@@ -1,0 +1,15 @@
+name: waxseal-audit
+description: >
+  Tamper-evident audit trail for agent actions. Appends every lifecycle event
+  to a SHA-256 hash chain at ~/.hermes/audit/trail.jsonl (waxseal format).
+  Secrets are redacted BEFORE hashing/storage. Verify anytime with:
+  `waxseal verify ~/.hermes/audit/trail.jsonl`.
+events:
+  - gateway:startup
+  - session:start
+  - session:end
+  - session:reset
+  - agent:start
+  - agent:step
+  - agent:end
+  - "command:*"

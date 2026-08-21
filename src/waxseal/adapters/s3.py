@@ -1,0 +1,162 @@
+"""S3 backend — object per entry, forks prevented by conditional writes.
+
+The client is INJECTED (any boto3-compatible object): waxseal keeps zero
+runtime dependencies (CLAUDE.md rule 1) and never imports boto3.
+
+Serialization point: `PUT entries/{seq}.json` with `IfNoneMatch="*"` — S3
+conditional writes (GA since 2024) reject the second writer of the same seq
+with 412 PreconditionFailed, so a lost race is retried on a fresh tail
+instead of forking the chain (CLAUDE.md rule 7). `head.json` is only a
+tail-discovery hint; correctness never depends on it.
+"""
+
+from __future__ import annotations
+
+import base64
+import contextlib
+import json
+from collections.abc import Callable, Iterator
+from typing import Any
+
+from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
+
+_MAX_RACE_RETRIES = 32
+_SEQ_WIDTH = 20  # zero-padded so lexicographic key order == numeric seq order
+
+
+class S3Backend:
+    def __init__(self, client: Any, *, bucket: str, prefix: str) -> None:
+        self._client = client
+        self._bucket = bucket
+        self._prefix = prefix.rstrip("/")
+
+    # -- keys -----------------------------------------------------------------
+    def _entry_key(self, seq: int) -> str:
+        return f"{self._prefix}/entries/{seq:0{_SEQ_WIDTH}d}.json"
+
+    def _head_key(self) -> str:
+        return f"{self._prefix}/head.json"
+
+    # -- backend protocol -----------------------------------------------------
+    def append(self, build: Callable[[int, str], Entry]) -> Entry:
+        for _ in range(_MAX_RACE_RETRIES):
+            next_seq, prev_hash = self._tail()
+            entry = build(next_seq, prev_hash)
+            body = json.dumps(_to_obj(entry), sort_keys=True, separators=(",", ":"))
+            try:
+                self._client.put_object(
+                    Bucket=self._bucket,
+                    Key=self._entry_key(next_seq),
+                    Body=body.encode("utf-8"),
+                    IfNoneMatch="*",
+                )
+            except Exception as exc:
+                if _is_precondition_failed(exc):
+                    continue  # lost the race: re-read the tail and rebuild
+                raise
+            # Best-effort hint only — a stale head is corrected by probing.
+            with contextlib.suppress(Exception):
+                self._client.put_object(
+                    Bucket=self._bucket,
+                    Key=self._head_key(),
+                    Body=json.dumps(
+                        {"seq": entry.header.seq, "entry_hash": entry.entry_hash}
+                    ).encode("utf-8"),
+                )
+            return entry
+        raise RuntimeError(
+            f"append lost the conditional-write race {_MAX_RACE_RETRIES} times; "
+            "writer contention is pathological"
+        )
+
+    def entries(self) -> Iterator[Entry]:
+        prefix = f"{self._prefix}/entries/"
+        token: str | None = None
+        while True:
+            kwargs: dict[str, Any] = {"Bucket": self._bucket, "Prefix": prefix}
+            if token is not None:
+                kwargs["ContinuationToken"] = token
+            page = self._client.list_objects_v2(**kwargs)
+            for item in page.get("Contents", []):
+                body = self._client.get_object(Bucket=self._bucket, Key=item["Key"])
+                yield _from_obj(json.loads(body["Body"].read()))
+            if not page.get("IsTruncated"):
+                return
+            token = page["NextContinuationToken"]
+
+    # -- tail discovery ---------------------------------------------------------
+    def _tail(self) -> tuple[int, str]:
+        candidate = -1
+        entry_hash = GENESIS_PREV_HASH
+        try:
+            head = json.loads(
+                self._client.get_object(Bucket=self._bucket, Key=self._head_key())[
+                    "Body"
+                ].read()
+            )
+            candidate, entry_hash = int(head["seq"]), str(head["entry_hash"])
+        except Exception:  # noqa: S110 - no head yet, or unreadable: probe from genesis
+            pass
+        # The head hint may lag behind winners of earlier races: probe forward.
+        seq = candidate
+        while True:
+            try:
+                body = self._client.get_object(Bucket=self._bucket, Key=self._entry_key(seq + 1))
+            except Exception as exc:
+                if _is_not_found(exc):
+                    return seq + 1, entry_hash
+                raise
+            obj = json.loads(body["Body"].read())
+            seq += 1
+            entry_hash = str(obj["entry_hash"])
+
+
+def _is_precondition_failed(exc: Exception) -> bool:
+    code = _error_code(exc)
+    return code in {"PreconditionFailed", "412"}
+
+
+def _is_not_found(exc: Exception) -> bool:
+    code = _error_code(exc)
+    return code in {"NoSuchKey", "404", "NotFound"}
+
+
+def _error_code(exc: Exception) -> str:
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        return str(response.get("Error", {}).get("Code", ""))
+    return ""
+
+
+def _to_obj(entry: Entry) -> dict[str, object]:
+    if entry.payload is None:
+        raise ValueError("S3 backend stores payload bytes; payload must not be None")
+    h = entry.header
+    return {
+        "header": {
+            "seq": h.seq,
+            "ts": h.ts,
+            "hash_version": h.hash_version,
+            "payload_type": h.payload_type,
+            "payload_hash": h.payload_hash,
+            "prev_hash": h.prev_hash,
+        },
+        "entry_hash": entry.entry_hash,
+        "payload_b64": base64.b64encode(entry.payload).decode("ascii"),
+    }
+
+
+def _from_obj(obj: dict[str, Any]) -> Entry:
+    header = obj["header"]
+    return Entry(
+        header=EntryHeader(
+            seq=int(header["seq"]),
+            ts=str(header["ts"]),
+            hash_version=str(header["hash_version"]),
+            payload_type=str(header["payload_type"]),
+            payload_hash=str(header["payload_hash"]),
+            prev_hash=str(header["prev_hash"]),
+        ),
+        entry_hash=str(obj["entry_hash"]),
+        payload=base64.b64decode(str(obj["payload_b64"])),
+    )

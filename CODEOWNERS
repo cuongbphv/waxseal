@@ -1,0 +1,8 @@
+# Frozen paths (CLAUDE.md): changes require owner review.
+# Enable "Require review from Code Owners" branch protection on GitHub.
+/SPEC.md                                    @cuongbpv
+/tests/vectors/                             @cuongbpv
+/src/waxseal/domain/fingerprint.py        @cuongbpv
+/CLAUDE.md                                  @cuongbpv
+/LICENSE                                    @cuongbpv
+/CODEOWNERS                                 @cuongbpv

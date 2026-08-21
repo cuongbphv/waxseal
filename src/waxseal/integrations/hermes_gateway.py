@@ -1,0 +1,95 @@
+"""waxseal-audit hook for hermes-agent.
+
+Appends every lifecycle event to a tamper-evident hash chain at
+<hermes home>/audit/trail.jsonl. Requires `pip install waxseal` in the
+environment running the hermes gateway.
+
+Hermes hook contract: handle(event_type, context), errors must never block
+the pipeline — so every failure path degrades to a counted dropped write
+(chain integrity ≠ trail completeness) instead of an exception.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+from waxseal import AuditLog
+from waxseal.adapters.redactors import RegexRedactor
+
+PAYLOAD_TYPE = "application/vnd.hermes.hook-event+json"
+
+# Written verbatim as HOOK.yaml by `waxseal install hermes-gateway`. Lives
+# next to handle() so manifest and code cannot drift apart in a release.
+HOOK_MANIFEST = """\
+name: waxseal-audit
+description: >
+  Tamper-evident audit trail for agent actions. Appends every lifecycle event
+  to a SHA-256 hash chain at ~/.hermes/audit/trail.jsonl (waxseal format).
+  Secrets are redacted BEFORE hashing/storage. Verify anytime with:
+  `waxseal verify ~/.hermes/audit/trail.jsonl`.
+events:
+  - gateway:startup
+  - session:start
+  - session:end
+  - session:reset
+  - agent:start
+  - agent:step
+  - agent:end
+  - "command:*"
+"""
+
+# One log per resolved trail path: hermes loads this module once per gateway
+# process, but tests (and multi-home setups) may vary HERMES_HOME.
+_logs: dict[Path, AuditLog] = {}
+
+
+def _hermes_home() -> Path:
+    env = os.environ.get("HERMES_HOME")
+    if env:
+        return Path(env)
+    try:
+        # Inside a hermes gateway this is the authoritative resolver.
+        from hermes_cli.config import get_hermes_home
+
+        return Path(get_hermes_home())
+    except Exception:
+        return Path.home() / ".hermes"
+
+
+def _get_log() -> AuditLog:
+    path = _hermes_home() / "audit" / "trail.jsonl"
+    log = _logs.get(path)
+    if log is None:
+        log = AuditLog.open(path, redactor=RegexRedactor())
+        _logs[path] = log
+    return log
+
+
+def _sanitize(value: Any) -> Any:
+    """Keep the payload JSON-serializable whatever the context contains."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _sanitize(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize(v) for v in value]
+    return repr(value)
+
+
+def handle(event_type: str, context: dict[str, Any] | None) -> None:
+    try:
+        log = _get_log()
+    except Exception as e:  # broken environment: never block the pipeline
+        print(f"[waxseal-audit] cannot open trail (event dropped): {e}", flush=True)
+        return
+    payload = {"event": event_type, **_sanitize(context or {})}
+    if not log.try_append(payload=payload, payload_type=PAYLOAD_TYPE):
+        # Labelled fail-open: the loss is visible in the gateway log and
+        # counted on the writer (log.dropped_writes).
+        print(
+            f"[waxseal-audit] dropped write for {event_type!r} "
+            f"(total dropped: {log.dropped_writes})",
+            flush=True,
+        )

@@ -1,0 +1,90 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "waxseal"
+version = "0.1.0"
+description = "Tamper-evident, schema-evolution-safe audit hash chain for AI agent frameworks. Zero dependencies."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Bui Phan Viet Cuong" }]
+keywords = ["audit", "hash-chain", "tamper-evident", "ai-agents", "integrity", "provenance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+# Zero hard runtime dependencies — stdlib only. This is a CLAUDE.md invariant.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+    "hypothesis",
+    "mypy",
+    "ruff",
+    # Integration tests only (TestRealPostgres); runtime deps stay [].
+    "psycopg[binary]>=3.1",
+]
+
+[project.scripts]
+waxseal = "waxseal.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/cuongbphv/waxseal"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/waxseal"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["waxseal"]
+branch = true
+
+[tool.coverage.report]
+# CLAUDE.md invariant: domain + adapters must stay >= 90% line coverage.
+fail_under = 90
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "^\\s*\\.\\.\\.$",           # Protocol method bodies
+    "if TYPE_CHECKING:",
+]
+
+[tool.mypy]
+strict = true
+files = ["src/waxseal"]
+
+# Host frameworks are imported only inside their own environments and are
+# never runtime dependencies (CLAUDE.md rule 1) — no stubs exist to install.
+[[tool.mypy.overrides]]
+module = ["agents.*", "langchain_core.*", "crewai.*", "hermes_cli.*"]
+ignore_missing_imports = true
+
+# The hook classes MUST subclass the host's (untyped) base classes and use
+# the host's (untyped) decorators — that is the integration contract itself.
+[[tool.mypy.overrides]]
+module = "waxseal.integrations.*"
+disallow_subclassing_any = false
+disallow_untyped_decorators = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

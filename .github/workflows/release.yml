@@ -1,0 +1,49 @@
+name: release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  test:
+    name: test (gate before publish)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # setup-uv stopped publishing moving major tags after v7 — pin the full version.
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.12"
+      # CLAUDE.md: all green + coverage floor (>=90%) before any release.
+      - run: uv run --extra dev pytest --cov=waxseal
+
+  build:
+    name: build sdist + wheel
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Must match the environment name configured in the PyPI trusted publisher.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/waxseal/
+    permissions:
+      # Mandatory for Trusted Publishing (OIDC) — no API token secret needed.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

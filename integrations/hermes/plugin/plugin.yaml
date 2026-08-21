@@ -1,0 +1,7 @@
+name: waxseal-audit
+version: "0.1.0"
+description: "Tamper-evident, action-level audit trail: every tool call (dispatch + result) is appended to a SHA-256 hash chain at ~/.hermes/audit/trail.jsonl (waxseal format). Secrets are redacted BEFORE hashing/storage. Verify anytime: `waxseal verify ~/.hermes/audit/trail.jsonl`."
+author: waxseal
+hooks:
+  - pre_tool_call
+  - post_tool_call

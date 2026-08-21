@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# Build / distribution
+dist/
+build/
+
+# Test / coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.pytest_cache/
+.hypothesis/
+
+# Type checking / linting caches
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local env files
+.env
+
+# Claude Code — personal overrides only; .claude/settings.json is shared
+.claude/settings.local.json
+
+# Private research notes — not part of the public repo
+docs/research_1.md
+docs/research_2.md

@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      # setup-uv stopped publishing moving major tags after v7 — pin the full version.
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: ${{ matrix.python-version }}
+      # CLAUDE.md: all green + coverage floor (>=90%) before any "done" claim.
+      - run: uv run --extra dev pytest --cov=waxseal
+      - run: uv run --extra dev mypy
+      - run: uv run --extra dev ruff check .
