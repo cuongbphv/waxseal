@@ -100,7 +100,8 @@ flowchart TD
 pip install waxseal
 ```
 
-Until the first PyPI release: `pip install git+https://github.com/cuongbphv/waxseal`
+Released on [PyPI](https://pypi.org/project/waxseal/). From source:
+`pip install git+https://github.com/cuongbphv/waxseal`
 
 ## Usage
 

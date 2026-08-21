@@ -101,7 +101,8 @@ flowchart TD
 pip install waxseal
 ```
 
-Trước khi có bản phát hành PyPI đầu tiên: `pip install git+https://github.com/cuongbphv/waxseal`
+Đã phát hành trên [PyPI](https://pypi.org/project/waxseal/). Cài từ source:
+`pip install git+https://github.com/cuongbphv/waxseal`
 
 ## Sử dụng
 
