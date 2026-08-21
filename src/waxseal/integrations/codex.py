@@ -56,8 +56,14 @@ def _trail_path() -> Path:
     if env:
         return Path(env)
     codex_home = os.environ.get("CODEX_HOME")
-    base = Path(codex_home) if codex_home else Path.home() / ".codex"
-    return base / "waxseal" / "trail.jsonl"
+    if codex_home:
+        return Path(codex_home) / "waxseal" / "trail.jsonl"
+    # HOME before Path.home(): ntpath resolves "~" from USERPROFILE and
+    # ignores HOME, so a host that launches this hook with HOME set would
+    # strand the trail in the wrong profile on Windows.
+    home = os.environ.get("HOME")
+    base = Path(home) if home else Path.home()
+    return base / ".codex" / "waxseal" / "trail.jsonl"
 
 
 def _clip(text: str) -> str:

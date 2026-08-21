@@ -95,15 +95,21 @@ def _default_home(target: str) -> Path:
 
 
 def _write(path: Path, content: str, force: bool) -> bool:
+    # utf-8 + newline="" on both sides: the locale default (cp1252 on Windows)
+    # wrote these shims' em dashes as 0x97, and Python source must be UTF-8 —
+    # the installed hermes plugin failed to import with a SyntaxError
+    # (found running `waxseal install hermes` 0.1.0 on Windows, 2026-08-21).
     if path.exists():
-        if path.read_text() == content:
+        # No newline= here: Path.read_text only grew it in 3.13, and universal
+        # newlines already fold any legacy CRLF copy back to the \n content.
+        if path.read_text(encoding="utf-8") == content:
             print(f"unchanged: {path}")
             return True
         if not force:
             print(f"REFUSED: {path} exists with different content (rerun with --force)")
             return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8", newline="")
     print(f"wrote: {path}")
     return True
 

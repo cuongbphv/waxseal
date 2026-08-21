@@ -2,7 +2,26 @@
 
 Tamper-evident audit trail for [hermes-agent](https://github.com/NousResearch/hermes-agent),
 addressing issue #487 (action-focused, chain-linked audit log). Verified against
-hermes-agent **v2026.8.18** source.
+hermes-agent **v2026.8.18** source. waxseal is on
+[PyPI](https://pypi.org/project/waxseal/) (stdlib-only, zero runtime dependencies).
+
+## hermes-agent issues this addresses
+
+Built for [#487](https://github.com/NousResearch/hermes-agent/issues/487), closed
+2026-05-05 with the maintainer direction: no core changes — the plugin hooks are the
+integration seam. The same need recurs in open issues:
+
+| Issue | Ask | What this integration provides |
+|---|---|---|
+| [#1155](https://github.com/NousResearch/hermes-agent/issues/1155) | Structured, persistent audit log of every tool call (redacted args, per-session correlation, cron-monitorable) | Two chained JSONL entries per tool call (`dispatch` + `result`) carrying `session_id`/`task_id`/`tool_call_id`/`turn_id`; secrets redacted before hashing; `waxseal verify` exit codes are cron-alertable |
+| [#5041](https://github.com/NousResearch/hermes-agent/issues/5041) | Cryptographic audit trail for tool calls | SHA-256 hash chain over a canonical byte encoding, offline verification — without wrapping the hermes process (no Node, no MCP gateway). No signatures/policy engine (see limits below) |
+| [#26201](https://github.com/NousResearch/hermes-agent/issues/26201) | Hash-chain tamper protection with a JSONL backend | The chain layer, including schema-version fingerprints: rows written by a newer schema report "unverifiable", never "tampered", after a rollback |
+
+The plugin's default is the plain hash chain. At the library level waxseal also has
+opt-in forward-secure HMAC sealing (`.attest` sidecar: evolving epoch key, detects
+truncate-and-rewrite) and a `Signer` protocol for injected digital signatures — but it
+bundles **no** signature algorithm and no automatic external anchoring; see
+"What it guarantees (and what it does not)" below.
 
 hermes-agent has two extension systems, and they cover different ground:
 

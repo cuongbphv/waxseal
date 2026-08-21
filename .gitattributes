@@ -1,0 +1,6 @@
+# LF everywhere: tests/test_vectors.py freezes the SHA-256 of vector FILES
+# (byte-exact). core.autocrlf=true checkouts on Windows rewrote LF->CRLF and
+# tripped the freeze guard with a false "vectors changed" (2026-08-21).
+* text=auto eol=lf
+# Golden vectors are write-once bytes — never any conversion at all.
+tests/vectors/** -text

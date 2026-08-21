@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-21
+
+### Fixed
+
+- Windows: `waxseal install` wrote hook/plugin shims with the locale codec
+  (cp1252), which encoded the shims' em dashes as `0x97`; Python requires
+  UTF-8 source, so the installed hermes plugin failed to import with a
+  `SyntaxError`. Shims are now written and compared as UTF-8 with `\n`
+  newlines on every platform.
+- Windows: the Claude Code / Codex / Cursor hook scripts resolved the default
+  trail location via `Path.home()`, which ignores `HOME` on Windows
+  (`USERPROFILE` wins); a host launching the hook with `HOME` set stranded
+  the trail in the wrong profile. `HOME` is now honored first.
+- Repository: added `.gitattributes` (LF + `tests/vectors/** -text`) so
+  `core.autocrlf=true` checkouts no longer rewrite the golden vector bytes
+  and trip the write-once freeze guard with a false "vectors changed".
+
 ## [0.1.0] - 2026-08-21
 
 ### Added
