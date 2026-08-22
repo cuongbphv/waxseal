@@ -62,7 +62,7 @@ def _get_log() -> AuditLog:
     path = _hermes_home() / "audit" / "trail.jsonl"
     log = _logs.get(path)
     if log is None:
-        log = AuditLog.open(path, redactor=RegexRedactor())
+        log = AuditLog.open(path, redactor=RegexRedactor(), record_drops=True)
         _logs[path] = log
     return log
 
@@ -83,6 +83,13 @@ def handle(event_type: str, context: dict[str, Any] | None) -> None:
         log = _get_log()
     except Exception as e:  # broken environment: never block the pipeline
         print(f"[waxseal-audit] cannot open trail (event dropped): {e}", flush=True)
+        # No AuditLog to route this through — record it directly,
+        # best-effort (FileDropRecorder.record() never raises).
+        from waxseal.adapters.drops import FileDropRecorder
+
+        FileDropRecorder(_hermes_home() / "audit" / "trail.jsonl").record(
+            reason=type(e).__name__, payload_type=PAYLOAD_TYPE
+        )
         return
     payload = {"event": event_type, **_sanitize(context or {})}
     if not log.try_append(payload=payload, payload_type=PAYLOAD_TYPE):

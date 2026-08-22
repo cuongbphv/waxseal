@@ -76,9 +76,18 @@ class WaxsealCallbackHandler(BaseCallbackHandler):
     def _append(self, payload: dict[str, Any]) -> None:
         try:
             if self._log is None:
-                self._log = AuditLog.open(self._trail, redactor=RegexRedactor())
+                self._log = AuditLog.open(
+                    self._trail, redactor=RegexRedactor(), record_drops=True
+                )
         except Exception as e:  # broken environment: never block the run
             print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
+            # No AuditLog to route this through — record it directly,
+            # best-effort (FileDropRecorder.record() never raises).
+            from waxseal.adapters.drops import FileDropRecorder
+
+            FileDropRecorder(self._trail).record(
+                reason=type(e).__name__, payload_type=PAYLOAD_TYPE
+            )
             return
         if not self._log.try_append(payload=payload, payload_type=PAYLOAD_TYPE):
             # Labelled fail-open (chain integrity ≠ trail completeness).

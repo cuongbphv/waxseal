@@ -108,6 +108,18 @@ class TestPublicApiFrozen:
             "membership_proof",
             "verify_chain",
             "verify_membership",
+            # DESIGN.md's Merkle-graduation upgrade path: a Checkpoint pins
+            # (seq, entry_hash, root) for an external anchor sink to witness,
+            # and consistency_proof/verify_consistency (RFC 9162 section
+            # 2.1.4, independently cross-checked in
+            # tools/gen_consistency_vectors.py) let a verifier confirm two
+            # checkpoints taken at different trail sizes describe the same
+            # append-only history without needing the whole trail in hand.
+            "Checkpoint",
+            "checkpoint_for",
+            "checkpoint_frame",
+            "consistency_proof",
+            "verify_consistency",
         }
 
 

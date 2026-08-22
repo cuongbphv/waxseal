@@ -73,6 +73,48 @@ class TestDroppedWritesAreLabelled:
         sys.modules.pop("waxseal.integrations.hermes_gateway", None)
 
 
+class TestOpenFailureStillLeavesADropRecord:
+    """M5: the pre-open failure branch (no AuditLog to route through yet)
+    calls FileDropRecorder directly — every failure path still exits
+    silently AND leaves a measurable drop record."""
+
+    def test_hermes_plugin(self, monkeypatch, tmp_path: Path, capsys) -> None:
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        # Realistic setup: the audit directory already exists from an
+        # earlier successful run — THIS open() call fails for some other
+        # reason (corrupt trail, transient permission issue), and unlike the
+        # blocker-file scenario above, the sidecar write can still succeed.
+        (tmp_path / "audit").mkdir()
+        sys.modules.pop("waxseal.integrations.hermes", None)
+        hermes = importlib.import_module("waxseal.integrations.hermes")
+        monkeypatch.setattr(
+            AuditLog, "open",
+            staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
+        )
+        hermes.on_post_tool_call(tool_name="terminal", args={})
+        assert "dropped" in capsys.readouterr().out
+        drops = tmp_path / "audit" / "trail.jsonl.drops"
+        assert drops.exists()
+        assert len(drops.read_text().splitlines()) == 1
+        sys.modules.pop("waxseal.integrations.hermes", None)
+
+    def test_hermes_gateway(self, monkeypatch, tmp_path: Path, capsys) -> None:
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        (tmp_path / "audit").mkdir()
+        sys.modules.pop("waxseal.integrations.hermes_gateway", None)
+        gw = importlib.import_module("waxseal.integrations.hermes_gateway")
+        monkeypatch.setattr(
+            AuditLog, "open",
+            staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
+        )
+        gw.handle("agent:step", {"iteration": 1})
+        assert "dropped" in capsys.readouterr().out
+        drops = tmp_path / "audit" / "trail.jsonl.drops"
+        assert drops.exists()
+        assert len(drops.read_text().splitlines()) == 1
+        sys.modules.pop("waxseal.integrations.hermes_gateway", None)
+
+
 class TestInstallDefaultHomes:
     def test_hermes_home_env_wins(self, monkeypatch, tmp_path: Path) -> None:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hh"))

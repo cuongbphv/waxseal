@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from tests.adapters.backend_contract import BackendContractTests
 from tests.adapters.test_jsonl import build_entry
 from waxseal import AuditLog, VersionRegistry, verify_chain
 from waxseal.adapters.s3 import S3Backend
@@ -78,6 +79,16 @@ class FakeS3Client:
 @pytest.fixture()
 def backend() -> S3Backend:
     return S3Backend(FakeS3Client(), bucket="audit", prefix="trail")
+
+
+class TestS3BackendContract(BackendContractTests):
+    # A base-class fixture wins over a same-named module fixture in pytest's
+    # resolution order (class scope is closer than module scope), so the
+    # module-level `backend` above can't be "reused" by omission — it must be
+    # re-exposed here or the abstract NotImplementedError fixture shadows it.
+    @pytest.fixture()
+    def backend(self) -> S3Backend:
+        return S3Backend(FakeS3Client(), bucket="audit", prefix="trail")
 
 
 class TestAppend:

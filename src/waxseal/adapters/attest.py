@@ -19,13 +19,18 @@ from pathlib import Path
 
 from waxseal.adapters.atomic import atomic_write_bytes
 from waxseal.domain.sealing import (
+    AGG_GENESIS,
+    FS_HMAC_AGG_SCHEME,
     FS_HMAC_SCHEME,
     SEAL_FRAME_PREFIX,
     Attestation,
+    aggregate_step,
     evolve_key,
     seal_entry,
 )
 from waxseal.ports.sign import Signer
+
+_KNOWN_FS_HMAC_SCHEMES = (FS_HMAC_SCHEME, FS_HMAC_AGG_SCHEME)
 
 
 class FileAttestor:
@@ -35,13 +40,22 @@ class FileAttestor:
         *,
         initial_key: bytes | None = None,
         signer: Signer | None = None,
+        scheme: str = FS_HMAC_SCHEME,
     ) -> None:
         if (initial_key is None) == (signer is None):
             raise ValueError("provide exactly one of initial_key (fs-hmac) or signer")
+        if signer is not None and scheme != FS_HMAC_SCHEME:
+            raise ValueError(
+                "scheme only applies to fs-hmac mode; signer mode has no epoch keyfile"
+            )
+        if scheme not in _KNOWN_FS_HMAC_SCHEMES:
+            raise ValueError(f"unknown scheme {scheme!r}, expected one of {_KNOWN_FS_HMAC_SCHEMES}")
         trail = Path(trail_path).expanduser()
         self._attest_path = trail.with_name(trail.name + ".attest")
         self._key_path = trail.with_name(trail.name + ".sealkey")
+        self._agg_path = trail.with_name(trail.name + ".sealagg")
         self._signer = signer
+        self._scheme = scheme
         if initial_key is not None and not self._key_path.exists():
             self._write_key(0, initial_key)
 
@@ -69,10 +83,37 @@ class FileAttestor:
             att = Attestation(
                 seq=seq,
                 entry_hash=entry_hash,
-                scheme=FS_HMAC_SCHEME,
+                scheme=self._scheme,
                 value=seal_entry(key, entry_hash),
             )
-            self._write_key(epoch + 1, evolve_key(key))
+            evolved = evolve_key(key)
+            if self._scheme == FS_HMAC_AGG_SCHEME:
+                prior = self.read_aggregate()
+                if prior is not None and prior[1] != seq:
+                    # .sealagg is attacker-writable by the same threat model
+                    # as the keyfile (module docstring): trusting a stale
+                    # epoch here would silently skip folding whatever
+                    # happened since, so the persisted aggregate would LOOK
+                    # complete without being complete. Same refusal as the
+                    # keyfile epoch != seq check above — an operator decision,
+                    # not a silent rebase onto a state that no longer matches
+                    # the row about to be attested.
+                    raise RuntimeError(
+                        f"aggregate epoch {prior[1]} != entry seq {seq}; "
+                        ".sealagg is out of sync with the trail — operator "
+                        "decision required"
+                    )
+                agg_start = prior[0] if prior is not None else seq
+                prev_agg = prior[2] if prior is not None else AGG_GENESIS
+                running = aggregate_step(key, prev_agg, att.value)
+                # Order matters (each write is its own crash window, never
+                # self-"fixed"): keyfile replace, THEN .sealagg replace,
+                # THEN the .attest line below — a crash between any two
+                # leaves a state verify_attestations reports, not repairs.
+                self._write_key(epoch + 1, evolved)
+                self._write_aggregate(agg_start, epoch + 1, running)
+            else:
+                self._write_key(epoch + 1, evolved)
         obj: dict[str, object] = {
             "seq": att.seq,
             "entry_hash": att.entry_hash,
@@ -123,6 +164,25 @@ class FileAttestor:
         if expected != key:
             return "keyfile_key_mismatch"
         return None
+
+    def read_aggregate(self) -> tuple[int, int, str] | None:
+        """(agg_start, epoch, agg) from ``.sealagg``, or None if it does not
+        exist yet (fs-hmac mode, or the agg scheme has never attested a
+        row). Only the LATEST value is ever stored — see module docstring."""
+        if not self._agg_path.exists():
+            return None
+        obj = json.loads(self._agg_path.read_text(encoding="utf-8"))
+        return int(obj["agg_start"]), int(obj["epoch"]), str(obj["agg"])
+
+    def _write_aggregate(self, agg_start: int, epoch: int, agg: str) -> None:
+        # Atomic replace-only (same single-owner helper as the keyfile): keeping
+        # every intermediate mu would let an attacker who truncates the
+        # trail also copy an old mu_{t'-1} forward, reopening the exact
+        # truncation hole this scheme exists to close.
+        atomic_write_bytes(
+            self._agg_path,
+            json.dumps({"agg": agg, "agg_start": agg_start, "epoch": epoch}).encode("ascii"),
+        )
 
     # -- key file ---------------------------------------------------------------
     def _read_key(self) -> tuple[int, bytes]:

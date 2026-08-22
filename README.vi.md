@@ -50,8 +50,10 @@ khác KHÔNG làm (khảo sát các thư viện audit-log Python, tháng 8/2026 
 | SPEC byte-level (dự kiến freeze ở v1) + golden vectors → port sang Go/Rust/TS | ✅ | ❌ format = code chạy sao thì vậy | ❌ |
 | Zero runtime dependency (client S3/Postgres được inject, không bao giờ import) | ✅ | thường kéo cả stack crypto/serialization | ✅ |
 | Redact-before-hash (secret không bao giờ chạm disk, hash cam kết trên bytes đã redact) | ✅ | thỉnh thoảng | ❌ |
-| Móc anchoring ra ngoài có sẵn (`waxseal head`) chống rewrite/truncate phần đuôi | ✅ | ❌ | ❌ |
+| Anchoring ra ngoài có sẵn, thủ công (`waxseal head`) hoặc tự động (`anchor_every=N`) | ✅ | ❌ | ❌ |
 | Forward-secure seal (HMAC key-evolving, thuần stdlib) + chữ ký Ed25519 inject | ✅ | ❌ | ❌ |
+| Aggregate tag FssAgg đóng lỗ hổng truncation kể cả khi keyfile bị lộ | ✅ | ❌ | ❌ |
+| Remote backend HTTP là backend ngang hàng đầy đủ với storage local, trust model ghi rõ | ✅ | hiếm, trust model không ghi rõ | ❌ |
 
 Hai dòng đầu chính là lớp lỗi từ hai sự cố kể trên; xem [DESIGN.md](DESIGN.md) cho
 nền tảng học thuật của từng dòng.
@@ -138,7 +140,13 @@ CLI:
 waxseal verify trail.jsonl   # exit 0 nguyên vẹn / 1 gãy / 2 có row unverifiable / 3 không có trail
 waxseal tail trail.jsonl -n 20
 waxseal inspect trail.jsonl
-waxseal head trail.jsonl     # in head của chain (seq + entry_hash) để anchor ra ngoài
+waxseal head trail.jsonl       # in head của chain (seq + entry_hash) để anchor ra ngoài
+waxseal checkpoint trail.jsonl # in {seq, entry_hash, root} — root là batch root, không chỉ tip
+waxseal anchor trail.jsonl     # append 1 checkpoint vào sidecar .anchors cục bộ
+waxseal verify --anchors trail.jsonl  # kiểm cả lịch sử trail so với .anchors
+
+# Mọi lệnh trên trừ `anchor` đều nhận được URL của một remote chain server:
+waxseal verify http://chain.example.com/v1/chains/default
 ```
 
 ## Storage backends
@@ -153,6 +161,7 @@ writer song song không bao giờ fork được chain.
 | In-memory | `waxseal.adapters.memory` | mutex | không |
 | Amazon S3 | `waxseal.adapters.s3` | conditional PUT (`IfNoneMatch: *`) | tự inject boto3 client |
 | PostgreSQL | `waxseal.adapters.postgres` | `pg_advisory_xact_lock` + `PRIMARY KEY(seq)` | tự inject psycopg connection |
+| Remote (HTTP) | `waxseal.adapters.remote` | compare-and-swap phía server trên `(seq, prev_hash)`, client retry khi 409 | không (dùng `urllib` stdlib) |
 
 ```python
 # S3 — client được inject; bản thân waxseal vẫn zero-dependency
@@ -173,6 +182,32 @@ log = AuditLog(PostgresBackend(lambda: psycopg.connect("postgresql://...")))
 > Lưu ý về Kafka: compacted topic xóa record cũ (tombstone) nên **không** phải
 > append-only — đừng dùng làm store cho tamper-evidence.
 
+### Remote backend
+
+`RemoteBackend` nói chuyện với bất kỳ server nào hiện thực wire contract trong
+[REMOTE.md](REMOTE.md) — một bề mặt HTTP nhỏ (`GET /v1/chains/{id}/head`,
+`POST .../entries`, `GET .../entries?cursor=`) thay vì một protocol riêng.
+Critical section mà mọi backend khác giữ bằng lock thì ở đây được giữ phía
+server: `POST` là compare-and-swap trên `(seq, prev_hash)`, writer thua race
+sẽ đọc lại head mới nhất rồi retry thay vì làm fork chain.
+
+```python
+from waxseal import AuditLog
+
+log = AuditLog.open("http://chain.example.com/v1/chains/default")
+log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
+```
+
+`WAXSEAL_API_KEY` cung cấp bearer token (không bao giờ qua argv hay URL).
+
+**Trust model, nói thẳng:** server là *trusted writer*, không phải một peer
+Byzantine-fault-tolerant. `verify_chain` vẫn chạy hoàn toàn phía client và bắt
+được corruption, truncation, reorder — nhưng một server không trung thực có
+thể trả về một bản rewrite giả mạo nhất quán toàn bộ trail mà không check
+phía client nào tự bắt được. Cách giảm thiểu vẫn là điều README này đã
+khuyến nghị cho kẻ tấn công local có quyền ghi: anchor head độc lập, tốt nhất
+tại một service KHÁC với chính chain server (xem phần Anchoring bên dưới).
+
 ## Nguồn metadata
 
 Ngoài hành động của agent, có thể chain cả lịch sử file/tài liệu:
@@ -183,6 +218,34 @@ from waxseal.sources.files import record_file, current_matches_last
 record_file(log, "SPEC.md", doc_id="spec")          # snapshot content hash vào chain
 current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None (chưa từng ghi)
 ```
+
+## Anchoring: checkpoint và consistency proof
+
+Bản thân hash chain không chống lại được kẻ tấn công có quyền ghi lại toàn bộ
+trail — mọi `prev_hash` phía sau chỗ sửa đều tính lại được. `checkpoint_for
+(entry_hashes)` chốt `(seq, entry_hash, root)`, với `root` là batch root RFC
+6962 trên toàn bộ entry hash tính đến thời điểm đó; anchor checkpoint này ở
+nơi writer không với tới được sẽ đóng lỗ hổng rewrite-toàn-trail mà bản thân
+chain không tự đóng được.
+
+```python
+from waxseal import AuditLog
+from waxseal.adapters.anchors import FileAnchorSink
+
+log = AuditLog.open("trail.jsonl",
+                    anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
+# cứ mỗi 100 lần append, best-effort publish 1 checkpoint ngoài write path;
+# anchor lỗi không bao giờ chặn ghi — chỉ tính vào anchor_failures
+```
+
+`waxseal verify --anchors` replay lại từng checkpoint đã ghi so với trail hiện
+tại và báo lỗi đầu tiên: `anchor_beyond_head` (trail bị truncate sau khi
+checkpoint), `anchor_entry_hash_mismatch` (tip bị rewrite), hoặc
+`anchor_root_mismatch` (một entry trước đó bị rewrite mà không phá vỡ chuỗi
+`prev_hash`). `domain.anchoring` còn có RFC 9162 §2.1.4
+`consistency_proof`/`verify_consistency` — chứng minh một head sau này mở
+rộng từ head trước đó mà không cần replay toàn bộ log — và RFC 6962
+`membership_proof`/`verify_membership` cho membership proof của từng entry.
 
 ## Chữ ký & forward-secure seal
 
@@ -237,6 +300,22 @@ cùng lúc vẫn bị phát hiện** — epoch trong keyfile là một chiều, 
 Giới hạn: Python không zeroize được memory, và entry viết *sau* thời điểm máy bị
 chiếm là do attacker kiểm soát dưới mọi scheme — xem [DESIGN.md](DESIGN.md) §6.
 
+**Khi bản thân keyfile không được tin cậy**, truyền
+`scheme="fs-hmac-agg-sha256-v1"` cho `FileAttestor`: mọi seal được fold vào MỘT
+accumulator keyed duy nhất (`.sealagg`, chỉ lưu giá trị mới nhất), nên kẻ tấn
+công dù copy được trail, sidecar `.attest`, và cả giá trị accumulator cuối cùng
+vẫn không tự refold được — đóng lỗ hổng mà scheme thường để lại nếu keyfile bị
+lộ cùng lúc với đuôi trail bị truncate.
+
+## Đo độ đầy đủ: dropped writes
+
+Toàn vẹn chain không đồng nghĩa với đầy đủ trail — một write bị rơi trước khi
+chạm storage không để lại khoảng trống `seq` nào cho `verify` bắt được.
+`AuditLog.open(path, record_drops=True)` ghi lý do (không bao giờ ghi payload)
+của mỗi lần drop vào sidecar `.drops` độc lập với process hiện tại, và
+`verify`/`inspect` báo cáo dưới dạng `dropped_writes >= N (measured minimum,
+...)` — `None` vẫn nghĩa là *chưa từng đo*, khác với `0` đã đo được.
+
 ## Tích hợp
 
 Hook audit cho bảy agent framework và coding tool. Mỗi integration
@@ -280,18 +359,26 @@ key; trail của waxseal là bản ghi bạn có thể giữ, chia sẻ và veri
 - **Toàn vẹn chain ≠ đầy đủ trail**: một write bị rơi trước khi chạm storage không để
   lại khoảng trống. `dropped_writes` báo cáo riêng chuyện này; `None` nghĩa là *chưa đo* —
   không bao giờ đánh đồng với `0`.
-- Writer song song không thể fork chain (xem bảng backend).
+- Writer song song không thể fork chain (xem bảng backend); với `RemoteBackend` đây
+  là compare-and-swap phía server, không phải lock giữ ở client.
 - waxseal là tamper-*evident* (phát hiện giả mạo), không phải tamper-*proof* (chống
   giả mạo tuyệt đối): kẻ tấn công có quyền ghi vẫn có thể viết lại toàn bộ phần đuôi
-  chain. Dùng `waxseal head` để anchor head hash ra một trust domain bên ngoài — một
-  proof OpenTimestamps, một timestamp RFC 3161, hoặc một git commit đã push lên
-  remote — để chặn kiểu tấn công này.
+  chain. Anchor head ra một trust domain bên ngoài — thủ công (`waxseal head` → proof
+  OpenTimestamps, timestamp RFC 3161, hoặc git commit đã push lên remote) hoặc tự
+  động (`anchor_every=N` với `FileAnchorSink`/`HTTPAnchorSink`) — để chặn kiểu tấn
+  công này.
+- Một target `RemoteBackend` là *trusted writer*, không phải Byzantine-fault-tolerant:
+  một chain server không trung thực có thể trả về bản rewrite giả mạo nhất quán mà
+  không check phía client nào tự bắt được. Hãy trỏ anchor sink tới một service khác
+  với chính chain server.
 
 ## Spec & thiết kế
 
 - [SPEC.md](SPEC.md) — format byte-level (lp64v1 encoding, PAE-style framing, cách
   dựng fingerprint; dự kiến freeze ở v1) kèm golden test vectors — port được sang mọi
   ngôn ngữ.
+- [REMOTE.md](REMOTE.md) — wire contract của `RemoteBackend`: endpoint, khuôn dạng
+  envelope, authentication, và trust model trusted-writer.
 - [DESIGN.md](DESIGN.md) — các lựa chọn thuật toán và nền tảng học thuật phía sau.
 
 ## Giấy phép

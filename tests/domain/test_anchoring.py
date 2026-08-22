@@ -14,7 +14,9 @@ import pytest
 
 from waxseal.domain.anchoring import (
     batch_root,
+    consistency_proof,
     membership_proof,
+    verify_consistency,
     verify_membership,
 )
 
@@ -165,3 +167,127 @@ class TestInvalidInputs:
     def test_root_rejects_malformed_hex(self) -> None:
         with pytest.raises(ValueError):
             batch_root(["zz-not-hex"])
+
+
+class TestConsistencyRoundTrip:
+    @pytest.mark.parametrize("new_size", range(1, 66))
+    def test_every_old_size_verifies_against_every_new_size(self, new_size: int) -> None:
+        hashes = entry_hashes(new_size)
+        new_root = batch_root(hashes)
+        for old_size in range(1, new_size + 1):
+            old_root = batch_root(hashes[:old_size])
+            proof = consistency_proof(hashes, old_size)
+            assert verify_consistency(old_root, old_size, new_root, new_size, proof), (
+                f"old_size={old_size} new_size={new_size}"
+            )
+
+    def test_reference_vectors_round_trip(self) -> None:
+        for old_size in range(1, len(RFC_LEAVES) + 1):
+            old_root = RFC_ROOTS[old_size]
+            proof = consistency_proof(RFC_LEAVES, old_size)
+            assert verify_consistency(
+                old_root, old_size, RFC_ROOTS[8], len(RFC_LEAVES), proof
+            )
+
+
+class TestConsistencyTamperRejection:
+    def test_wrong_new_root_fails(self) -> None:
+        hashes = entry_hashes(8)
+        old_root = batch_root(hashes[:3])
+        proof = consistency_proof(hashes, 3)
+        assert not verify_consistency(old_root, 3, batch_root(entry_hashes(9)), 8, proof)
+
+    def test_wrong_old_root_fails(self) -> None:
+        hashes = entry_hashes(8)
+        new_root = batch_root(hashes)
+        proof = consistency_proof(hashes, 3)
+        forged_root = hashlib.sha256(b"wrong-old-root").hexdigest()
+        assert not verify_consistency(forged_root, 3, new_root, 8, proof)
+
+    def test_truncated_proof_fails(self) -> None:
+        hashes = entry_hashes(8)
+        old_root = batch_root(hashes[:3])
+        new_root = batch_root(hashes)
+        proof = consistency_proof(hashes, 3)
+        assert proof, "expected a non-empty proof for this size pair"
+        assert not verify_consistency(old_root, 3, new_root, 8, proof[:-1])
+
+    def test_extended_proof_fails(self) -> None:
+        hashes = entry_hashes(8)
+        old_root = batch_root(hashes[:3])
+        new_root = batch_root(hashes)
+        proof = consistency_proof(hashes, 3)
+        padded = (*proof, hashlib.sha256(b"extra").hexdigest())
+        assert not verify_consistency(old_root, 3, new_root, 8, padded)
+
+    def test_reordered_proof_fails(self) -> None:
+        hashes = entry_hashes(8)
+        old_root = batch_root(hashes[:5])
+        new_root = batch_root(hashes)
+        proof = consistency_proof(hashes, 5)
+        assert len(proof) >= 2, "expected a multi-hash proof for this size pair"
+        reversed_proof = tuple(reversed(proof))
+        assert reversed_proof != proof
+        assert not verify_consistency(old_root, 5, new_root, 8, reversed_proof)
+
+    def test_rewritten_entry_behind_old_size_breaks_consistency(self) -> None:
+        # An edit anywhere in the old prefix must change the old root itself,
+        # so a caller who recomputes old_root from a since-tampered trail
+        # already gets a different value; this pins that the proof cannot be
+        # reused to paper over it.
+        hashes = entry_hashes(8)
+        old_root = batch_root(hashes[:5])
+        new_root = batch_root(hashes)
+        proof = consistency_proof(hashes, 5)
+        tampered = list(hashes)
+        tampered[1] = hashlib.sha256(b"forged").hexdigest()
+        tampered_old_root = batch_root(tampered[:5])
+        assert tampered_old_root != old_root
+        assert not verify_consistency(tampered_old_root, 5, new_root, 8, proof)
+
+
+class TestConsistencyInvalidInputs:
+    def test_old_size_out_of_range_raises(self) -> None:
+        hashes = entry_hashes(8)
+        with pytest.raises(IndexError):
+            consistency_proof(hashes, 0)
+        with pytest.raises(IndexError):
+            consistency_proof(hashes, 9)
+        with pytest.raises(IndexError):
+            consistency_proof([], 1)
+
+    def test_verify_fails_closed_on_shrinking_size(self) -> None:
+        hashes = entry_hashes(8)
+        root = batch_root(hashes)
+        proof = consistency_proof(hashes, 5)
+        assert not verify_consistency(batch_root(hashes[:5]), 8, root, 5, proof)
+
+    def test_verify_fails_closed_on_zero_old_size(self) -> None:
+        hashes = entry_hashes(8)
+        root = batch_root(hashes)
+        assert not verify_consistency("00" * 32, 0, root, 8, ())
+
+    def test_verify_fails_closed_on_malformed_hex(self) -> None:
+        hashes = entry_hashes(8)
+        old_root = batch_root(hashes[:3])
+        new_root = batch_root(hashes)
+        proof = consistency_proof(hashes, 3)
+        assert not verify_consistency("zz-not-hex", 3, new_root, 8, proof)
+        assert not verify_consistency(old_root, 3, new_root, 8, ("zz-not-hex", *proof[1:]))
+
+    def test_verify_fails_closed_on_empty_proof_for_differing_sizes(self) -> None:
+        hashes = entry_hashes(8)
+        old_root = batch_root(hashes[:3])
+        new_root = batch_root(hashes)
+        assert not verify_consistency(old_root, 3, new_root, 8, ())
+
+    def test_equal_sizes_require_matching_roots_and_empty_proof(self) -> None:
+        hashes = entry_hashes(8)
+        root = batch_root(hashes)
+        assert verify_consistency(root, 8, root, 8, ())
+        assert not verify_consistency(root, 8, batch_root(entry_hashes(9)), 8, ())
+        assert not verify_consistency(root, 8, root, 8, ("aa" * 32,))
+
+    def test_consistency_proof_for_equal_sizes_is_empty(self) -> None:
+        hashes = entry_hashes(8)
+        assert consistency_proof(hashes, 8) == ()

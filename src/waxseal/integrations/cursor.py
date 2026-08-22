@@ -106,9 +106,16 @@ def main() -> int:
         print(f"[waxseal-audit] unreadable hook event (entry dropped): {e}", file=sys.stderr)
         return 0
     try:
-        log = AuditLog.open(_trail_path(), redactor=RegexRedactor())
+        log = AuditLog.open(_trail_path(), redactor=RegexRedactor(), record_drops=True)
     except Exception as e:
         print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
+        # No AuditLog to route this through — record it directly, best-effort
+        # (FileDropRecorder.record() never raises).
+        from waxseal.adapters.drops import FileDropRecorder
+
+        FileDropRecorder(_trail_path()).record(
+            reason=type(e).__name__, payload_type=PAYLOAD_TYPE
+        )
         return 0
     if not log.try_append(payload=build_payload(event), payload_type=PAYLOAD_TYPE):
         # Labelled fail-open (chain integrity ≠ trail completeness): the loss

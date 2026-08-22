@@ -66,6 +66,15 @@ c2sp.org/tlog-checkpoint), not a bespoke tree. A linear chain is exactly a Merkl
 tree's leaf sequence: the tree can be retrofitted over existing entries without
 changing stored records.
 
+**Criteria 1 and 2 are now implemented, retrofitted over the same stored records
+as promised above.** `domain/anchoring.py` computes RFC 6962 `batch_root` and
+`membership_proof`/`verify_membership` (criterion 1), plus RFC 9162 §2.1.4
+`consistency_proof`/`verify_consistency` (criterion 2 — checking that a later head
+extends an earlier one without replaying the log). `domain/checkpoint.py`'s
+`Checkpoint(seq, entry_hash, root)` is the bytes-only object an external anchor
+witnesses (SPEC §9/§10). Criterion 3 (selective disclosure, verifiable deletion)
+remains out of scope.
+
 ## 3. Whole-suffix rewrite: anchoring, not more chain
 
 A hash chain is tamper-*evident*, not tamper-*proof*: an attacker with write access
@@ -90,6 +99,16 @@ Minimal-infrastructure ladder for waxseal users, lowest cost first:
 
 The residual risk to state plainly: entries written since the last anchor are
 rewritable by a write-capable attacker. Anchor frequency is the knob.
+
+**Rung 1 of that ladder is now automatable rather than a manual `waxseal head`
+copy-paste.** `AuditLog(anchor_sink=..., anchor_every=N)` publishes a `Checkpoint`
+(a batch root, not just the bare tip) to an `AnchorSink` every `N` entries,
+best-effort and outside the append critical section — a failed anchor never blocks
+a write, it only counts against `anchor_failures` (SPEC §9). `FileAnchorSink` is the
+local baseline (a sidecar `waxseal verify --anchors` checks trail history against
+between real external events); `HTTPAnchorSink` (§10 below) is a real external
+witness. Neither replaces rung 1's own advice: the sink itself should point at
+infrastructure the log's own writer does not control.
 
 ## 4. Canonicalization: sign the bytes (lp64v1), not the interpretation
 
@@ -163,8 +182,10 @@ and often a trusted verifier — all contradicting the zero-dependency, embeddab
 and its truncation hole still needs anchoring anyway. waxseal covers the same
 practical threats with `waxseal head` anchoring (rewrite AND truncation bounded by
 anchor frequency, at near-zero cost). The fingerprint descriptor gives a keyed scheme
-(HMAC per epoch, FssAgg-style aggregate) a clean home as a NEW fingerprint if a future
-version adds it — old rows stay verifiable under their own descriptor.
+(HMAC per epoch, FssAgg-style aggregate) a clean home as a NEW fingerprint — a later
+version added both (`fs-hmac-sha256-v1`, then the FssAgg aggregate below) as opt-in
+attestation schemes, never by editing the chain's own header fingerprint; old rows
+stay verifiable under their own descriptor.
 
 ## 7. The attestation layer: scheme choice and journald's lessons
 
@@ -203,8 +224,14 @@ tool noticing"), each mapped to a verifier check waxseal ships:
 trail + sidecar consistently cannot regress the keyfile — `A_{t'}` is not computable
 from `A_t` (one-way evolution), so `epoch == len(attestations)` and
 `derive(A_0, epoch) == stored key` fail. This covers the Ma-Tsudik truncation attack
-for the embedded case; an FssAgg-style running aggregate (`μ_i = H(μ_{i-1} ‖ tag_i)`)
-is the documented upgrade path if the keyfile itself must be untrusted.
+as long as the keyfile itself is trusted; when it must not be, `fs-hmac-agg-sha256-v1`
+(SPEC §11) folds every seal into one KEYED running accumulator,
+`μ_i = HMAC(A_i, μ_{i-1} ‖ tag_i)` — keyed under the same one-way epoch key, so an
+attacker who only holds public values (trail, sidecar, and even the final `μ`) cannot
+refold it themselves, closing the "trust the keyfile" assumption the plain scheme
+still carries. Only the latest `μ` is ever persisted (`.sealagg`, replace-only):
+keeping every intermediate value would hand a truncating attacker exactly the
+`μ_{t'-1}` they would need to splice a forged suffix onto.
 
 **Verification semantics precedent**: unknown scheme/key is opaque, never tampering —
 C2SP signed note ("Verifiers MUST ignore signatures from unknown keys"), RFC 6962
@@ -270,6 +297,51 @@ pipeline position: redact → hash → store). Patterns err toward matching with
 family but use exact key-name matching rather than substring rules — `tokenizer`
 and `authors` must survive, because over-redaction destroys the audit value the
 trail exists to provide, and a hash chain makes every redaction permanent.
+
+## 10. Remote backend: CAS instead of a lock, and a trusted-writer server
+
+**Choice: `RemoteBackend` is an HTTP peer to JSONL/SQLite/S3, not a client wrapping
+one of them.** It speaks a small wire contract (REMOTE.md) over an injected
+`Transport` — stdlib `urllib` by default — so the zero-dependency rule (section 4's
+canonicalization discipline extends here too) holds for the client exactly as it
+does for `S3Backend`'s injected boto3 client.
+
+**Read-tail + append is still one critical section (CLAUDE.md rule 7) — enforced
+server-side, not by a client-held lock.** A file lock or `BEGIN IMMEDIATE`
+transaction assumes a single process (or a single database) owns the critical
+section; a remote HTTP peer has no such shared primitive to hold across a network
+round trip. The wire contract instead makes the server the lock: `POST /entries`
+must be an atomic compare-and-swap on `(seq, prev_hash)` against the server's own
+current head, answering `409` the instant two writers race for the same slot. The
+client's job is only to retry: read the (now-current) head, rebuild the entry
+against it, and re-`POST` — the same shape `S3Backend` already uses against
+`IfNoneMatch`, capped at the same `_MAX_RACE_RETRIES = 32` so pathological
+contention fails loudly instead of looping forever. Two writers never both
+extend the same `prev_hash` — the fork this rule exists to prevent — because the
+server's CAS check, not a client lock, is the single point that can see both
+racers at once.
+
+**Trust model: the server is a trusted writer, not a Byzantine-fault-tolerant
+peer.** `verify_chain` runs entirely client-side against whatever the server
+returns, so it still catches corruption, truncation, and reordering exactly as it
+would for a local file — but a server that is itself dishonest can serve a
+consistently-forged full rewrite that no client-side check can distinguish from
+the truth, the same whole-suffix-rewrite gap section 3 describes for a local
+attacker with write access. This is not a weaker promise made quietly: REMOTE.md
+states it as the wire contract's first normative fact, and the mitigation is the
+one this document already recommends — anchor the head independently
+(`checkpoint_for` + an `AnchorSink` pointed at a service *other than* the chain
+server, e.g. `HTTPAnchorSink` against a separate host). A chain server and its
+anchor witness colluding is out of scope for the same reason a compromised
+machine and its own attestation keyfile colluding is (section 6): a witness that
+shares the attacker's trust boundary was never a witness.
+
+**Relationship to `FileAttestor`:** attestation sidecars are local-writer
+constructs — one host, one keyfile, one epoch clock. A remote chain server is a
+different trust boundary; sealing does not travel over the wire contract, and
+multiple independent writers attesting against the same remote chain is
+undocumented territory this version does not attempt (an `AttestationFailure`
+would surface the disagreement loudly rather than silently pick a winner).
 
 ## References
 

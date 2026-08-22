@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-22
+
+### Added
+
+- `RemoteBackend`: an HTTP peer to JSONL/SQLite/S3 speaking a small wire contract
+  (`REMOTE.md`) over an injected `Transport` (stdlib `urllib` by default, zero new
+  runtime dependencies). `AuditLog.open("http://...")`/`"https://..."` dispatches to
+  it automatically; the CLI accepts a URL target for `verify`, `tail`, `inspect`,
+  `head`, and `checkpoint` (`anchor` is refused for a URL target — no local sidecar
+  location to write to). Credentials are read only from `WAXSEAL_API_KEY`, never
+  from argv or the URL itself. The server is a trusted writer, not a
+  Byzantine-fault-tolerant peer — `REMOTE.md` states this as the wire contract's
+  first normative fact, and independent head anchoring is the documented
+  mitigation.
+- Merkle consistency proofs (RFC 9162 §2.1.4): `consistency_proof`/
+  `verify_consistency` in `domain/anchoring.py`, alongside the existing batch-root
+  membership proofs — checking that a later chain head extends an earlier one
+  without replaying the whole log.
+- `Checkpoint(seq, entry_hash, root)` (`domain/checkpoint.py`) and `waxseal
+  checkpoint`: a bytes-only snapshot an external anchor sink can witness.
+- Automatic anchoring: `AuditLog(anchor_sink=..., anchor_every=N)` publishes a
+  checkpoint every `N` entries, best-effort and outside the append critical
+  section. `FileAnchorSink` (local `.anchors` sidecar) and `HTTPAnchorSink`
+  (POSTs to an external service over the same `Transport`) both implement the new
+  `AnchorSink` port. `waxseal anchor` and `waxseal verify --anchors` are new CLI
+  commands.
+- `fs-hmac-agg-sha256-v1`: an opt-in FssAgg-style aggregate attestation scheme
+  (Ma-Tsudik) that folds every per-entry seal into one KEYED running accumulator
+  (`.sealagg`, replace-only, latest value only), closing the gap where an
+  untrusted keyfile alone cannot prove a truncated tail was never dropped.
+- Drop-count completeness measurement: an optional `.drops` sidecar
+  (`record_drops=True`) reports a measured minimum of dropped writes independent
+  of the current process, surfaced by `verify`/`inspect` as `dropped_writes >= N`
+  — never conflating "not measured" (`None`) with "measured zero" (`0`).
+- `s3` and `postgres` optional extras in `pyproject.toml` (pull in a compatible
+  injected client for callers who want one; waxseal itself still imports neither).
+
+### Fixed
+
+- `__init__.py`'s public-API docstring referenced a nonexistent
+  `test_public_api.py`; corrected to `tests/architecture/test_invariants.py`.
+
 ## [0.1.1] - 2026-08-21
 
 ### Fixed

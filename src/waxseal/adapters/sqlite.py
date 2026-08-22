@@ -16,7 +16,8 @@ import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
+from waxseal.adapters._envelope import entry_from_fields
+from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS entries (
@@ -126,15 +127,13 @@ class SQLiteBackend:
                 " prev_hash, entry_hash, payload FROM entries ORDER BY rowid"
             )
             for seq, ts, hv, pt, ph, prev, eh, payload in rows:
-                yield Entry(
-                    header=EntryHeader(
-                        seq=seq,
-                        ts=ts,
-                        hash_version=hv,
-                        payload_type=pt,
-                        payload_hash=ph,
-                        prev_hash=prev,
-                    ),
+                yield entry_from_fields(
+                    seq=seq,
+                    ts=ts,
+                    hash_version=hv,
+                    payload_type=pt,
+                    payload_hash=ph,
+                    prev_hash=prev,
                     entry_hash=eh,
                     payload=bytes(payload),
                 )

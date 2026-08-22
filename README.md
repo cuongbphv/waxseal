@@ -49,8 +49,10 @@ for the literature behind each choice):
 | Byte-level SPEC (freeze planned for v1) + golden test vectors → portable to Go/Rust/TS | ✅ | ❌ format = whatever the code does | ❌ |
 | Zero runtime dependencies (S3/Postgres clients are injected, never imported) | ✅ | often pulls crypto/serialization stacks | ✅ |
 | Redact-before-hash (secrets never reach disk, hash commits to redacted bytes) | ✅ | sometimes | ❌ |
-| Built-in external anchoring hook (`waxseal head`) against suffix-rewrite/truncation | ✅ | ❌ | ❌ |
+| Built-in external anchoring, manual (`waxseal head`) or automatic (`anchor_every=N`) | ✅ | ❌ | ❌ |
 | Forward-secure seals (key-evolving HMAC, stdlib only) + injected Ed25519 signatures | ✅ | ❌ | ❌ |
+| FssAgg aggregate tag closing the truncation gap even if the keyfile leaks | ✅ | ❌ | ❌ |
+| Remote HTTP backend as a full peer to local storage, with an explicit trust model | ✅ | rare, undocumented trust model | ❌ |
 
 The first two rows are the failure class from the incidents above; see
 [DESIGN.md](DESIGN.md) for the literature behind each row.
@@ -137,7 +139,13 @@ CLI:
 waxseal verify trail.jsonl   # exit 0 intact / 1 broken / 2 unverifiable present / 3 no such trail
 waxseal tail trail.jsonl -n 20
 waxseal inspect trail.jsonl
-waxseal head trail.jsonl     # print the chain head (seq + entry_hash) for anchoring
+waxseal head trail.jsonl       # print the chain head (seq + entry_hash) for anchoring
+waxseal checkpoint trail.jsonl # print {seq, entry_hash, root} — a batch root, not just the tip
+waxseal anchor trail.jsonl     # append a checkpoint to the local .anchors sidecar
+waxseal verify --anchors trail.jsonl  # also check trail history against .anchors
+
+# Any of the above except `anchor` also accepts a remote chain server URL:
+waxseal verify http://chain.example.com/v1/chains/default
 ```
 
 ## Storage backends
@@ -152,6 +160,7 @@ concurrent writers can never fork the chain.
 | In-memory | `waxseal.adapters.memory` | mutex | none |
 | Amazon S3 | `waxseal.adapters.s3` | conditional PUT (`IfNoneMatch: *`) | inject your boto3 client |
 | PostgreSQL | `waxseal.adapters.postgres` | `pg_advisory_xact_lock` + `PRIMARY KEY(seq)` | inject your psycopg connection |
+| Remote (HTTP) | `waxseal.adapters.remote` | server-side compare-and-swap on `(seq, prev_hash)`, client retries on `409` | none (stdlib `urllib`) |
 
 ```python
 # S3 — the client is injected; waxseal itself stays dependency-free
@@ -172,6 +181,33 @@ log = AuditLog(PostgresBackend(lambda: psycopg.connect("postgresql://...")))
 > Note on Kafka: compacted topics delete old records (tombstones), so they are **not**
 > append-only — do not use them as a tamper-evidence store.
 
+### Remote backend
+
+`RemoteBackend` talks to any server implementing the wire contract in
+[REMOTE.md](REMOTE.md) — a small HTTP surface (`GET /v1/chains/{id}/head`,
+`POST .../entries`, `GET .../entries?cursor=`) instead of a proprietary
+protocol. The critical section every other backend enforces with a lock is
+enforced server-side here: `POST` is a compare-and-swap on `(seq, prev_hash)`,
+and a losing writer retries against the fresh head rather than forking the chain.
+
+```python
+from waxseal import AuditLog
+
+log = AuditLog.open("http://chain.example.com/v1/chains/default")
+log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
+```
+
+`WAXSEAL_API_KEY` supplies a bearer token (never argv, never the URL itself).
+
+**Trust model, stated plainly:** the server is a *trusted writer*, not a
+Byzantine-fault-tolerant peer. `verify_chain` still runs entirely client-side
+and catches corruption, truncation, and reordering — but a dishonest server can
+serve a consistently-forged rewrite of the whole trail that no client-side
+check can catch on its own. The mitigation is the same one this README already
+recommends for a local attacker with write access: anchor the head
+independently, ideally at a service *other than* the chain server itself (see
+Anchoring, below).
+
 ## Metadata sources
 
 Beyond agent actions, chain any file/document history:
@@ -182,6 +218,34 @@ from waxseal.sources.files import record_file, current_matches_last
 record_file(log, "SPEC.md", doc_id="spec")          # snapshot content hash into the chain
 current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None (never recorded)
 ```
+
+## Anchoring: checkpoints and consistency proofs
+
+A hash chain by itself cannot resist an attacker who can rewrite the whole
+trail file — every `prev_hash` downstream of the edit is recomputable.
+`checkpoint_for(entry_hashes)` pins `(seq, entry_hash, root)`, where `root` is
+an RFC 6962 batch root over every entry hash so far; anchoring that checkpoint
+somewhere the writer cannot reach closes the whole-trail-rewrite gap the chain
+cannot close on its own.
+
+```python
+from waxseal import AuditLog
+from waxseal.adapters.anchors import FileAnchorSink
+
+log = AuditLog.open("trail.jsonl",
+                    anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
+# every 100th append best-effort publishes a checkpoint outside the write path;
+# a failed anchor never blocks a write — it only counts against anchor_failures
+```
+
+`waxseal verify --anchors` replays every recorded checkpoint against the
+current trail and reports the first break: `anchor_beyond_head` (truncated
+since the checkpoint), `anchor_entry_hash_mismatch` (the tip was rewritten), or
+`anchor_root_mismatch` (an earlier entry was rewritten without breaking the
+`prev_hash` chain). `domain.anchoring` also exposes RFC 9162 §2.1.4
+`consistency_proof`/`verify_consistency` — proving a later head extends an
+earlier one without replaying the whole log — and RFC 6962 `membership_proof`/
+`verify_membership` for single-entry inclusion proofs.
 
 ## Signatures & forward-secure seals
 
@@ -239,6 +303,22 @@ rolled back.
 Limits: Python cannot zeroize memory, and entries written *after* compromise
 are attacker-controlled under any scheme — see [DESIGN.md](DESIGN.md) §6.
 
+**When the keyfile itself must not be trusted**, pass
+`scheme="fs-hmac-agg-sha256-v1"` to `FileAttestor`: every seal folds into one
+KEYED running accumulator (`.sealagg`, only the latest value ever persisted),
+so an attacker who copies the trail, the `.attest` sidecar, and even the final
+accumulator value still cannot refold it themselves — closing the gap the
+plain scheme leaves if the keyfile leaks alongside a truncated tail.
+
+## Completeness: measuring dropped writes
+
+Chain integrity is not the same thing as trail completeness — a write dropped
+before it reaches storage leaves no `seq` gap for `verify` to catch.
+`AuditLog.open(path, record_drops=True)` records every drop's reason (never its
+payload) to a `.drops` sidecar independent of the current process, and
+`verify`/`inspect` report it as `dropped_writes >= N (measured minimum, ...)` —
+`None` still means *never measured*, distinct from a measured `0`.
+
 ## Integrations
 
 Audit hooks for seven agent frameworks and coding tools. Each one is
@@ -283,17 +363,24 @@ waxseal trail is the copy you can keep, share, and verify.
 - **Chain integrity ≠ trail completeness**: a write dropped before it reaches storage
   leaves no gap. `dropped_writes` reports this separately; `None` means *not measured* —
   never conflated with `0`.
-- Concurrent writers cannot fork the chain (see backends table).
+- Concurrent writers cannot fork the chain (see backends table); for `RemoteBackend`
+  this is a server-side compare-and-swap rather than a client-held lock.
 - waxseal is tamper-*evident*, not tamper-*proof*: an attacker with write access can
-  rewrite the whole suffix of a chain. Use `waxseal head` to anchor the head hash in
-  an external trust domain — an OpenTimestamps proof, an RFC 3161 timestamp, or a git
-  commit pushed to a remote — to bound that attack.
+  rewrite the whole suffix of a chain. Anchor the head in an external trust domain —
+  manually (`waxseal head` → an OpenTimestamps proof, an RFC 3161 timestamp, a git
+  commit pushed to a remote) or automatically (`anchor_every=N` with a `FileAnchorSink`
+  or `HTTPAnchorSink`) — to bound that attack.
+- A `RemoteBackend` target is a *trusted writer*, not Byzantine-fault-tolerant: a
+  dishonest chain server can serve a consistently-forged rewrite that no client-side
+  check catches. Point the anchor sink at a service other than the chain server.
 
 ## Spec & design
 
 - [SPEC.md](SPEC.md) — byte-level format (lp64v1 encoding, PAE-style framing,
   fingerprint construction; freeze planned for v1) with golden test vectors — portable
   to any language.
+- [REMOTE.md](REMOTE.md) — the `RemoteBackend` wire contract: endpoints, envelope
+  shape, authentication, and the trusted-writer trust model.
 - [DESIGN.md](DESIGN.md) — algorithm choices and the academic literature behind them.
 
 ## License

@@ -9,6 +9,7 @@ because chain integrity ≠ trail completeness (CLAUDE.md rule 5).
 from __future__ import annotations
 
 import json
+import os
 import threading
 from collections.abc import Callable
 from dataclasses import replace
@@ -17,12 +18,20 @@ from pathlib import Path
 from typing import Any
 
 from waxseal.adapters.jsonl import JSONLBackend
+from waxseal.domain.checkpoint import Checkpoint, checkpoint_for
 from waxseal.domain.fingerprint import fingerprint_v1
 from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash
 from waxseal.domain.header import Entry, EntryHeader
 from waxseal.domain.registry import VersionRegistry
-from waxseal.domain.sealing import SEAL_FRAME_PREFIX, AttestResult, verify_seals
+from waxseal.domain.sealing import (
+    FS_HMAC_AGG_SCHEME,
+    SEAL_FRAME_PREFIX,
+    AttestResult,
+    verify_aggregate,
+    verify_seals,
+)
 from waxseal.domain.verify import VerifyResult, verify_chain
+from waxseal.ports.drops import DropRecorder
 from waxseal.ports.redact import Redactor
 from waxseal.ports.sign import Verifier
 
@@ -52,14 +61,23 @@ class AuditLog:
         now_fn: Callable[[], str] | None = None,
         registry: VersionRegistry | None = None,
         attestor: Any | None = None,
+        anchor_sink: Any | None = None,
+        anchor_every: int | None = None,
+        drop_recorder: DropRecorder | None = None,
     ) -> None:
+        if anchor_every is not None and anchor_every < 1:
+            raise ValueError("anchor_every must be a positive integer")
         self._backend = backend
         self._redactor = redactor
         self._now = now_fn or _default_now
         self._registry = registry or VersionRegistry()
         self._attestor = attestor
+        self._anchor_sink = anchor_sink
+        self._anchor_every = anchor_every
+        self._drop_recorder = drop_recorder
         self._dropped = 0
         self._attest_failures = 0
+        self._anchor_failures = 0
         # Append + attest must be one critical section: the backend's own lock
         # ends when append returns, and the sealkey's read-modify-write outside
         # it let concurrent threads desync epoch from seq (a prior review
@@ -77,7 +95,40 @@ class AuditLog:
         now_fn: Callable[[], str] | None = None,
         registry: VersionRegistry | None = None,
         attestor: Any | None = None,
+        anchor_sink: Any | None = None,
+        anchor_every: int | None = None,
+        record_drops: bool = False,
+        chain_id: str = "default",
+        timeout: float = 10.0,
     ) -> AuditLog:
+        if isinstance(path, str) and path.startswith(("http://", "https://")):
+            # MUST come before Path(path): Path() collapses "//" and drops
+            # the scheme, so checking suffix on a mangled URL would never
+            # even reach a backend choice — same class of bug M0's suffix
+            # dispatch below already guards against for local paths.
+            if record_drops:
+                raise ValueError(
+                    "record_drops requires a local trail path (a .drops sidecar "
+                    "needs somewhere to live) — not supported for a remote URL target"
+                )
+            from waxseal.adapters.remote import RemoteBackend
+
+            remote_backend: Any = RemoteBackend(
+                path,
+                api_key=os.environ.get("WAXSEAL_API_KEY"),
+                chain_id=chain_id,
+                timeout=timeout,
+            )
+            return cls(
+                remote_backend,
+                redactor=redactor,
+                now_fn=now_fn,
+                registry=registry,
+                attestor=attestor,
+                anchor_sink=anchor_sink,
+                anchor_every=anchor_every,
+                drop_recorder=None,
+            )
         p = Path(path).expanduser()
         if p.suffix == ".jsonl":
             backend: Any = JSONLBackend(p)
@@ -89,8 +140,20 @@ class AuditLog:
             raise ValueError(
                 f"no backend for {p.suffix!r}: use .jsonl or one of {sorted(_SQLITE_SUFFIXES)}"
             )
+        drop_recorder = None
+        if record_drops:
+            from waxseal.adapters.drops import FileDropRecorder
+
+            drop_recorder = FileDropRecorder(p)
         return cls(
-            backend, redactor=redactor, now_fn=now_fn, registry=registry, attestor=attestor
+            backend,
+            redactor=redactor,
+            now_fn=now_fn,
+            registry=registry,
+            attestor=attestor,
+            anchor_sink=anchor_sink,
+            anchor_every=anchor_every,
+            drop_recorder=drop_recorder,
         )
 
     def append(self, *, payload: dict[str, Any] | bytes, payload_type: str) -> Entry:
@@ -129,6 +192,22 @@ class AuditLog:
                         f"entry seq={entry.header.seq} is on the chain but its "
                         f"attestation failed: {e}"
                     ) from e
+        if (
+            self._anchor_sink is not None
+            and self._anchor_every is not None
+            and (entry.header.seq + 1) % self._anchor_every == 0
+        ):
+            # Deliberately OUTSIDE the append lock: this is a best-effort,
+            # fire-and-forget publish, never a gate on normal appends. A race
+            # between two triggers can duplicate a checkpoint record, which
+            # is harmless (idempotent content, checked independently) — the
+            # alternative of holding the lock across sidecar I/O would repeat
+            # the attest_failures precedent's own hazard for no benefit here,
+            # since anchoring, unlike attesting, is not a per-entry contract.
+            try:
+                self.anchor()
+            except Exception:
+                self._anchor_failures += 1
         return entry
 
     def verify_attestations(
@@ -213,6 +292,7 @@ class AuditLog:
                     reason=reason,
                     unverifiable=(),
                 )
+
         if verifier is not None:
             checked = 0
             unverifiable: list[int] = []
@@ -250,7 +330,41 @@ class AuditLog:
             )
         if initial_key is None:
             raise ValueError("provide initial_key (fs-hmac) or verifier (signatures)")
-        return verify_seals(attestations, initial_key)
+        result = verify_seals(attestations, initial_key)
+        if not result.ok:
+            return result
+        if hasattr(self._attestor, "read_aggregate"):
+            # FssAgg: an independent, ADDITIONAL gate checked only once the
+            # per-entry seals themselves are already intact — it exists to
+            # catch what a per-position check structurally cannot (rows
+            # missing entirely), not to duplicate seal_mismatch's more
+            # specific broken_seq. A trail rewritten consistently down to
+            # the .sealagg sidecar itself (an attacker who controls every
+            # file) is the same honest limit anchoring already documents.
+            try:
+                agg_data = self._attestor.read_aggregate()
+            except (ValueError, KeyError, TypeError):
+                return AttestResult(
+                    ok=False, checked=result.checked, broken_seq=None,
+                    reason="malformed_aggregate", unverifiable=result.unverifiable,
+                )
+            has_agg_row = any(att.scheme == FS_HMAC_AGG_SCHEME for att in attestations)
+            if has_agg_row and agg_data is None:
+                return AttestResult(
+                    ok=False, checked=result.checked, broken_seq=None,
+                    reason="aggregate_missing", unverifiable=result.unverifiable,
+                )
+            if agg_data is not None:
+                agg_start, epoch, agg = agg_data
+                reason = verify_aggregate(
+                    attestations, initial_key, agg_start=agg_start, epoch=epoch, agg=agg
+                )
+                if reason is not None:
+                    return AttestResult(
+                        ok=False, checked=result.checked, broken_seq=None,
+                        reason=reason, unverifiable=result.unverifiable,
+                    )
+        return result
 
     def try_append(self, *, payload: dict[str, Any] | bytes, payload_type: str) -> bool:
         """Best-effort append: never raises. A failure increments
@@ -264,8 +378,13 @@ class AuditLog:
             # shows up as attestation_gap on verify.
             self._attest_failures += 1
             return True
-        except Exception:
+        except Exception as e:
             self._dropped += 1
+            if self._drop_recorder is not None:
+                # DropRecorder contract (ports/drops.py) is "never raises" —
+                # this call is trusted, not wrapped, same as attestor.attest()
+                # above trusts its own contract.
+                self._drop_recorder.record(reason=type(e).__name__, payload_type=payload_type)
             return False
 
     @property
@@ -276,13 +395,43 @@ class AuditLog:
     def attest_failures(self) -> int:
         return self._attest_failures
 
+    @property
+    def anchor_failures(self) -> int:
+        return self._anchor_failures
+
+    def anchor(self) -> Checkpoint:
+        """Checkpoint the current trail and publish it via ``anchor_sink``.
+
+        Called automatically every ``anchor_every`` appends, or explicitly
+        (e.g. from the CLI). Raises ValueError with no sink configured or an
+        empty trail (nothing to checkpoint); the sink's own ``anchor()`` may
+        raise too — auto-anchoring catches that (see ``append``), an
+        explicit call does not, so a caller asking for it gets to see why.
+        """
+        if self._anchor_sink is None:
+            raise ValueError("this log was opened without an anchor_sink")
+        hashes = [entry.entry_hash for entry in self._backend.entries()]
+        if not hashes:
+            raise ValueError("cannot anchor an empty trail")
+        cp = checkpoint_for(hashes)
+        self._anchor_sink.anchor(cp)
+        return cp
+
     def verify(self, *, measure_drops: bool = True) -> VerifyResult:
         result = verify_chain(self._backend.entries(), self._registry)
-        if measure_drops:
-            # Only this process's own counter — a fresh process reporting 0
-            # for history it never observed would be a lie (None = unmeasured).
-            return replace(result, dropped_writes=self._dropped)
-        return result
+        if not measure_drops:
+            return result
+        if self._drop_recorder is not None and hasattr(self._drop_recorder, "count"):
+            # The sidecar's own count survives across process restarts — a
+            # fresh process's in-memory counter would otherwise read 0 for
+            # history it never observed (None-vs-0, CLAUDE.md rule 5).
+            return replace(
+                result, dropped_writes=self._drop_recorder.count(), drops_source="sidecar"
+            )
+        # No durable recorder: only this process's own counter, reset every
+        # AuditLog.open — reporting it as anything but "process" scope would
+        # overstate what was actually measured.
+        return replace(result, dropped_writes=self._dropped, drops_source="process")
 
     def _canonical_payload(self, payload: dict[str, Any] | bytes) -> bytes:
         if isinstance(payload, bytes):

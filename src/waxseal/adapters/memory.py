@@ -24,6 +24,8 @@ class MemoryBackend:
                 entry = build(last.header.seq + 1, last.entry_hash)
             else:
                 entry = build(0, GENESIS_PREV_HASH)
+            if entry.payload is None:
+                raise ValueError("Memory backend stores payload bytes; payload must not be None")
             self._entries.append(entry)
             return entry
 
