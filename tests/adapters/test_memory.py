@@ -2,12 +2,21 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
+from tests.adapters.backend_contract import BackendContractTests
 from tests.adapters.test_jsonl import build_entry
 from waxseal import AuditLog, VersionRegistry, verify_chain
 from waxseal.adapters.memory import MemoryBackend
 from waxseal.domain.header import GENESIS_PREV_HASH
 
 PT = "application/vnd.test.event+json"
+
+
+class TestMemoryBackendContract(BackendContractTests):
+    @pytest.fixture()
+    def backend(self) -> MemoryBackend:
+        return MemoryBackend()
 
 
 class TestMemoryBackend:

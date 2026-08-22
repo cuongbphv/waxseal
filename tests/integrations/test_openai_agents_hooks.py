@@ -174,3 +174,21 @@ class TestNeverAbortsTheRun:
         h = make_hooks(blocked / "trail.jsonl")
         asyncio.run(h.on_tool_start(tool_context(), AGENT, TOOL))  # must not raise
         assert "dropped" in capsys.readouterr().err
+
+    def test_open_failure_still_leaves_a_drop_record(
+        self, make_hooks, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # M5: the pre-open failure branch has no AuditLog to route through
+        # yet, so it calls FileDropRecorder directly. tmp_path is writable,
+        # so unlike the blocked-directory case above, the record must land.
+        monkeypatch.setattr(
+            AuditLog, "open",
+            staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
+        )
+        trail = tmp_path / "trail.jsonl"
+        h = make_hooks(trail)
+        asyncio.run(h.on_tool_start(tool_context(), AGENT, TOOL))
+        assert "dropped" in capsys.readouterr().err
+        drops = tmp_path / "trail.jsonl.drops"
+        assert drops.exists()
+        assert len(drops.read_text().splitlines()) == 1

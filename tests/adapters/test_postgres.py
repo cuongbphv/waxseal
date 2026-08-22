@@ -19,6 +19,7 @@ import os
 
 import pytest
 
+from tests.adapters.backend_contract import BackendContractTests
 from tests.adapters.test_jsonl import build_entry
 from waxseal import VersionRegistry, verify_chain
 from waxseal.adapters.postgres import ADVISORY_LOCK_KEY, PostgresBackend
@@ -108,6 +109,25 @@ def backend(store: FakeStore) -> PostgresBackend:
     b = PostgresBackend(connect)
     b._test_conns = conns  # type: ignore[attr-defined]
     return b
+
+
+class TestPostgresBackendContract(BackendContractTests):
+    # A base-class fixture wins over a same-named module fixture in pytest's
+    # resolution order (class scope is closer than module scope), so the
+    # module-level `backend`/`store` above must be re-exposed here rather
+    # than relied on by omission — see the identical note in test_s3.py.
+    @pytest.fixture()
+    def backend(self, store: FakeStore) -> PostgresBackend:
+        conns: list[FakeConn] = []
+
+        def connect() -> FakeConn:
+            conn = FakeConn(store)
+            conns.append(conn)
+            return conn
+
+        b = PostgresBackend(connect)
+        b._test_conns = conns  # type: ignore[attr-defined]
+        return b
 
 
 class TestProtocol:

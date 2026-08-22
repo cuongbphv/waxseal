@@ -221,3 +221,21 @@ class TestNeverBlocksTheCrew:
         stub.module.WaxsealEventListener(blocked / "trail.jsonl")
         stub.bus.handlers[stub.events.ToolUsageStartedEvent]("crew", tool_started(stub.events))
         assert "dropped" in capsys.readouterr().err
+
+    def test_open_failure_still_leaves_a_drop_record(
+        self, stub, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # M5: the pre-open failure branch has no AuditLog to route through
+        # yet, so it calls FileDropRecorder directly. tmp_path is writable,
+        # so unlike the blocked-directory case above, the record must land.
+        monkeypatch.setattr(
+            AuditLog, "open",
+            staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
+        )
+        trail = tmp_path / "trail.jsonl"
+        stub.module.WaxsealEventListener(trail)
+        stub.bus.handlers[stub.events.ToolUsageStartedEvent]("crew", tool_started(stub.events))
+        assert "dropped" in capsys.readouterr().err
+        drops = tmp_path / "trail.jsonl.drops"
+        assert drops.exists()
+        assert len(drops.read_text().splitlines()) == 1

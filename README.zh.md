@@ -45,8 +45,10 @@ waxseal 为你的 Agent 提供密码学审计轨迹：每个动作都被追加�
 | 字节级 SPEC（计划在 v1 冻结）+ 黄金测试向量 → 可移植到 Go/Rust/TS | ✅ | ❌ 格式 = 代码怎么跑就怎么算 | ❌ |
 | 零运行时依赖（S3/Postgres 客户端由调用方注入，永不 import） | ✅ | 常常拖入整套加密/序列化栈 | ✅ |
 | 先脱敏后哈希（密钥永不落盘，哈希承诺的是脱敏后的字节） | ✅ | 偶尔 | ❌ |
-| 内置外部锚定钩子（`waxseal head`）对抗后缀重写/截断 | ✅ | ❌ | ❌ |
+| 内置外部锚定，手动（`waxseal head`）或自动（`anchor_every=N`） | ✅ | ❌ | ❌ |
 | 前向安全封印（密钥演进 HMAC，纯标准库）+ 注入式 Ed25519 签名 | ✅ | ❌ | ❌ |
+| FssAgg 聚合标签，即便密钥文件泄露也能堵住截断漏洞 | ✅ | ❌ | ❌ |
+| 远程 HTTP 后端与本地存储完全对等，信任模型写得明明白白 | ✅ | 少见，信任模型不写明 | ❌ |
 
 前两行正是上文两起事故所属的故障类；每一行背后的文献见 [DESIGN.md](DESIGN.md)。
 
@@ -132,7 +134,13 @@ log.append(payload={"cmd": "curl -H 'Authorization: Bearer sk-...'"},
 waxseal verify trail.jsonl   # 退出码 0 完好 / 1 断链 / 2 存在不可验证行 / 3 路径不存在
 waxseal tail trail.jsonl -n 20
 waxseal inspect trail.jsonl
-waxseal head trail.jsonl     # 打印链头（seq + entry_hash），用于外部锚定
+waxseal head trail.jsonl       # 打印链头（seq + entry_hash），用于外部锚定
+waxseal checkpoint trail.jsonl # 打印 {seq, entry_hash, root} —— root 是批量根，不只是链头
+waxseal anchor trail.jsonl     # 把一个 checkpoint 追加到本地 .anchors 边车文件
+waxseal verify --anchors trail.jsonl  # 额外用 .anchors 校验 trail 历史
+
+# 除 `anchor` 外，以上命令都可以接受一个远程 chain server 的 URL：
+waxseal verify http://chain.example.com/v1/chains/default
 ```
 
 ## 存储后端
@@ -146,6 +154,7 @@ waxseal head trail.jsonl     # 打印链头（seq + entry_hash），用于外部
 | 内存 | `waxseal.adapters.memory` | 互斥锁 | 无 |
 | Amazon S3 | `waxseal.adapters.s3` | 条件 PUT（`IfNoneMatch: *`） | 注入你的 boto3 客户端 |
 | PostgreSQL | `waxseal.adapters.postgres` | `pg_advisory_xact_lock` + `PRIMARY KEY(seq)` | 注入你的 psycopg 连接 |
+| 远程（HTTP） | `waxseal.adapters.remote` | 服务端对 `(seq, prev_hash)` 做 compare-and-swap，客户端在 409 时重试 | 无（标准库 `urllib`） |
 
 ```python
 # S3 —— 客户端由调用方注入；waxseal 本身保持零依赖
@@ -166,6 +175,29 @@ log = AuditLog(PostgresBackend(lambda: psycopg.connect("postgresql://...")))
 > 关于 Kafka 的提醒：compacted topic 会删除旧记录（tombstone），**不是**真正的
 > append-only —— 不要把它用作防篡改存储。
 
+### 远程后端
+
+`RemoteBackend` 可以和任何实现了 [REMOTE.md](REMOTE.md) 中那份接口约定的服务器
+通信 —— 一个很小的 HTTP 接口（`GET /v1/chains/{id}/head`、
+`POST .../entries`、`GET .../entries?cursor=`），而不是私有协议。其他后端用锁
+维护的临界区，在这里改由服务端维护：`POST` 是对 `(seq, prev_hash)` 的
+compare-and-swap，输掉竞争的写入者会重新读取最新链头再重试，而不是让链分叉。
+
+```python
+from waxseal import AuditLog
+
+log = AuditLog.open("http://chain.example.com/v1/chains/default")
+log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
+```
+
+`WAXSEAL_API_KEY` 提供 bearer token（永远不经过命令行参数，也不放进 URL）。
+
+**信任模型，说清楚：** 服务器是*受信任的写入者*，不是拜占庭容错节点。
+`verify_chain` 仍然完全在客户端运行，能抓住损坏、截断、重排序 —— 但一个不诚实
+的服务器可以给出一份从头到尾一致伪造的重写版本，客户端单独检查是抓不出来的。
+缓解方式和本文档一直给本地有写权限的攻击者开的方子一样：独立锚定链头，最好
+锚在与 chain server 不同的另一个服务上（见下文的锚定小节）。
+
 ## 元数据源
 
 除了 Agent 动作，还可以把任何文件/文档的历史纳入链中：
@@ -176,6 +208,32 @@ from waxseal.sources.files import record_file, current_matches_last
 record_file(log, "SPEC.md", doc_id="spec")          # 把内容哈希快照进链
 current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None（从未记录）
 ```
+
+## 锚定：checkpoint 与 consistency proof
+
+哈希链本身抵御不了能重写整个 trail 文件的攻击者 —— 篡改点之后的每个
+`prev_hash` 都是可以重新算出来的。`checkpoint_for(entry_hashes)` 钉住
+`(seq, entry_hash, root)`，其中 `root` 是对目前为止所有 entry hash 的 RFC 6962
+批量根；把这个 checkpoint 锚定到写入者够不到的地方，就能堵上链本身堵不住的
+整体重写漏洞。
+
+```python
+from waxseal import AuditLog
+from waxseal.adapters.anchors import FileAnchorSink
+
+log = AuditLog.open("trail.jsonl",
+                    anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
+# 每追加 100 次，就在写入路径之外尽力发布一次 checkpoint；
+# 锚定失败永远不会阻塞写入 —— 只会计入 anchor_failures
+```
+
+`waxseal verify --anchors` 会把每条已记录的 checkpoint 与当前 trail 重放比对，
+报告第一个断裂点：`anchor_beyond_head`（checkpoint 之后 trail 被截断）、
+`anchor_entry_hash_mismatch`（链头被重写），或 `anchor_root_mismatch`（更早的
+entry 被重写，但没有破坏 `prev_hash` 链）。`domain.anchoring` 还提供了 RFC 9162
+§2.1.4 的 `consistency_proof`/`verify_consistency` —— 证明后来的链头是早先链头
+的延伸，而无需重放整个日志 —— 以及 RFC 6962 的
+`membership_proof`/`verify_membership`，用于单条 entry 的 inclusion proof。
 
 ## 签名与前向安全封印
 
@@ -229,6 +287,20 @@ attestation 存放在 `.attest` 边车文件中（不改动任何后端 schema�
 限制：Python 无法清零内存，且机器被攻陷*之后*写入的条目在任何方案下都由攻击者
 控制 —— 见 [DESIGN.md](DESIGN.md) §6。
 
+**当 keyfile 本身也不能被信任时**，给 `FileAttestor` 传
+`scheme="fs-hmac-agg-sha256-v1"`：每个封印都会折叠进同一个带密钥的运行累加器
+（`.sealagg`，只保留最新值），这样攻击者即便拿到了 trail、`.attest` 边车文件、
+甚至最终的累加器值，也无法自行重新折叠出同样的结果 —— 堵上了普通方案在 keyfile
+连同被截断的尾部一起泄露时留下的缺口。
+
+## 完整性度量：统计被丢弃的写入
+
+链的完整性不等于 trail 的完整性 —— 一次在落盘前就丢失的写入，不会给 `verify`
+留下任何 `seq` 空隙可抓。`AuditLog.open(path, record_drops=True)` 会把每次丢弃的
+原因（绝不包含 payload）记录到一个独立于当前进程的 `.drops` 边车文件中，
+`verify`/`inspect` 会以 `dropped_writes >= N (measured minimum, ...)` 的形式报告 ——
+`None` 依然表示*从未测量过*，与已测得的 `0` 不同。
+
 ## 集成
 
 为七个 agent 框架与编码工具提供审计 hook。每个集成都针对目标当前的
@@ -268,15 +340,23 @@ transcript，请轮换密钥；waxseal 的 trail 才是你可以保留、分享�
 - 可检测：条目被修改、被删除（seq 缺口）、被插入/重排（prev-hash 断裂）、payload 被替换。
 - **链完整性 ≠ 轨迹完备性**：在到达存储之前丢失的写入不会留下缺口。`dropped_writes`
   单独报告此事；`None` 表示*未测量*——永远不与 `0` 混同。
-- 并发写入者无法让链分叉（见后端表格）。
+- 并发写入者无法让链分叉（见后端表格）；对 `RemoteBackend` 而言这是服务端的
+  compare-and-swap，而不是客户端持有的锁。
 - waxseal 提供的是篡改可检测（tamper-evident），而非防止篡改（tamper-proof）：
-  拥有写权限的攻击者可以重写链的整个后缀。用 `waxseal head` 把链头哈希锚定到外部
-  （OpenTimestamps、RFC 3161 时间戳、推送到远端的 git 提交）即可约束这种攻击。
+  拥有写权限的攻击者可以重写链的整个后缀。把链头锚定到外部信任域 —— 手动
+  （`waxseal head` → OpenTimestamps、RFC 3161 时间戳、推送到远端的 git 提交）或
+  自动（`anchor_every=N` 配合 `FileAnchorSink`/`HTTPAnchorSink`）—— 即可约束这种
+  攻击。
+- `RemoteBackend` 的目标是*受信任的写入者*，不是拜占庭容错节点：不诚实的
+  chain server 可以给出一份从头到尾一致伪造的重写版本，客户端单独检查抓不出来。
+  请把 anchor sink 指向 chain server 之外的另一个服务。
 
 ## 规范与设计
 
 - [SPEC.md](SPEC.md) —— 字节级格式（lp64v1 编码、PAE 风格框架、指纹构造；计划在
   v1 冻结）附带黄金测试向量 —— 可移植到任何语言。
+- [REMOTE.md](REMOTE.md) —— `RemoteBackend` 的接口约定：端点、envelope 格式、
+  认证方式，以及受信任写入者这一信任模型。
 - [DESIGN.md](DESIGN.md) —— 算法选型及其背后的学术文献。
 
 ## 许可证

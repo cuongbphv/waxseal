@@ -226,3 +226,28 @@ class TestPayloadAbsent:
         result = verify_chain(chain, registry())
         assert not result.ok
         assert result.reason == "entry_hash_mismatch"
+
+
+class TestDropsSource:
+    """drops_source: a trailing-default field (M5) — every construction
+    site above this class predates it and must keep working unchanged."""
+
+    def test_verify_chain_defaults_drops_source_to_none(self) -> None:
+        result = verify_chain(build_chain(2), registry())
+        assert result.drops_source is None
+
+    def test_replace_can_set_drops_source_without_touching_other_fields(self) -> None:
+        result = verify_chain(build_chain(2), registry())
+        with_source = replace(result, dropped_writes=3, drops_source="sidecar")
+        assert with_source.drops_source == "sidecar"
+        assert with_source.dropped_writes == 3
+        assert with_source.ok == result.ok
+        assert with_source.checked == result.checked
+
+    def test_positional_construction_still_works_without_drops_source(self) -> None:
+        # Pins that the field is genuinely trailing-default: an old caller
+        # naming every field but this one must not break.
+        result = VerifyResult(
+            ok=True, checked=0, broken_seq=None, reason=None, unverifiable=(), dropped_writes=None
+        )
+        assert result.drops_source is None

@@ -18,7 +18,16 @@ from waxseal.domain.header import Entry
 class WriterBackend(Protocol):
     def append(self, build: Callable[[int, str], Entry]) -> Entry:
         """Under the backend's write lock: read the tail, call
-        ``build(next_seq, prev_hash)``, persist and return the entry."""
+        ``build(next_seq, prev_hash)``, persist and return the entry.
+
+        ``build`` MAY be invoked more than once per logical append: an
+        optimistic (compare-and-set) backend re-invokes it with a fresh
+        ``(next_seq, prev_hash)`` after losing a race, instead of holding a
+        lock across the round trip (S3's conditional-write retry is the
+        precedent). Callers MUST pass a builder that is side-effect-free and
+        deterministic given ``(seq, prev_hash)`` — ``AuditLog.append``
+        satisfies this by computing ``ts`` before the closure runs.
+        """
         ...
 
 

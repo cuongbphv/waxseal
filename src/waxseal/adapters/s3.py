@@ -12,13 +12,13 @@ tail-discovery hint; correctness never depends on it.
 
 from __future__ import annotations
 
-import base64
 import contextlib
 import json
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
+from waxseal.adapters._envelope import from_obj, to_obj
+from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 
 _MAX_RACE_RETRIES = 32
 _SEQ_WIDTH = 20  # zero-padded so lexicographic key order == numeric seq order
@@ -42,7 +42,7 @@ class S3Backend:
         for _ in range(_MAX_RACE_RETRIES):
             next_seq, prev_hash = self._tail()
             entry = build(next_seq, prev_hash)
-            body = json.dumps(_to_obj(entry), sort_keys=True, separators=(",", ":"))
+            body = json.dumps(to_obj(entry, backend="S3"), sort_keys=True, separators=(",", ":"))
             try:
                 self._client.put_object(
                     Bucket=self._bucket,
@@ -79,7 +79,7 @@ class S3Backend:
             page = self._client.list_objects_v2(**kwargs)
             for item in page.get("Contents", []):
                 body = self._client.get_object(Bucket=self._bucket, Key=item["Key"])
-                yield _from_obj(json.loads(body["Body"].read()))
+                yield from_obj(json.loads(body["Body"].read()))
             if not page.get("IsTruncated"):
                 return
             token = page["NextContinuationToken"]
@@ -126,37 +126,3 @@ def _error_code(exc: Exception) -> str:
     if isinstance(response, dict):
         return str(response.get("Error", {}).get("Code", ""))
     return ""
-
-
-def _to_obj(entry: Entry) -> dict[str, object]:
-    if entry.payload is None:
-        raise ValueError("S3 backend stores payload bytes; payload must not be None")
-    h = entry.header
-    return {
-        "header": {
-            "seq": h.seq,
-            "ts": h.ts,
-            "hash_version": h.hash_version,
-            "payload_type": h.payload_type,
-            "payload_hash": h.payload_hash,
-            "prev_hash": h.prev_hash,
-        },
-        "entry_hash": entry.entry_hash,
-        "payload_b64": base64.b64encode(entry.payload).decode("ascii"),
-    }
-
-
-def _from_obj(obj: dict[str, Any]) -> Entry:
-    header = obj["header"]
-    return Entry(
-        header=EntryHeader(
-            seq=int(header["seq"]),
-            ts=str(header["ts"]),
-            hash_version=str(header["hash_version"]),
-            payload_type=str(header["payload_type"]),
-            payload_hash=str(header["payload_hash"]),
-            prev_hash=str(header["prev_hash"]),
-        ),
-        entry_hash=str(obj["entry_hash"]),
-        payload=base64.b64decode(str(obj["payload_b64"])),
-    )

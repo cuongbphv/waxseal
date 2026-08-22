@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.adapters.backend_contract import BackendContractTests
 from tests.adapters.test_jsonl import build_entry
 from waxseal import AuditLog
 from waxseal.adapters.sqlite import SQLiteBackend
@@ -12,6 +13,12 @@ from waxseal.domain.header import GENESIS_PREV_HASH
 
 TS = "2026-08-21T06:00:00+00:00"
 PT = "application/vnd.test.event+json"
+
+
+class TestSQLiteBackendContract(BackendContractTests):
+    @pytest.fixture()
+    def backend(self, tmp_path: Path) -> SQLiteBackend:
+        return SQLiteBackend(tmp_path / "trail.db")
 
 
 class TestAppend:

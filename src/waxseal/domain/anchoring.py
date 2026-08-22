@@ -90,6 +90,88 @@ def membership_proof(entry_hashes: Sequence[str], index: int) -> tuple[str, ...]
     return tuple(h.hex() for h in _audit_path(index, leaves))
 
 
+def _consistency_subproof(m: int, leaves: Sequence[bytes], complete: bool) -> list[bytes]:
+    """RFC 9162 §2.1.4.1 SUBPROOF(m, D_n, complete), leaves-in/hashes-out."""
+    n = len(leaves)
+    if m == n:
+        return [] if complete else [_tree_hash(leaves)]
+    k = _split_point(n)
+    if m <= k:
+        return [*_consistency_subproof(m, leaves[:k], complete), _tree_hash(leaves[k:])]
+    return [*_consistency_subproof(m - k, leaves[k:], False), _tree_hash(leaves[:k])]
+
+
+def consistency_proof(entry_hashes: Sequence[str], old_size: int) -> tuple[str, ...]:
+    """Sibling hashes proving the tree at ``old_size`` is a prefix of the
+    current tree (RFC 9162 §2.1.4.1: PROOF(m, D_n) = SUBPROOF(m, D_n, true)).
+
+    ``old_size`` must be in ``[1, len(entry_hashes)]``: a size-0 "tree" has no
+    root to prove consistency with, and a size beyond the current batch does
+    not exist yet — out of range raises IndexError rather than proving some
+    other size by surprise, matching ``membership_proof``'s contract for
+    operator-supplied indices.
+    """
+    n = len(entry_hashes)
+    if not 1 <= old_size <= n:
+        raise IndexError(f"old_size {old_size} outside range [1, {n}]")
+    leaves = [bytes.fromhex(h) for h in entry_hashes]
+    return tuple(h.hex() for h in _consistency_subproof(old_size, leaves, True))
+
+
+def verify_consistency(
+    old_root: str,
+    old_size: int,
+    new_root: str,
+    new_size: int,
+    proof: Sequence[str],
+) -> bool:
+    """Check a consistency proof between two tree sizes (RFC 9162 §2.1.4.2).
+
+    Returns False on anything that does not check out — bad hex, a shrinking
+    or non-positive size, a missing/extra/reordered proof hash, or a root
+    that does not match. Never raises: see module docstring.
+    """
+    if old_size < 1 or new_size < old_size:
+        return False
+    try:
+        old_hash = bytes.fromhex(old_root)
+        new_hash = bytes.fromhex(new_root)
+        path = [bytes.fromhex(p) for p in proof]
+    except ValueError:
+        return False
+
+    if old_size == new_size:
+        return not path and old_hash == new_hash
+
+    if not path:
+        return False
+    if old_size & (old_size - 1) == 0:  # old_size is an exact power of two
+        path = [old_hash, *path]
+
+    fn = old_size - 1
+    sn = new_size - 1
+    while fn & 1:
+        fn >>= 1
+        sn >>= 1
+
+    fr = sr = path[0]
+    for sibling in path[1:]:
+        if sn == 0:
+            return False
+        if fn & 1 or fn == sn:
+            fr = _pair_hash(sibling, fr)
+            sr = _pair_hash(sibling, sr)
+            while not (fn & 1) and fn != 0:
+                fn >>= 1
+                sn >>= 1
+        else:
+            sr = _pair_hash(sr, sibling)
+        fn >>= 1
+        sn >>= 1
+
+    return fr == old_hash and sr == new_hash and sn == 0
+
+
 def verify_membership(
     entry_hash: str,
     index: int,

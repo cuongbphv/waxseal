@@ -4,9 +4,12 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from waxseal import AuditLog
 from waxseal.adapters.attest import FileAttestor
-from waxseal.domain.sealing import generate_key
+from waxseal.domain.sealing import FS_HMAC_SCHEME, Attestation, generate_key
+from waxseal.log import AttestationFailure
 
 PT = "application/vnd.test.event+json"
 
@@ -387,6 +390,285 @@ class TestAttestationCriticalSection:
         assert not result.ok
         assert result.reason == "attestation_gap"
         assert result.broken_seq == 2
+
+
+def open_agg_sealed(tmp_path: Path, k0: bytes) -> AuditLog:
+    from waxseal.domain.sealing import FS_HMAC_AGG_SCHEME
+
+    return AuditLog.open(
+        tmp_path / "trail.jsonl",
+        attestor=FileAttestor(
+            tmp_path / "trail.jsonl", initial_key=k0, scheme=FS_HMAC_AGG_SCHEME
+        ),
+        now_fn=lambda: "2026-08-22T06:00:00+00:00",
+    )
+
+
+class TestFssAggregate:
+    """FssAgg (Ma-Tsudik): a running, keyed fold over every attested value,
+    persisted as ONLY its latest value (adapters/attest.py's .sealagg,
+    replace-only) so an attacker who truncates the trail cannot also
+    reproduce the fold — they hold only the current, already-evolved key."""
+
+    def test_scheme_defaults_to_plain_fs_hmac(self, tmp_path: Path) -> None:
+        k0 = generate_key()
+        log = open_sealed(tmp_path, k0)
+        log.append(payload={"i": 0}, payload_type="application/vnd.test.event+json")
+        assert not (tmp_path / "trail.jsonl.sealagg").exists()
+
+    def test_agg_scheme_writes_a_sealagg_sidecar_with_only_the_latest_value(
+        self, tmp_path: Path
+    ) -> None:
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
+        agg_path = tmp_path / "trail.jsonl.sealagg"
+        assert agg_path.exists()
+        obj = json.loads(agg_path.read_text())
+        assert set(obj) == {"agg", "agg_start", "epoch"}
+        assert obj["epoch"] == 3
+        assert obj["agg_start"] == 0
+
+    def test_intact_agg_trail_verifies(self, tmp_path: Path) -> None:
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        for i in range(5):
+            log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
+        result = log.verify_attestations(initial_key=k0)
+        assert result.ok
+        assert result.checked == 5
+
+    def test_attestation_rows_use_the_agg_scheme_name(self, tmp_path: Path) -> None:
+        from waxseal.domain.sealing import FS_HMAC_AGG_SCHEME
+
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        log.append(payload={"i": 0}, payload_type="application/vnd.test.event+json")
+        [att] = list(log._attestor.attestations())
+        assert att.scheme == FS_HMAC_AGG_SCHEME
+
+    def test_truncating_trail_attest_and_keyfile_together_is_still_caught_by_epoch(
+        self, tmp_path: Path
+    ) -> None:
+        # Even a fully consistent 3-file truncation (trail + .attest +
+        # .sealkey, matching Ma-Tsudik's own attack) leaves .sealagg's
+        # "epoch" stale relative to the now-shorter attestation list —
+        # the aggregate's OWN gate, independent of the keyfile check.
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        for i in range(5):
+            log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
+        # Roll keyfile back consistently (public: SHA-256 forward, not back —
+        # so a real attacker cannot do this; this simulates the truncation
+        # itself being caught by leaving .sealagg's epoch/agg stale, which a
+        # keyfile-only rollback WOULD miss if it could roll back at all).
+        for name in ("trail.jsonl", "trail.jsonl.attest"):
+            p = tmp_path / name
+            p.write_text("\n".join(p.read_text().splitlines()[:3]) + "\n")
+        result = log.verify_attestations(initial_key=k0)
+        assert not result.ok
+        # The plain keyfile-epoch check fires first (still one epoch ahead
+        # of the truncated sidecar); the aggregate is a second, independent
+        # gate — verified directly against domain.sealing.verify_aggregate
+        # in tests/domain/test_sealing.py.
+        assert result.reason == "keyfile_epoch_mismatch"
+
+    def test_tampered_value_on_an_agg_row_is_caught_by_the_per_entry_seal_first(
+        self, tmp_path: Path
+    ) -> None:
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
+        attest_path = tmp_path / "trail.jsonl.attest"
+        lines = attest_path.read_text().splitlines()
+        obj = json.loads(lines[1])
+        obj["value"] = "00" * 32
+        lines[1] = json.dumps(obj)
+        attest_path.write_text("\n".join(lines) + "\n")
+        result = log.verify_attestations(initial_key=k0)
+        assert not result.ok
+        assert result.reason == "seal_mismatch"
+        assert result.broken_seq == 1
+
+    def test_stale_sealagg_replayed_over_a_matching_truncation_is_an_honest_limit(
+        self, tmp_path: Path
+    ) -> None:
+        # Honest limit (documented, not hidden): if an attacker can replay an
+        # OLD .sealagg whose stored epoch happens to equal the truncated
+        # attestation count, the aggregate's own gate cannot see it either —
+        # exactly like an old anchor (SPEC.md's own documented limit for
+        # anchoring, mirrored here for the aggregate).
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
+        agg_path = tmp_path / "trail.jsonl.sealagg"
+        saved_agg = agg_path.read_text()
+        for i in range(3, 5):
+            log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
+        for name in ("trail.jsonl", "trail.jsonl.attest"):
+            p = tmp_path / name
+            p.write_text("\n".join(p.read_text().splitlines()[:3]) + "\n")
+        agg_path.write_text(saved_agg)  # replay the OLD (matching) sealagg
+        # The keyfile is still 2 epochs ahead of the truncated sidecar (it
+        # cannot be rolled back — SHA-256 is one-way), so THAT gate still
+        # fires; this pins that the honest limit is specific to the
+        # aggregate gate, not a claim that truncation goes undetected here.
+        result = log.verify_attestations(initial_key=k0)
+        assert not result.ok
+        assert result.reason == "keyfile_epoch_mismatch"
+
+    def test_writer_refuses_to_reuse_a_stale_sealagg_epoch(self, tmp_path: Path) -> None:
+        # attest.py's writer must cross-check .sealagg's own persisted epoch
+        # against the row it is about to attest — trusting a stale value
+        # (the sidecar is attacker-writable by the same threat model as the
+        # keyfile) would silently skip folding whatever happened since, so
+        # the persisted aggregate would LOOK complete without being complete.
+        # This is the same class of self-check the keyfile epoch != seq
+        # guard three lines above it in attest() already performs.
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        for i in range(2):
+            log.append(payload={"i": i}, payload_type=PT)
+        agg_path = tmp_path / "trail.jsonl.sealagg"
+        stale_agg = agg_path.read_text()  # epoch=2
+        log.append(payload={"i": 2}, payload_type=PT)  # keyfile/attest now at 3
+        agg_path.write_text(stale_agg)  # only .sealagg rolled back, independently
+        with pytest.raises(AttestationFailure):
+            log.append(payload={"i": 3}, payload_type=PT)
+
+    def test_aggregate_missing_when_a_row_claims_the_agg_scheme(self, tmp_path: Path) -> None:
+        from waxseal.domain.sealing import FS_HMAC_AGG_SCHEME
+
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        log.append(payload={"i": 0}, payload_type="application/vnd.test.event+json")
+        (tmp_path / "trail.jsonl.sealagg").unlink()
+        result = log.verify_attestations(initial_key=k0)
+        assert not result.ok
+        assert result.reason == "aggregate_missing"
+        assert log._attestor.attestations().__next__().scheme == FS_HMAC_AGG_SCHEME
+
+    def test_old_fs_hmac_sidecar_without_sealagg_still_verifies_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression: a pre-existing plain fs-hmac trail (no .sealagg at
+        # all) must verify exactly as before — the aggregate is additive,
+        # never required.
+        k0 = generate_key()
+        log = open_sealed(tmp_path, k0)
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
+        assert not (tmp_path / "trail.jsonl.sealagg").exists()
+        assert log.verify_attestations(initial_key=k0).ok
+
+    def test_unknown_scheme_value_is_rejected_at_construction(self, tmp_path: Path) -> None:
+        k0 = generate_key()
+        with pytest.raises(ValueError, match="scheme"):
+            FileAttestor(tmp_path / "trail.jsonl", initial_key=k0, scheme="made-up-scheme-v9")
+
+    def test_scheme_param_is_rejected_in_signer_mode(self, tmp_path: Path) -> None:
+        from waxseal.domain.sealing import FS_HMAC_AGG_SCHEME
+
+        signer = TestInjectedSigner.FakeEd25519()
+        with pytest.raises(ValueError, match="scheme"):
+            FileAttestor(
+                tmp_path / "trail.jsonl", signer=signer, scheme=FS_HMAC_AGG_SCHEME
+            )
+
+    def test_malformed_sealagg_json_is_a_verdict_not_a_crash(self, tmp_path: Path) -> None:
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        log.append(payload={"i": 0}, payload_type="application/vnd.test.event+json")
+        (tmp_path / "trail.jsonl.sealagg").write_text("{this is not json")
+        result = log.verify_attestations(initial_key=k0)
+        assert not result.ok
+        assert result.reason == "malformed_aggregate"
+
+    def test_tampered_aggregate_value_alone_is_caught_after_seals_pass(
+        self, tmp_path: Path
+    ) -> None:
+        # Per-entry seals are untouched (they still verify), but the stored
+        # fold itself no longer matches — this is the case the fold exists
+        # to catch that a per-position seal check cannot see on its own.
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
+        agg_path = tmp_path / "trail.jsonl.sealagg"
+        obj = json.loads(agg_path.read_text())
+        obj["agg"] = "ff" * 32
+        agg_path.write_text(json.dumps(obj))
+        result = log.verify_attestations(initial_key=k0)
+        assert not result.ok
+        assert result.reason == "aggregate_mismatch"
+
+    def test_attestor_without_read_aggregate_skips_the_aggregate_gate(
+        self, tmp_path: Path
+    ) -> None:
+        # A minimal custom Attestor (not FileAttestor) that never implements
+        # read_aggregate: the gate must be optional, not a hard requirement
+        # of the AttestResult protocol — verify_attestations falls back to
+        # the plain per-entry seal check alone.
+        class MinimalFsHmacAttestor:
+            def __init__(self) -> None:
+                self._rows: list = []
+
+            def attest(self, seq: int, entry_hash: str):
+                from waxseal.domain.sealing import seal_entry
+
+                value = seal_entry(k0_evolved(seq), entry_hash)
+                att = Attestation(seq=seq, entry_hash=entry_hash, scheme=FS_HMAC_SCHEME,
+                                   value=value)
+                self._rows.append(att)
+                return att
+
+            def attestations(self):
+                return iter(self._rows)
+
+        def k0_evolved(seq: int) -> bytes:
+            from waxseal.domain.sealing import evolve_key
+
+            k = k0
+            for _ in range(seq):
+                k = evolve_key(k)
+            return k
+
+        k0 = generate_key()
+        log = AuditLog.open(tmp_path / "trail.jsonl", attestor=MinimalFsHmacAttestor())
+        for i in range(2):
+            log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
+        result = log.verify_attestations(initial_key=k0)
+        assert result.ok
+        assert result.checked == 2
+
+    def test_aggregate_can_start_mid_trail(self, tmp_path: Path) -> None:
+        # A trail that starts under plain fs-hmac and switches to the agg
+        # scheme partway through: agg_start pins where folding began, and
+        # the earlier rows stay covered by the ordinary keyfile check.
+        from waxseal.domain.sealing import FS_HMAC_AGG_SCHEME
+
+        k0 = generate_key()
+        log = open_sealed(tmp_path, k0)
+        for i in range(2):
+            log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
+        log._attestor = FileAttestor(
+            tmp_path / "trail.jsonl", initial_key=k0, scheme=FS_HMAC_AGG_SCHEME
+        )
+        # Same epoch key continuity: FileAttestor reads the persisted keyfile.
+        for i in range(2, 5):
+            log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
+        obj = json.loads((tmp_path / "trail.jsonl.sealagg").read_text())
+        assert obj["agg_start"] == 2
+        assert obj["epoch"] == 5
+        assert [json.loads(line)["scheme"] for line in
+                (tmp_path / "trail.jsonl.attest").read_text().splitlines()] == (
+            [FS_HMAC_SCHEME] * 2 + [FS_HMAC_AGG_SCHEME] * 3
+        )
+        result = log.verify_attestations(initial_key=k0)
+        assert result.ok
 
 
 class TestSidecarPermissions:

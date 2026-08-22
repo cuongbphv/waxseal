@@ -29,6 +29,11 @@ class VerifyResult:
     # None = not measured (CLAUDE.md rule 5) — a verifier walking storage
     # cannot see writes that were dropped before they reached storage.
     dropped_writes: int | None
+    # Trailing default: every existing construction/replace() site keeps
+    # working unchanged. None = dropped_writes is also None (never
+    # measured); "process" = an in-memory counter, reset on every AuditLog.open;
+    # "sidecar" = a DropRecorder's own sidecar, durable across process restarts.
+    drops_source: str | None = None
 
 
 def verify_chain(entries: Iterable[Entry], registry: VersionRegistry) -> VerifyResult:

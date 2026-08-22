@@ -15,7 +15,8 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
+from waxseal.adapters._envelope import entry_from_fields
+from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 
 # Arbitrary but stable: int64 from ascii "waxseal!" (8 bytes).
 ADVISORY_LOCK_KEY = int.from_bytes(b"waxseal!", "big", signed=True)
@@ -99,15 +100,13 @@ class PostgresBackend:
                 " FROM waxseal_entries ORDER BY rowpos"
             )
             for seq, ts, hv, pt, ph, prev, eh, payload in cur.fetchall():
-                yield Entry(
-                    header=EntryHeader(
-                        seq=seq,
-                        ts=ts,
-                        hash_version=hv,
-                        payload_type=pt,
-                        payload_hash=ph,
-                        prev_hash=prev,
-                    ),
+                yield entry_from_fields(
+                    seq=seq,
+                    ts=ts,
+                    hash_version=hv,
+                    payload_type=pt,
+                    payload_hash=ph,
+                    prev_hash=prev,
                     entry_hash=eh,
                     payload=bytes(payload),
                 )

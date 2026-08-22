@@ -25,8 +25,23 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
 
+from waxseal.domain.hashing import lp
+
 FS_HMAC_SCHEME: Final = "fs-hmac-sha256-v1"
 SEAL_FRAME_PREFIX: Final = b"waxseal-seal-v1\n"
+
+# FssAgg (Ma-Tsudik 2007): folds every per-entry seal into ONE running,
+# KEYED accumulator so an attacker who truncates the trail loses the ability
+# to reproduce it — they hold only the current epoch key, and the fold at
+# each step is HMAC'd under that step's now-discarded key, not a plain hash
+# of the public values (see TestVerifyAggregate's refold-without-key test:
+# a keyless refold from public values alone cannot reproduce a real fold).
+# Only the LATEST mu is ever persisted (adapters/attest.py's .sealagg,
+# replace-only) — storing every intermediate mu would hand an attacker who
+# copies mu_{t'-1} exactly the truncation hole this scheme exists to close.
+FS_HMAC_AGG_SCHEME: Final = "fs-hmac-agg-sha256-v1"
+AGG_FRAME_PREFIX: Final = b"waxseal-agg-v1\n"
+AGG_GENESIS: Final = "0" * 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,12 +91,14 @@ def verify_seals(attestations: Iterable[Attestation], initial_key: bytes) -> Att
                 reason="seal_sequence_mismatch",
                 unverifiable=tuple(unverifiable),
             )
-        if att.scheme == FS_HMAC_SCHEME:
+        if att.scheme in (FS_HMAC_SCHEME, FS_HMAC_AGG_SCHEME):
             try:
                 expected = seal_entry(key, att.entry_hash)
-            except UnicodeEncodeError:
-                # Attacker-writable sidecar: a non-ASCII "hash" must be a
-                # verdict, not a crash that denies the audit.
+                matches = hmac.compare_digest(expected, att.value)
+            except (UnicodeEncodeError, TypeError):
+                # Attacker-writable sidecar: a non-ASCII "hash", or a value
+                # hmac.compare_digest itself refuses (it rejects any non-ASCII
+                # str), must be a verdict, not a crash that denies the audit.
                 return AttestResult(
                     ok=False,
                     checked=checked,
@@ -89,7 +106,7 @@ def verify_seals(attestations: Iterable[Attestation], initial_key: bytes) -> Att
                     reason="malformed_attestation",
                     unverifiable=tuple(unverifiable),
                 )
-            if not hmac.compare_digest(expected, att.value):
+            if not matches:
                 return AttestResult(
                     ok=False,
                     checked=checked,
@@ -110,3 +127,79 @@ def verify_seals(attestations: Iterable[Attestation], initial_key: bytes) -> Att
         reason=None,
         unverifiable=tuple(unverifiable),
     )
+
+
+def aggregate_step(epoch_key: bytes, prev_agg: str, value: str) -> str:
+    """One FssAgg fold: mu_i = HMAC-SHA256(A_i, frame(mu_{i-1}, value_i)).
+
+    ``epoch_key`` is the SAME key that sealed this row (the epoch key BEFORE
+    it evolves) — the fold commits to the whole prefix under a key an
+    attacker who later compromises the machine no longer holds.
+    """
+    frame = AGG_FRAME_PREFIX + bytes.fromhex(prev_agg) + lp(value)
+    return hmac.new(epoch_key, frame, hashlib.sha256).hexdigest()
+
+
+def verify_aggregate(
+    attestations: Iterable[Attestation],
+    initial_key: bytes,
+    *,
+    agg_start: int,
+    epoch: int,
+    agg: str,
+) -> str | None:
+    """Check a persisted FssAgg accumulator against the full attestation
+    list. Fails closed and never raises (same contract as
+    ``anchoring.verify_membership``): the sidecar holding ``agg``/``epoch``/
+    ``agg_start`` is attacker-writable by threat model.
+
+    Returns ``None`` when it verifies, else one of:
+
+    - ``malformed_aggregate``: agg_start out of [0, epoch], agg is not hex,
+      or an aggregate-scheme row's value cannot be folded (non-UTF-8 —
+      an attacker-writable sidecar is not obligated to hand back clean
+      bytes, and a fold that cannot even run is a verdict, not a crash).
+    - ``aggregate_epoch_mismatch``: either ``epoch`` claims more rows than
+      exist (a dropped/truncated row), or an aggregate-scheme row sits PAST
+      ``epoch`` — a fold the writer performed but never persisted (a crash
+      between the keyfile/attest writes and the ``.sealagg`` write).
+    - ``aggregate_mismatch``: the fold over the given rows does not
+      reproduce ``agg`` (a tampered value, or a wrong ``agg_start``).
+
+    Rows before ``agg_start`` are skipped (aggregation may start mid-trail —
+    DESIGN.md's upgrade path); they still advance the epoch key so later
+    folds line up, matching ``verify_seals``' positional clock. Rows at or
+    after ``epoch`` are similarly skipped for folding, but ONLY if they are
+    not themselves aggregate-scheme: a trail may switch a ``FileAttestor``
+    back to plain ``fs-hmac-sha256-v1`` after aggregating for a while, and
+    that scheme's own rows never touch ``.sealagg`` again — treating the
+    resulting positional gap as a break would turn an ordinary configuration
+    change into a false tampering alarm (the incident class this whole
+    project exists to make unrepresentable).
+    """
+    atts = list(attestations)
+    if not 0 <= agg_start <= epoch:
+        return "malformed_aggregate"
+    if epoch > len(atts):
+        return "aggregate_epoch_mismatch"
+    try:
+        bytes.fromhex(agg)
+    except ValueError:
+        return "malformed_aggregate"
+    if any(att.scheme == FS_HMAC_AGG_SCHEME for att in atts[epoch:]):
+        return "aggregate_epoch_mismatch"
+
+    key = initial_key
+    running = AGG_GENESIS
+    for position, att in enumerate(atts):
+        if position >= epoch:
+            break
+        if position >= agg_start and att.scheme == FS_HMAC_AGG_SCHEME:
+            try:
+                running = aggregate_step(key, running, att.value)
+            except (ValueError, UnicodeEncodeError):
+                return "malformed_aggregate"
+        key = evolve_key(key)
+    if running != agg:
+        return "aggregate_mismatch"
+    return None

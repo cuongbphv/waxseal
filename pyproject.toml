@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "waxseal"
-version = "0.1.1"
+version = "0.1.2"
 description = "Tamper-evident, schema-evolution-safe audit hash chain for AI agent frameworks. Zero dependencies."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -35,6 +35,20 @@ dev = [
     "mypy",
     "ruff",
     # Integration tests only (TestRealPostgres); runtime deps stay [].
+    "psycopg[binary]>=3.1",
+]
+# S3Backend/SQLiteBackend/PostgresBackend take an INJECTED client — waxseal
+# itself never imports boto3/psycopg (CLAUDE.md rule 1: dependencies = []).
+# These extras exist only so `pip install waxseal[s3]` pulls in a compatible
+# client for callers who want one, not because waxseal needs it.
+s3 = [
+    # [Unverified] minimum version for IfNoneMatch/IfMatch (S3 conditional
+    # writes, AWS GA 2024) is not pinned here — not independently confirmed
+    # against boto3's own changelog. If put_object rejects IfNoneMatch as an
+    # unexpected keyword, upgrade boto3/botocore to a current release.
+    "boto3",
+]
+postgres = [
     "psycopg[binary]>=3.1",
 ]
 

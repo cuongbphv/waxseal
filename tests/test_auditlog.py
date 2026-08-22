@@ -85,18 +85,96 @@ class TestDroppedWrites:
         result = log.verify()
         assert result.ok  # chain is intact...
         assert result.dropped_writes == 1  # ...but the trail is incomplete.
+        assert result.drops_source == "process"  # no recorder configured — in-memory only
 
     def test_dropped_writes_zero_when_measured_and_none_dropped(self, tmp_path: Path) -> None:
         log = open_log(tmp_path / "trail.jsonl")
         log.append(payload={"i": 0}, payload_type=PT)
-        assert log.verify().dropped_writes == 0
+        result = log.verify()
+        assert result.dropped_writes == 0
+        assert result.drops_source == "process"
 
     def test_verify_without_a_writer_reports_none_not_zero(self, tmp_path: Path) -> None:
         # A fresh process cannot know what an earlier process dropped.
         path = tmp_path / "trail.jsonl"
         open_log(path).append(payload={"i": 0}, payload_type=PT)
         fresh = open_log(path)
-        assert fresh.verify(measure_drops=False).dropped_writes is None
+        result = fresh.verify(measure_drops=False)
+        assert result.dropped_writes is None
+        assert result.drops_source is None
+
+
+class TestDropRecorderSidecar:
+    """M5: a `.drops` sidecar makes the drop count durable across the
+    process restarts a bare in-memory counter cannot survive."""
+
+    def test_two_writer_instances_each_dropping_once_are_both_measured(
+        self, tmp_path: Path
+    ) -> None:
+        # Simulates two separate hook processes writing to the same trail:
+        # neither one's in-memory counter can see the other's drop, but a
+        # shared sidecar does.
+        path = tmp_path / "trail.jsonl"
+        first = AuditLog.open(path, now_fn=lambda: TS, record_drops=True)
+        first.append(payload={"i": 0}, payload_type=PT)
+        first.try_append(payload=object(), payload_type=PT)  # type: ignore[arg-type]
+
+        second = AuditLog.open(path, now_fn=lambda: TS, record_drops=True)
+        second.try_append(payload=object(), payload_type=PT)  # type: ignore[arg-type]
+
+        reader = AuditLog.open(path, now_fn=lambda: TS, record_drops=True)
+        result = reader.verify()
+        assert result.dropped_writes == 2
+        assert result.drops_source == "sidecar"
+
+    def test_empty_sidecar_reports_zero_not_none(self, tmp_path: Path) -> None:
+        path = tmp_path / "trail.jsonl"
+        log = AuditLog.open(path, now_fn=lambda: TS, record_drops=True)
+        log.append(payload={"i": 0}, payload_type=PT)  # no drops — sidecar never created
+        result = log.verify()
+        assert result.dropped_writes == 0  # measured: zero seen...
+        assert result.drops_source == "sidecar"  # ...not "never measured"
+
+    def test_deleting_the_sidecar_reads_back_as_measured_zero_not_a_crash(
+        self, tmp_path: Path
+    ) -> None:
+        # An AuditLog with a configured recorder trusts it unconditionally
+        # (drops_source stays "sidecar") — it cannot tell "deleted" from
+        # "never written", so deletion reads back as a measured 0, not a
+        # crash or a silent revert to None. The None-vs-0 distinction lives
+        # one layer up, in the CLI's own read_drop_count() sidecar peek
+        # (module-level function, tested in tests/adapters/test_drops.py),
+        # which DOES see file-absence directly and reports None for it.
+        path = tmp_path / "trail.jsonl"
+        log = AuditLog.open(path, now_fn=lambda: TS, record_drops=True)
+        log.append(payload={"i": 0}, payload_type=PT)
+        log.try_append(payload=object(), payload_type=PT)  # type: ignore[arg-type]
+        assert log.verify().dropped_writes == 1
+
+        (path.parent / (path.name + ".drops")).unlink()
+        result = log.verify()
+        assert result.dropped_writes == 0
+        assert result.drops_source == "sidecar"
+
+    def test_recorder_never_raises_even_when_the_trail_dir_becomes_unwritable(
+        self, tmp_path: Path
+    ) -> None:
+        import os
+        import sys
+
+        if sys.platform == "win32":
+            pytest.skip("POSIX permission bits")
+        if os.geteuid() == 0:
+            pytest.skip("root bypasses permission checks")
+        path = tmp_path / "trail.jsonl"
+        log = AuditLog.open(path, now_fn=lambda: TS, record_drops=True)
+        log.append(payload={"i": 0}, payload_type=PT)
+        tmp_path.chmod(0o500)
+        try:
+            ok = log.try_append(payload=object(), payload_type=PT)  # type: ignore[arg-type]
+        finally:
+            tmp_path.chmod(0o700)
+        assert ok is False  # try_append still fails open, never raises
 
 
 class TestBackendDispatch:

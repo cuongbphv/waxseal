@@ -75,3 +75,29 @@ def test_unopenable_trail_exits_zero_with_labelled_drop(
     event = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}
     assert run_main(monkeypatch, hook, json.dumps(event), blocker / "trail.jsonl") == 0
     assert "dropped" in capsys.readouterr().err
+    # Honest limit (adapters/drops.py's own docstring): the SAME broken
+    # directory that blocks the trail also blocks the .drops sidecar next to
+    # it — a disk too broken to hold a write cannot bear witness to its own
+    # failure either. FileDropRecorder swallows that, it does not fake it.
+    assert not (blocker / "trail.jsonl.drops").exists()
+
+
+def test_open_failure_still_leaves_a_drop_record(
+    monkeypatch, hook, tmp_path: Path, capsys
+) -> None:
+    # Unlike the blocker-file case above, the trail's OWN directory is
+    # writable here — only AuditLog.open() itself fails (e.g. a corrupt
+    # backend) — so the sidecar write in the except-branch can and must
+    # succeed (M5: every failure path stays silent on stdout AND leaves a
+    # measurable drop record).
+    monkeypatch.setattr(
+        AuditLog, "open", staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x")))
+    )
+    trail = tmp_path / "trail.jsonl"
+    event = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}
+    assert run_main(monkeypatch, hook, json.dumps(event), trail) == 0
+    assert capsys.readouterr().out == ""
+
+    drops = trail.parent / (trail.name + ".drops")
+    assert drops.exists()
+    assert len(drops.read_text().splitlines()) == 1

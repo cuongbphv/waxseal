@@ -36,5 +36,4 @@ coverage.xml
 .claude/settings.local.json
 
 # Private research notes — not part of the public repo
-docs/research_1.md
-docs/research_2.md
+docs/
