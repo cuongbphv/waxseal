@@ -7,9 +7,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
@@ -17,7 +19,20 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: ${{ matrix.python-version }}
-      # CLAUDE.md: all green + coverage floor (>=90%) before any "done" claim.
+      # CLAUDE.md: all green + coverage floor (100%) before any "done" claim.
+      # Both operating systems, because filelock.py's two lock branches each
+      # carry a `# pragma: no cover` naming the CI that runs the other one. A
+      # pragma pointing at a job that does not exist is a claimed check nobody
+      # performs — the one thing this project must never ship.
       - run: uv run --extra dev pytest --cov=waxseal
       - run: uv run --extra dev mypy
       - run: uv run --extra dev ruff check .
+      # CLAUDE.md: golden vectors are cross-checked by scripts that implement
+      # SPEC.md prose directly instead of importing waxseal. A vector suite
+      # only ever checked against the code it came from checks nothing.
+      # Each exits non-zero on disagreement. gen_vectors.py is deliberately not
+      # here: it WRITES, and tests/test_vectors.py already guards that file's
+      # frozen hash.
+      - run: uv run --extra dev python tools/gen_rfc3161_vectors.py
+      - run: uv run --extra dev python tools/gen_consistency_vectors.py
+      - run: uv run --extra dev python tools/gen_checkpoint_vectors.py

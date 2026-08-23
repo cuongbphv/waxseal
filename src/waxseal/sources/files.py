@@ -38,7 +38,7 @@ def current_matches_last(log: AuditLog, path: Path | str, *, doc_id: str) -> boo
     None = this doc_id was never recorded — distinct from a mismatch
     (unmeasured is not a verdict, CLAUDE.md rule 5)."""
     last_hash: str | None = None
-    for entry in log._backend.entries():
+    for entry in log.entries():
         if entry.header.payload_type != FILE_VERSION_PAYLOAD_TYPE or entry.payload is None:
             continue
         payload = json.loads(entry.payload)

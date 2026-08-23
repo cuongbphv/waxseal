@@ -125,6 +125,16 @@ def test_library_targets_install_nothing_and_print_usage(
     assert "waxseal.integrations." in capsys.readouterr().out
 
 
+def test_openclaw_installs_nothing_and_prints_the_schedule(tmp_path: Path, capsys) -> None:
+    # The exporter runs on a timer, so there is no host file to place and
+    # nothing on the agent's execution path to configure.
+    assert main(["install", "openclaw", "--home", str(tmp_path)]) == 0
+    assert list(tmp_path.iterdir()) == []
+    out = capsys.readouterr().out
+    assert "python -m waxseal.integrations.openclaw" in out
+    assert "waxseal verify" in out
+
+
 def test_unknown_target_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["install", "not-a-target", "--home", str(tmp_path)])

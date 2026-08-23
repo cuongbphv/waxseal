@@ -3,8 +3,10 @@
 Fork prevention is layered: BEGIN IMMEDIATE serializes read-tail + insert,
 and the PRIMARY KEY on seq makes the database itself reject a second entry
 with the same seq even if locking were somehow bypassed. Entries are read
-back in rowid (insertion) order, NOT seq order — sorting by seq would hide
-reordering from the verifier.
+back ORDER BY rowid; seq is an INTEGER PRIMARY KEY, which SQLite aliases to
+rowid, so this coincides with seq order — a renumbered/reordered row is
+caught by the hash checks (seq is inside the hashed header), not by read-back
+order (contrast postgres.py, whose separate rowpos really is insertion order).
 """
 
 from __future__ import annotations

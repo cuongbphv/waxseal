@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "waxseal"
-version = "0.1.2"
+version = "0.1.3"
 description = "Tamper-evident, schema-evolution-safe audit hash chain for AI agent frameworks. Zero dependencies."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -70,12 +70,18 @@ source = ["waxseal"]
 branch = true
 
 [tool.coverage.report]
-# CLAUDE.md invariant: domain + adapters must stay >= 90% line coverage.
-fail_under = 90
+# CLAUDE.md invariant: the floor is a ratchet — it may go up, never down.
+# 0.1.3 closed the last gaps; the two platform-conditional branches that no
+# single OS can reach carry a labelled pragma naming the CI that runs them.
+fail_under = 100
 show_missing = true
 exclude_lines = [
     "pragma: no cover",
     "^\\s*\\.\\.\\.$",           # Protocol method bodies
+    # A Protocol body is a type declaration, not code: its methods are never
+    # called, and their docstrings leave a partial-branch arc that no test can
+    # close. tests/architecture/test_ports.py checks the shape instead.
+    "class .*\\(Protocol\\):",
     "if TYPE_CHECKING:",
 ]
 

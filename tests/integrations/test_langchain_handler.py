@@ -25,6 +25,7 @@ import json
 import sys
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -130,6 +131,54 @@ class TestToolEvents:
         trail = tmp_path / "trail.jsonl"
         make_handler(trail).on_tool_end({"rows": [1, 2]}, run_id=RUN_ID)
         assert read_payload(trail)["output"] == {"rows": [1, 2]}
+
+
+class TestAgentDecisions:
+    """on_agent_action fires when the agent CHOOSES a tool, before any tool
+    run exists. Without it the trail shows executed calls only, so a chosen
+    action that never dispatched (a parse failure, an aborted run) leaves no
+    record of having been decided at all."""
+
+    def test_agent_action_records_the_chosen_tool_and_its_input(
+        self, make_handler, tmp_path: Path
+    ) -> None:
+        trail = tmp_path / "trail.jsonl"
+        action = SimpleNamespace(
+            tool="sql_db_query", tool_input={"query": "DROP TABLE users"}, log="thought"
+        )
+        make_handler(trail).on_agent_action(action, run_id=RUN_ID, parent_run_id=None)
+        payload = read_payload(trail)
+        assert payload["phase"] == "agent_action"
+        assert payload["tool_name"] == "sql_db_query"
+        assert payload["tool_input"] == {"query": "DROP TABLE users"}
+        assert payload["run_id"] == str(RUN_ID)
+
+    def test_agent_action_secret_never_reaches_disk(self, make_handler, tmp_path: Path) -> None:
+        trail = tmp_path / "trail.jsonl"
+        secret = "sk-abcdef1234567890abcdef"
+        action = SimpleNamespace(tool="shell", tool_input=f"curl -H 'Authorization: {secret}'")
+        make_handler(trail).on_agent_action(action, run_id=RUN_ID)
+        assert secret.encode() not in trail.read_bytes()
+
+    def test_agent_finish_records_the_return_values(self, make_handler, tmp_path: Path) -> None:
+        trail = tmp_path / "trail.jsonl"
+        finish = SimpleNamespace(return_values={"output": "42"}, log="done")
+        make_handler(trail).on_agent_finish(finish, run_id=RUN_ID, parent_run_id=None)
+        payload = read_payload(trail)
+        assert payload["phase"] == "agent_finish"
+        assert payload["return_values"] == {"output": "42"}
+
+    def test_a_decision_object_missing_the_attributes_is_recorded_as_none(
+        self, make_handler, tmp_path: Path
+    ) -> None:
+        # LangChain's agent types differ across versions; a missing attribute
+        # must read as "not present" on the chain, never crash the run and
+        # never be back-filled with a value the agent did not choose.
+        trail = tmp_path / "trail.jsonl"
+        make_handler(trail).on_agent_action(SimpleNamespace(), run_id=RUN_ID)
+        payload = read_payload(trail)
+        assert payload["tool_name"] is None
+        assert payload["tool_input"] is None
 
 
 class TestRedactionAndClipping:

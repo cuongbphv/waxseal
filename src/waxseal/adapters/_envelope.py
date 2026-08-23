@@ -6,6 +6,11 @@ copy-pasted in both, so a schema fix applied to one and not the other would
 silently desync the two backends' stored bytes. This module is the single
 source of truth for that shape; sqlite.py and postgres.py reuse
 ``entry_from_fields`` to reconstruct an ``Entry`` from their row columns.
+
+The header half of that shape is owned one layer down, by
+``domain.header.header_to_obj``/``header_from_obj``, because the proof bundle
+in ``domain/export.py`` carries the same header on a different wire and the
+copy-paste hazard above applies across formats too.
 """
 
 from __future__ import annotations
@@ -13,7 +18,7 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-from waxseal.domain.header import Entry, EntryHeader
+from waxseal.domain.header import Entry, EntryHeader, header_from_obj, header_to_obj
 
 
 def to_obj(entry: Entry, *, backend: str) -> dict[str, Any]:
@@ -26,16 +31,8 @@ def to_obj(entry: Entry, *, backend: str) -> dict[str, Any]:
     """
     if entry.payload is None:
         raise ValueError(f"{backend} backend stores payload bytes; payload must not be None")
-    h = entry.header
     return {
-        "header": {
-            "seq": h.seq,
-            "ts": h.ts,
-            "hash_version": h.hash_version,
-            "payload_type": h.payload_type,
-            "payload_hash": h.payload_hash,
-            "prev_hash": h.prev_hash,
-        },
+        "header": header_to_obj(entry.header),
         "entry_hash": entry.entry_hash,
         "payload_b64": base64.b64encode(entry.payload).decode("ascii"),
     }
@@ -43,16 +40,8 @@ def to_obj(entry: Entry, *, backend: str) -> dict[str, Any]:
 
 def from_obj(obj: dict[str, Any]) -> Entry:
     """Reconstruct an Entry from the JSON-envelope dict ``to_obj`` produces."""
-    header = obj["header"]
     return Entry(
-        header=EntryHeader(
-            seq=int(header["seq"]),
-            ts=str(header["ts"]),
-            hash_version=str(header["hash_version"]),
-            payload_type=str(header["payload_type"]),
-            payload_hash=str(header["payload_hash"]),
-            prev_hash=str(header["prev_hash"]),
-        ),
+        header=header_from_obj(obj["header"]),
         entry_hash=str(obj["entry_hash"]),
         payload=base64.b64decode(str(obj["payload_b64"])),
     )

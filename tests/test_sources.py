@@ -66,3 +66,25 @@ class TestRecordFile:
         doc.write_bytes(b"v1")
         log = open_log(tmp_path)
         assert current_matches_last(log, doc, doc_id="spec") is None
+
+    def test_other_payload_types_and_other_doc_ids_are_ignored(self, tmp_path: Path) -> None:
+        # A real trail is mixed. Reading the newest row of the wrong kind, or
+        # of a different document, would compare a file against a hash that
+        # was never about it — a false mismatch, which reads as tampering.
+        from waxseal.sources.files import current_matches_last
+
+        doc = tmp_path / "spec.md"
+        doc.write_bytes(b"v1")
+        other = tmp_path / "other.md"
+        other.write_bytes(b"unrelated")
+
+        log = open_log(tmp_path)
+        record_file(log, doc, doc_id="spec")
+        record_file(log, other, doc_id="other")
+        log.append(
+            payload={"note": "not a file version"},
+            payload_type="application/vnd.test.event+json",
+        )
+
+        assert current_matches_last(log, doc, doc_id="spec") is True
+        assert current_matches_last(log, doc, doc_id="never-recorded") is None

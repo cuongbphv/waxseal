@@ -3,9 +3,9 @@
 
 Appends every lifecycle hook event (tool dispatch, tool result, user prompt,
 session lifecycle) to a tamper-evident hash chain. Configure it in
-~/.codex/hooks.json or config.toml [[hooks.*]] tables (see README.md next to
-this file). Requires `pip install waxseal` in the interpreter this runs
-under.
+~/.codex/hooks.json or config.toml [[hooks.*]] tables (see the repo's
+integrations/codex/README.md). Requires `pip install waxseal` in the
+interpreter this runs under.
 
 Contract verified against openai/codex source, rust-v0.149.0 (2026-08-21):
 

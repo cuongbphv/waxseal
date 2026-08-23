@@ -50,7 +50,8 @@ khác KHÔNG làm (khảo sát các thư viện audit-log Python, tháng 8/2026 
 | SPEC byte-level (dự kiến freeze ở v1) + golden vectors → port sang Go/Rust/TS | ✅ | ❌ format = code chạy sao thì vậy | ❌ |
 | Zero runtime dependency (client S3/Postgres được inject, không bao giờ import) | ✅ | thường kéo cả stack crypto/serialization | ✅ |
 | Redact-before-hash (secret không bao giờ chạm disk, hash cam kết trên bytes đã redact) | ✅ | thỉnh thoảng | ❌ |
-| Anchoring ra ngoài có sẵn, thủ công (`waxseal head`) hoặc tự động (`anchor_every=N`) | ✅ | ❌ | ❌ |
+| Anchoring ra ngoài có sẵn: TSA RFC 3161, OpenTimestamps, witness, hoặc sink tự viết (`anchor_every=N`) | ✅ | ❌ | ❌ |
+| Pinned-head (TOFU) + witness cross-check chống chain server không trung thực | ✅ | ❌ | ❌ |
 | Forward-secure seal (HMAC key-evolving, thuần stdlib) + chữ ký Ed25519 inject | ✅ | ❌ | ❌ |
 | Aggregate tag FssAgg đóng lỗ hổng truncation kể cả khi keyfile bị lộ | ✅ | ❌ | ❌ |
 | Remote backend HTTP là backend ngang hàng đầy đủ với storage local, trust model ghi rõ | ✅ | hiếm, trust model không ghi rõ | ❌ |
@@ -79,7 +80,7 @@ flowchart LR
     G["genesis<br/>prev_hash = 000…0"] --> E0["entry 0<br/>entry_hash₀"]
     E0 -- "prev_hash = entry_hash₀" --> E1["entry 1<br/>entry_hash₁"]
     E1 -- "prev_hash = entry_hash₁" --> E2["entry 2<br/>entry_hash₂"]
-    E2 -. "waxseal head → anchor ra ngoài<br/>(OpenTimestamps / RFC 3161 / git)" .-> X["trust domain<br/>bên ngoài"]
+    E2 -. "waxseal anchor --tsa-url / --ots-calendar / --witness" .-> X["trust domain<br/>bên ngoài"]
 ```
 
 **Luồng verify — mỗi kết cục một mã riêng, unknown không bao giờ là tampered:**
@@ -203,10 +204,13 @@ log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 **Trust model, nói thẳng:** server là *trusted writer*, không phải một peer
 Byzantine-fault-tolerant. `verify_chain` vẫn chạy hoàn toàn phía client và bắt
 được corruption, truncation, reorder — nhưng một server không trung thực có
-thể trả về một bản rewrite giả mạo nhất quán toàn bộ trail mà không check
-phía client nào tự bắt được. Cách giảm thiểu vẫn là điều README này đã
-khuyến nghị cho kẻ tấn công local có quyền ghi: anchor head độc lập, tốt nhất
-tại một service KHÁC với chính chain server (xem phần Anchoring bên dưới).
+thể trả về một bản rewrite giả mạo nhất quán toàn bộ trail mà riêng
+`verify_chain` không bắt được. Ba thứ thu hẹp điều đó: anchor head độc lập tại
+một service KHÁC với chính chain server, giữ một `--pin` để bắt việc viết lại
+đoạn lịch sử bạn đã xác nhận, và thêm `--witness` ở một trust domain khác để
+bắt split-view (xem phần Anchoring và Thời gian được chứng thực bên dưới).
+Không thứ nào biến server thành đáng tin; chúng chỉ chuyển câu hỏi sang: ai
+nắm pin, ai nắm witness, ai nắm sink.
 
 ## Nguồn metadata
 
@@ -218,6 +222,71 @@ from waxseal.sources.files import record_file, current_matches_last
 record_file(log, "SPEC.md", doc_id="spec")          # snapshot content hash vào chain
 current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None (chưa từng ghi)
 ```
+
+## Nhật ký quyết định AI
+
+`DecisionRecord` là payload mang hình dạng một quyết định, dành cho hệ thống AI ra quyết
+định hoặc hỗ trợ ra quyết định: hệ thống nào, phiên bản mô hình nào, quyết định gì và vì
+sao, và có con người tham gia hay không. Input được cam kết bằng hash sau khi redact, chứ
+không được lưu lại.
+
+```python
+from waxseal import AuditLog, DecisionRecord, ModelRef, HumanOversight
+from waxseal.adapters.redactors import RegexRedactor
+from waxseal.sources.decisions import commit_input, record_decision
+
+redactor = RegexRedactor()
+log = AuditLog.open("decisions.jsonl", redactor=redactor)
+
+record_decision(log, DecisionRecord(
+    decision_id="DEC-1001",
+    decision_type="transaction_approval",
+    system_id="screening-agent",
+    model=ModelRef(name="my-model", version="2026.08.1"),
+    input_commitment=commit_input(model_input, redactor=redactor),  # redact xong mới hash
+    outcome="approve",
+    rationale="dưới ngưỡng, đối tác đã có lịch sử",
+    human_oversight=HumanOversight(mode="automated"),  # None = chưa ghi nhận, KHÁC automated
+))
+```
+
+Đọc lại các quyết định bằng `iter_decisions` — nó duyệt trail theo đúng thứ tự chuỗi và
+yield `(entry, record)`. Một dòng mà bytes không còn parse được thành quyết định vẫn được
+yield (với `record=None`) chứ không bị bỏ qua trong im lặng; còn dòng đó có bị *sửa đổi*
+hay không là câu hỏi của `verify`, được trả lời riêng:
+
+```python
+from waxseal.sources.decisions import iter_decisions
+
+for entry, record in iter_decisions(log, decision_type="transaction_approval"):
+    if record is None:
+        print(f"seq {entry.header.seq}: không parse được — chạy `waxseal verify`")
+    else:
+        print(f"seq {entry.header.seq}: {record.decision_id} → {record.outcome}")
+```
+
+Kiểm toán viên đọc một báo cáo, và kiểm tra được một quyết định mà không cần được trao cả
+nhật ký:
+
+```bash
+waxseal report decisions.jsonl              # Markdown; --json cho SIEM/GRC
+waxseal export-proof decisions.jsonl 3 > proof.json
+waxseal verify-proof proof.json             # offline; không cần trail
+```
+
+Một proof bundle là một entry cộng đường Merkle của nó, nên trả lời câu hỏi về một chủ thể
+không làm lộ mọi quyết định khác trong trail. Báo cáo in kiểm tra **không được chạy** thành
+*not checked*, không bao giờ in thành đã đạt.
+
+- [examples/banking-poc/](examples/banking-poc/README.vi.md) — demo end-to-end chạy được,
+  có animation minh hoạ luồng dữ liệu và tám kịch bản tấn công, mỗi kịch bản tự assert
+  đúng exit code của nó
+- [docs/architecture/banking-deployment.vi.md](docs/architecture/banking-deployment.vi.md)
+  — triển khai tham chiếu: bốn miền tin cậy, phân tách nhiệm vụ, lưu trữ và DR
+- [docs/compliance/mapping.vi.md](docs/compliance/mapping.vi.md) — lớp này chứng minh được
+  gì đối với EU AI Act, NIST AI RMF, RTS của DORA và các khung khác, **kèm phân tích
+  khoảng trống trung thực**. Đây là lớp bằng chứng: nó hỗ trợ các nghĩa vụ lưu trữ hồ sơ
+  và không hoàn thành thay nghĩa vụ nào cả
 
 ## Anchoring: checkpoint và consistency proof
 
@@ -246,6 +315,42 @@ checkpoint), `anchor_entry_hash_mismatch` (tip bị rewrite), hoặc
 `consistency_proof`/`verify_consistency` — chứng minh một head sau này mở
 rộng từ head trước đó mà không cần replay toàn bộ log — và RFC 6962
 `membership_proof`/`verify_membership` cho membership proof của từng entry.
+
+## Thời gian được chứng thực, pin và witness
+
+Một anchor chỉ có giá trị bằng đúng thẩm quyền mà nó dựa vào. Ba lệnh sau đưa một checkpoint
+ra ngoài tầm với của writer:
+
+```bash
+waxseal anchor trail.jsonl --tsa-url https://freetsa.org/tsr    # RFC 3161 timestamp
+waxseal anchor trail.jsonl --ots-calendar https://a.pool.opentimestamps.org
+waxseal anchor trail.jsonl --witness https://witness.example/anchor
+waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https://witness.example/anchor
+```
+
+- **RFC 3161** biến `ts` từ chỗ tự khai thành được chứng thực. waxseal kiểm tra reply
+  *về mặt cấu trúc* — status, message imprint, nonce, thuật toán digest — và nói rõ điều đó
+  trong mọi dòng nó in ra. Nó **không** verify chữ ký CMS/X.509; việc đó được ủy quyền cho
+  `openssl ts -verify`, công thức nằm trong docs. Receipt mà nó không đọc được là
+  *unverifiable* (exit 2); chỉ receipt chứng thực cho bytes khác mới là *gãy* (exit 1).
+- **OpenTimestamps** lưu một proof Bitcoin ở trạng thái *pending*, mờ đục và có chủ ý. Hoàn
+  tất nó về sau bằng `ots upgrade` / `ots verify`.
+- **`--pin`** là `known_hosts` cho một trail: verifier giữ lại checkpoint do chính nó tính ra
+  và từ chối lịch sử nào mâu thuẫn với checkpoint đó. Lần dùng đầu tiên được ghi nhãn rõ, pin
+  chỉ tiến lên sau một lần chạy sạch, và pin đã hỏng thì không bao giờ bị âm thầm pin lại.
+- **`--witness`** là kênh bên ngoài mà pin không thể thay thế. Pin bắt được server viết lại
+  lịch sử cho chính bạn; chỉ witness nằm ở một miền tin cậy *khác* mới bắt được server đưa
+  hai lịch sử khác nhau cho hai client. Witness không kết nối được sẽ in
+  `unreachable — NOT checked` và trả exit code 2 (không thể xác minh): một
+  phép kiểm chưa chạy không phải là đạt, cũng không phải là bằng chứng bị sửa.
+
+- [docs/anchoring-external-time.vi.md](docs/anchoring-external-time.vi.md) — công thức ủy
+  quyền cho `openssl ts`, đường nâng cấp OTS, và cách viết một `AnchorSink` cho chain khác
+  (EVM, Hyperledger, private)
+- [docs/security/threat-model.vi.md](docs/security/threat-model.vi.md) — vì sao
+  tamper-*proof* là bất khả thi với phần mềm thuần, client phát hiện được gì và chứng minh
+  được là không thể phát hiện gì trước một chain server Byzantine, và cách trích dẫn output
+  của waxseal mà không nói quá
 
 ## Chữ ký & forward-secure seal
 
@@ -318,7 +423,8 @@ của mỗi lần drop vào sidecar `.drops` độc lập với process hiện t
 
 ## Tích hợp
 
-Hook audit cho bảy agent framework và coding tool. Mỗi integration
+Hook audit cho bảy agent framework và coding tool, cộng một exporter cho host đã
+tự giữ ledger riêng (OpenClaw). Mỗi integration
 được verify với hook contract hiện hành của đích (phiên bản ghi trong README riêng),
 ghi lại dispatch *trước khi* thực thi, redact secret trước khi hash, clip output lớn
 một cách hiển thị, và **không bao giờ chặn/veto công việc của host** — mọi lỗi đều
@@ -328,7 +434,7 @@ Tất cả nằm sẵn trong wheel — không cần checkout source, không copy
 
 ```bash
 pip install waxseal
-waxseal install hermes        # hoặc claude-code / codex / cursor / hermes-gateway
+waxseal install hermes        # hoặc claude-code / codex / cursor / hermes-gateway / openclaw
 ```
 
 `install` ghi các shim mỏng vào thư mục config của host (import
@@ -346,6 +452,7 @@ CrewAI, OpenAI Agents không cần bước install — import trực tiếp, ví
 | CrewAI | event listener (`crewai.events`) | [integrations/crewai/](integrations/crewai/) |
 | OpenAI Agents SDK | `RunHooks` | [integrations/openai-agents/](integrations/openai-agents/) |
 | hermes-agent | plugin + gateway hook | [integrations/hermes/](integrations/hermes/) |
+| OpenClaw | exporter đọc audit ledger (`openclaw audit --json`, không hook) | [integrations/openclaw/](integrations/openclaw/) |
 
 Ghi chú phạm vi cho nhóm coding tool: các hook này cho bạn một bản ghi
 song song, tamper-evident, **không chứa secret** của mọi hành động. Chúng không (và
@@ -362,15 +469,23 @@ key; trail của waxseal là bản ghi bạn có thể giữ, chia sẻ và veri
 - Writer song song không thể fork chain (xem bảng backend); với `RemoteBackend` đây
   là compare-and-swap phía server, không phải lock giữ ở client.
 - waxseal là tamper-*evident* (phát hiện giả mạo), không phải tamper-*proof* (chống
-  giả mạo tuyệt đối): kẻ tấn công có quyền ghi vẫn có thể viết lại toàn bộ phần đuôi
-  chain. Anchor head ra một trust domain bên ngoài — thủ công (`waxseal head` → proof
-  OpenTimestamps, timestamp RFC 3161, hoặc git commit đã push lên remote) hoặc tự
-  động (`anchor_every=N` với `FileAnchorSink`/`HTTPAnchorSink`) — để chặn kiểu tấn
-  công này.
-- Một target `RemoteBackend` là *trusted writer*, không phải Byzantine-fault-tolerant:
-  một chain server không trung thực có thể trả về bản rewrite giả mạo nhất quán mà
-  không check phía client nào tự bắt được. Hãy trỏ anchor sink tới một service khác
-  với chính chain server.
+  giả mạo tuyệt đối), và không bản phát hành nào thay đổi điều đó: kẻ tấn công có
+  quyền ghi vẫn viết lại được toàn bộ phần đuôi chain. Phần mềm thuần không ngăn được
+  — mọi byte cục bộ đều ghi đè được, và thứ duy nhất phần mềm làm được là khiến việc
+  ghi đè *lộ ra* khi đối chiếu với một bản sao nằm ngoài tầm với của kẻ tấn công.
+  Anchor head ra một trust domain bên ngoài: `waxseal anchor --tsa-url` (RFC 3161),
+  `--ots-calendar` (OpenTimestamps), `--witness`, hoặc `anchor_every=N` với một sink
+  tự viết. Điều đó chỉ thu hẹp được tấn công đúng bằng mức sink nằm dưới một *quyền
+  quản trị khác*; một sidecar nằm cùng ổ đĩa thì không thu hẹp được gì.
+- Một target `RemoteBackend` là *trusted writer*, không phải Byzantine-fault-tolerant —
+  nhưng hai phép kiểm phía client thu hẹp điều đó. `--pin` bắt được server viết lại
+  đoạn lịch sử bạn đã xác nhận trước đó (`pin_mismatch`) hoặc trả về bản ngắn hơn
+  (`pin_beyond_head`). `--witness` bắt được server cho hai client xem hai lịch sử
+  tự-nhất-quán khác nhau — điều mà một client đơn lẻ chứng minh được là không thể tự
+  phát hiện (fork consistency, Mazières & Shasha). Cái vẫn nằm ngoài tầm: client lần
+  đầu kết nối, chưa có pin và chưa có witness; witness thông đồng với server; và client
+  bị kẻ tấn công nắm toàn bộ đường mạng. Hãy trỏ pin, witness và anchor sink tới nơi
+  khác với chính chain server — sự tách quyền đó chính là toàn bộ lập luận bảo mật.
 
 ## Spec & thiết kế
 

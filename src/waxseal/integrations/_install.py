@@ -14,6 +14,7 @@ repairs).
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 TARGETS = (
@@ -25,6 +26,7 @@ TARGETS = (
     "langchain",
     "crewai",
     "openai-agents",
+    "openclaw",
 )
 
 _STDIN_HOOK_SHIM = '''#!/usr/bin/env python3
@@ -80,10 +82,33 @@ _LIBRARY_USAGE = {
     ),
 }
 
+# Targets that run on a timer rather than inside the host: nothing to place on
+# disk either, but the guidance is a schedule, not an import.
+_RUNNER_USAGE = {
+    "openclaw": (
+        "OpenClaw keeps its own audit ledger but prunes it (30 days, 100k rows) and\n"
+        "hashes no row. Chain it from a timer — nothing runs on the agent's path:\n\n"
+        "  */5 * * * * python -m waxseal.integrations.openclaw\n\n"
+        "Trail: $OPENCLAW_HOME/audit/trail.jsonl (default ~/.openclaw/audit/trail.jsonl).\n"
+        "Verify anytime: waxseal verify ~/.openclaw/audit/trail.jsonl\n"
+        "Requires the `openclaw` CLI on PATH and a running gateway to answer it."
+    ),
+}
+
 _HOOKS_JSON_EVENTS = {
     "claude-code": ("PreToolUse", "PostToolUse", "UserPromptSubmit"),
     "codex": ("PreToolUse", "PostToolUse", "UserPromptSubmit"),
 }
+
+
+def _note_home_unused(target: str, home: Path | None) -> None:
+    if home is None:
+        return
+    print(
+        f"note: --home has no effect for {target} "
+        "(nothing is installed to a home directory)",
+        file=sys.stderr,
+    )
 
 
 def _default_home(target: str) -> Path:
@@ -116,8 +141,18 @@ def _write(path: Path, content: str, force: bool) -> bool:
 
 def install(target: str, home: Path | None, force: bool) -> int:
     if target in _LIBRARY_USAGE:
+        # These returns run before `home` is ever read, so an explicit --home
+        # was silently ignored — the same unlabelled-no-op class the CLI's
+        # remote --anchors note exists for (CLAUDE.md rule 6).
+        _note_home_unused(target, home)
         print(f"{target} attaches in your own code — nothing to install:\n")
         print(_LIBRARY_USAGE[target])
+        return 0
+
+    if target in _RUNNER_USAGE:
+        _note_home_unused(target, home)
+        print(f"{target} is ingested on a schedule — nothing to install:\n")
+        print(_RUNNER_USAGE[target])
         return 0
 
     home = home if home is not None else _default_home(target)

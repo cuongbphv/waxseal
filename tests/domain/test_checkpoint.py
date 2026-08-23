@@ -111,3 +111,26 @@ class TestVerifyCheckpoint:
         swapped = list(hashes)
         swapped[1], swapped[2] = swapped[2], swapped[1]
         assert verify_checkpoint(swapped, cp) == "anchor_root_mismatch"
+
+
+class TestSinkReceiptLivesInDomain:
+    """SinkReceipt is the AnchorSink Protocol's return envelope, so the
+    ports layer must be able to name it — and ports import domain at most
+    (the layer DAG). Living in adapters made the Protocol's annotation a
+    lie (`str | None` while Rfc3161AnchorSink returns SinkReceipt)."""
+
+    def test_importable_from_domain_checkpoint(self) -> None:
+        from waxseal.domain.checkpoint import SinkReceipt
+
+        r = SinkReceipt("receipt-bytes-as-str")
+        assert r.receipt == "receipt-bytes-as-str"
+        assert r.nonce is None
+
+    def test_ports_annotation_names_it(self) -> None:
+        import typing
+
+        from waxseal.domain.checkpoint import SinkReceipt
+        from waxseal.ports.anchor import AnchorSink
+
+        hints = typing.get_type_hints(AnchorSink.anchor)
+        assert SinkReceipt in typing.get_args(hints["return"])

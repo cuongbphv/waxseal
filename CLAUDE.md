@@ -51,10 +51,15 @@ error**. waxseal makes that class unrepresentable. Everything below serves that 
 ## Architecture (layer DAG, enforced by tests/architecture/)
 
 ```
-domain/    pure logic. NO I/O, NO imports from ports/adapters, stdlib only.
-ports/     typing.Protocol interfaces only. Imports domain at most.
-adapters/  concrete backends (jsonl, sqlite, redactors, atomic). Import domain + ports.
-cli.py     thin shell over adapters. Nothing imports cli.
+domain/        pure logic. NO I/O, NO imports from ports/adapters, stdlib only.
+ports/         typing.Protocol interfaces only. Imports domain at most.
+adapters/      concrete backends (jsonl, sqlite, redactors, atomic). Import domain + ports.
+sources/       ingesters that adapt external evidence into the log. May import domain,
+               ports, adapters, and the public AuditLog facade — never cli, never
+               backend internals (`log._backend` is off-limits; use `log.entries()`).
+integrations/  host-framework glue (hook shims, timer runners). Same import rule as
+               sources/. Process/subprocess I/O lives here or in adapters, never domain.
+cli.py         thin shell over adapters. Nothing imports cli.
 ```
 
 - `domain/` must stay importable with zero side effects and zero filesystem access.
@@ -92,9 +97,9 @@ cli.py     thin shell over adapters. Nothing imports cli.
 
 - **TDD is mandatory**: no production code without a failing test first. Bug fix = failing
   repro test first.
-- **Coverage floor: 90% line coverage over `src/waxseal`** (`fail_under = 90` in
-  pyproject). New modules land WITH their tests in the same commit. The floor may go up,
-  never down (ratchet).
+- **Coverage floor: 100% line coverage over `src/waxseal`** (`fail_under = 100` in
+  pyproject — ratcheted up from 90 on 2026-08-23). New modules land WITH their tests in
+  the same commit. The floor may go up, never down (ratchet).
 - Every behavior class needs a test: happy path, tamper (edit/delete/insert/reorder →
   correct `broken_seq` + reason), unknown fingerprint (→ unverifiable, exit 2, NOT
   tampered), concurrency (N threads, no fork), JSONL↔SQLite parity (same payload → same
@@ -115,8 +120,17 @@ cli.py     thin shell over adapters. Nothing imports cli.
 
 ## CLI contract
 
-`waxseal verify <path>`: exit 0 = intact; exit 1 = broken (prints first break: seq +
-reason); exit 2 = intact-but-unverifiable-entries-present (prints fingerprints); exit 3 =
-trail path does not exist (nothing read, nothing created). `tail`, `inspect`, `head` are
-read-only. `waxseal install <target>` writes host shim files only (hook/plugin stubs in
-the agent framework's home). The CLI never writes to the log.
+`waxseal verify <path|url>`: exit 0 = intact; exit 1 = broken (prints first break: seq +
+reason); exit 2 = intact-but-unverifiable (unknown fingerprints, unverifiable anchor
+bindings, or an unreachable witness — unverifiable, never tampered); exit 3 = trail path
+does not exist (nothing read, nothing created). `tail`, `inspect`, `head`, `report`,
+`checkpoint`, `export-proof`, `verify-proof`, `consistency` are read-only against the
+trail. `receipt` is read-only against the trail and its sidecar; it writes extracted
+receipt/frame files only into the operator-named `--out` directory. Two spec'd
+verifier-state carve-outs, neither of which touches the log: `--pin` writes the pin state
+file (SPEC §13 — exit 2 advances the pin because unverifiable ≠ tampered; exit 1 freezes
+it), and `anchor` appends to the `.anchors` sidecar. Credentials come only from env:
+`WAXSEAL_API_KEY` for the chain server, `WAXSEAL_WITNESS_API_KEY` for witnesses — the
+server's write credential never crosses the administrative-authority boundary to a
+witness. `waxseal install <target>` writes host shim files only (hook/plugin stubs in
+the agent framework's home). The CLI never appends chain entries.

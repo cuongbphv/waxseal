@@ -234,6 +234,16 @@ class TestAnchorCommand:
         path.touch()
         assert main(["anchor", str(path)]) == 1
 
+    def test_a_refused_anchor_says_why(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # A bare non-zero exit with no message is the one outcome an operator
+        # cannot act on, and the reason here is nameable.
+        path = tmp_path / "trail.jsonl"
+        path.touch()
+        main(["anchor", str(path)])
+        assert "empty trail" in capsys.readouterr().err
+
     def test_anchor_does_not_modify_the_trail_itself(self, tmp_path: Path) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)

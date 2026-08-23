@@ -13,6 +13,13 @@ The frame carries no timestamp: it must be exactly reproducible from the
 trail's own entry hashes alone, and the "when" comes from whatever anchors it
 (a block time, an RFC 3161 token, a commit) — baking a clock reading in here
 would make the frame depend on something the trail itself can't reproduce.
+
+A checkpoint may also carry a forward-secure aggregate binding (frame v2). The
+reason it belongs in the FRAME and not merely alongside it in the sidecar
+record: a signing or timestamping sink attests ``sha256(checkpoint_frame(cp))``
+and nothing else, so a binding that lived only in the surrounding JSON would
+be witnessed by no one — which is precisely the class of sink the binding
+exists to reach.
 """
 
 from __future__ import annotations
@@ -27,26 +34,103 @@ from waxseal.domain.hashing import lp
 
 CHECKPOINT_FRAME_PREFIX: Final = b"waxseal-checkpoint-v1\n"
 
+# v2 adds the forward-secure aggregate binding. A separate prefix AND a
+# different field count, so PAE framing makes v1/v2 confusion unrepresentable
+# rather than merely unlikely — no v2 frame can be parsed as a v1 frame over
+# different content.
+CHECKPOINT_FRAME_PREFIX_V2: Final = b"waxseal-checkpoint-v2\n"
+
+
+@dataclass(frozen=True, slots=True)
+class SinkReceipt:
+    """A receipt plus the request material the record must keep beside it.
+
+    An RFC 3161 nonce is checked against the response at anchor time, and
+    without storing it a later verify has nothing to compare — a token swapped
+    in from a DIFFERENT request over the same imprint passed re-verify (the
+    gap SPEC.md section 17 used to state). An external sink that needs a
+    request value re-checked later returns one of these instead of a bare
+    string; ``RecordingAnchorSink`` files the extra field, and every other
+    caller (AuditLog discards the return) is unaffected.
+
+    Lives in domain because it is the ``AnchorSink`` Protocol's return
+    envelope and ports import domain at most (the layer DAG) — in adapters it
+    left the Protocol annotating a return type its own implementations no
+    longer matched.
+    """
+
+    receipt: str
+    nonce: int | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class Checkpoint:
+    """A trail state an external witness can attest.
+
+    ``agg_commit``/``agg_epoch`` are the optional forward-secure aggregate
+    binding: a commitment to the FssAgg accumulator after ``agg_epoch`` rows.
+    Both present or both absent, enforced here so a half binding cannot be
+    constructed at all: the guard used to live in ``checkpoint_frame``, but
+    the anchor sinks serialize a checkpoint straight to JSON without framing
+    it, so half a binding reached the wire as ``"agg_epoch": null`` — a claim
+    committing to nothing, which is the shape of thing this library exists
+    not to publish. The commitment, never the accumulator itself: publishing
+    intermediate accumulator values is exactly what the aggregate scheme
+    forbids, because a truncating attacker who copies one can restore it over
+    a shortened trail.
+
+    A checkpoint with neither field is byte-identical to what this library has
+    always produced, so anchors taken before the binding existed keep
+    verifying.
+    """
+
     seq: int
     entry_hash: str
     root: str
+    agg_commit: str | None = None
+    agg_epoch: int | None = None
+
+    def __post_init__(self) -> None:
+        if (self.agg_commit is None) != (self.agg_epoch is None):
+            raise ValueError(
+                "an aggregate binding needs both agg_commit and agg_epoch, or neither; "
+                f"got agg_commit={self.agg_commit!r}, agg_epoch={self.agg_epoch!r}"
+            )
 
 
 def checkpoint_frame(checkpoint: Checkpoint) -> bytes:
-    """Canonical bytes for a checkpoint: PAE-style prefix + field count + fields."""
+    """Canonical bytes for a checkpoint: PAE-style prefix + field count + fields.
+
+    Emits the v1 frame when there is no aggregate binding and the v2 frame
+    when there is. Half a binding cannot arrive here — ``Checkpoint`` refuses
+    to hold one, so an epoch committing to nothing can never become a frame a
+    witness attests and nobody can check.
+    """
+    if checkpoint.agg_commit is None:
+        return (
+            CHECKPOINT_FRAME_PREFIX
+            + struct.pack(">Q", 3)
+            + lp(str(checkpoint.seq))
+            + lp(checkpoint.entry_hash)
+            + lp(checkpoint.root)
+        )
     return (
-        CHECKPOINT_FRAME_PREFIX
-        + struct.pack(">Q", 3)
+        CHECKPOINT_FRAME_PREFIX_V2
+        + struct.pack(">Q", 5)
         + lp(str(checkpoint.seq))
         + lp(checkpoint.entry_hash)
         + lp(checkpoint.root)
+        + lp(str(checkpoint.agg_epoch))
+        + lp(str(checkpoint.agg_commit))
     )
 
 
-def checkpoint_for(entry_hashes: Sequence[str]) -> Checkpoint:
+def checkpoint_for(
+    entry_hashes: Sequence[str],
+    *,
+    agg_commit: str | None = None,
+    agg_epoch: int | None = None,
+) -> Checkpoint:
     """Checkpoint over ``entry_hashes`` (write order, index 0 is seq 0).
 
     Raises ValueError on an empty trail: there is no tip to pin, and silently
@@ -59,6 +143,8 @@ def checkpoint_for(entry_hashes: Sequence[str]) -> Checkpoint:
         seq=len(entry_hashes) - 1,
         entry_hash=entry_hashes[-1],
         root=batch_root(entry_hashes),
+        agg_commit=agg_commit,
+        agg_epoch=agg_epoch,
     )
 
 

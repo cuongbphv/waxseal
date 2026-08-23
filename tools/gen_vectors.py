@@ -67,7 +67,14 @@ def main() -> None:
         "entries": entries,
     }
     out = Path(__file__).parent.parent / "tests" / "vectors" / "vectors.json"
-    out.write_text(json.dumps(vectors, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # newline="\n" is not cosmetic: vectors.json is write-once. Letting Windows
+    # translate to CRLF makes a regeneration look like an edit to a frozen file,
+    # which is the one signal that must only ever mean "STOP".
+    out.write_text(
+        json.dumps(vectors, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     print(f"wrote {out} (fingerprint {fp})")
 
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import struct
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
@@ -42,6 +43,14 @@ SEAL_FRAME_PREFIX: Final = b"waxseal-seal-v1\n"
 FS_HMAC_AGG_SCHEME: Final = "fs-hmac-agg-sha256-v1"
 AGG_FRAME_PREFIX: Final = b"waxseal-agg-v1\n"
 AGG_GENESIS: Final = "0" * 64
+
+# What an external witness gets to see. The accumulator itself must never be
+# published — the comment above says why persisting an intermediate mu reopens
+# the truncation hole, and an anchor stream is a persisted record like any
+# other. A commitment carries the same evidentiary weight for anyone holding
+# A_0 (they can recompute mu and check it) while telling an attacker who holds
+# only the current key nothing they can fold.
+AGG_COMMIT_FRAME_PREFIX: Final = b"waxseal-aggcommit-v1\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,4 +211,83 @@ def verify_aggregate(
         key = evolve_key(key)
     if running != agg:
         return "aggregate_mismatch"
+    return None
+
+
+def aggregate_commit(epoch: int, agg: str) -> str:
+    """A publishable commitment to the accumulator ``agg`` at ``epoch``.
+
+    ``sha256`` over a PAE-style frame binding both values, so a commitment
+    cannot be replayed against a different epoch. Hiding follows from ``agg``
+    being a 256-bit HMAC output that nobody without A_0 can predict — the
+    commitment reveals no value an attacker could fold, which is why this and
+    not the accumulator is what goes into an anchor.
+
+    Raises ValueError if ``agg`` is not hex. This is only ever called on a
+    value the library produced, so bad input here is a bug rather than the
+    attacker-supplied case the ``verify_*`` functions are hardened against.
+    """
+    bytes.fromhex(agg)
+    frame = AGG_COMMIT_FRAME_PREFIX + struct.pack(">Q", 2) + lp(str(epoch)) + lp(agg)
+    return hashlib.sha256(frame).hexdigest()
+
+
+def verify_anchored_aggregate(
+    attestations: Iterable[Attestation],
+    initial_key: bytes,
+    *,
+    agg_start: int,
+    anchored_epoch: int,
+    anchored_commit: str,
+) -> str | None:
+    """Check the trail against an aggregate commitment held by a witness.
+
+    This is the check ``verify_aggregate`` cannot make. That one compares the
+    local `.sealagg` against the local attestations — both under the same
+    authority, so an attacker who truncates the trail and restores an older
+    accumulator satisfies it. Here the epoch and commitment come from outside
+    (an anchor record a third party attested), so the same attacker has to
+    have rewritten something they do not control.
+
+    Fails closed and never raises; the attestation list is attacker-writable
+    by threat model. Returns ``None`` when it verifies, else one of:
+
+    - ``malformed_anchored_aggregate``: ``agg_start`` outside
+      ``[0, anchored_epoch]``, a commitment that is not hex, or a row whose
+      value the fold cannot run over.
+    - ``anchored_aggregate_epoch_mismatch``: the trail no longer holds as many
+      rows as were anchored. THE truncation case — replaying an old
+      accumulator cannot manufacture rows that are gone.
+    - ``anchored_aggregate_mismatch``: the fold over the anchored prefix does
+      not reproduce the anchored commitment (a rewritten row inside it, a
+      forged commitment, or the wrong key).
+
+    Unlike ``verify_aggregate``, aggregate-scheme rows PAST ``anchored_epoch``
+    are not a discrepancy: an anchor describes a past state, and a trail is
+    supposed to have grown since.
+    """
+    atts = list(attestations)
+    if not 0 <= agg_start <= anchored_epoch:
+        return "malformed_anchored_aggregate"
+    try:
+        bytes.fromhex(anchored_commit)
+    except ValueError:
+        return "malformed_anchored_aggregate"
+    if anchored_epoch > len(atts):
+        return "anchored_aggregate_epoch_mismatch"
+
+    key = initial_key
+    running = AGG_GENESIS
+    for position, att in enumerate(atts):
+        if position >= anchored_epoch:
+            break
+        if position >= agg_start and att.scheme == FS_HMAC_AGG_SCHEME:
+            try:
+                running = aggregate_step(key, running, att.value)
+            except (ValueError, UnicodeEncodeError):
+                return "malformed_anchored_aggregate"
+        key = evolve_key(key)
+
+    if not hmac.compare_digest(aggregate_commit(anchored_epoch, running), anchored_commit):
+        return "anchored_aggregate_mismatch"
     return None

@@ -45,7 +45,8 @@ waxseal 为你的 Agent 提供密码学审计轨迹：每个动作都被追加�
 | 字节级 SPEC（计划在 v1 冻结）+ 黄金测试向量 → 可移植到 Go/Rust/TS | ✅ | ❌ 格式 = 代码怎么跑就怎么算 | ❌ |
 | 零运行时依赖（S3/Postgres 客户端由调用方注入，永不 import） | ✅ | 常常拖入整套加密/序列化栈 | ✅ |
 | 先脱敏后哈希（密钥永不落盘，哈希承诺的是脱敏后的字节） | ✅ | 偶尔 | ❌ |
-| 内置外部锚定，手动（`waxseal head`）或自动（`anchor_every=N`） | ✅ | ❌ | ❌ |
+| 内置外部锚定：RFC 3161 TSA、OpenTimestamps、witness，或自写 sink（`anchor_every=N`） | ✅ | ❌ | ❌ |
+| 固定链头（TOFU）+ witness 交叉核对，用于对抗不诚实的 chain server | ✅ | ❌ | ❌ |
 | 前向安全封印（密钥演进 HMAC，纯标准库）+ 注入式 Ed25519 签名 | ✅ | ❌ | ❌ |
 | FssAgg 聚合标签，即便密钥文件泄露也能堵住截断漏洞 | ✅ | ❌ | ❌ |
 | 远程 HTTP 后端与本地存储完全对等，信任模型写得明明白白 | ✅ | 少见，信任模型不写明 | ❌ |
@@ -73,7 +74,7 @@ flowchart LR
     G["创世<br/>prev_hash = 000…0"] --> E0["entry 0<br/>entry_hash₀"]
     E0 -- "prev_hash = entry_hash₀" --> E1["entry 1<br/>entry_hash₁"]
     E1 -- "prev_hash = entry_hash₁" --> E2["entry 2<br/>entry_hash₂"]
-    E2 -. "waxseal head → 外部锚定<br/>(OpenTimestamps / RFC 3161 / git)" .-> X["外部<br/>信任域"]
+    E2 -. "waxseal anchor --tsa-url / --ots-calendar / --witness" .-> X["外部<br/>信任域"]
 ```
 
 **验证流程 —— 每种结果都有独立退出码，未知永远不等于篡改：**
@@ -194,9 +195,11 @@ log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 
 **信任模型，说清楚：** 服务器是*受信任的写入者*，不是拜占庭容错节点。
 `verify_chain` 仍然完全在客户端运行，能抓住损坏、截断、重排序 —— 但一个不诚实
-的服务器可以给出一份从头到尾一致伪造的重写版本，客户端单独检查是抓不出来的。
-缓解方式和本文档一直给本地有写权限的攻击者开的方子一样：独立锚定链头，最好
-锚在与 chain server 不同的另一个服务上（见下文的锚定小节）。
+的服务器可以给出一份从头到尾一致伪造的重写版本，仅凭 `verify_chain` 抓不出来。
+有三件事能收窄它：把链头独立锚定到与 chain server 不同的另一个服务上；保留一份
+`--pin`，以便抓到对你此前已确认历史的改写；再加一个位于不同信任域的 `--witness`，
+以便抓到 split-view（见下文的锚定与「经证明的时间」小节）。它们都不会让服务器
+变得可信，只是把问题挪成：谁掌握 pin、谁掌握 witness、谁掌握 sink。
 
 ## 元数据源
 
@@ -208,6 +211,66 @@ from waxseal.sources.files import record_file, current_matches_last
 record_file(log, "SPEC.md", doc_id="spec")          # 把内容哈希快照进链
 current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None（从未记录）
 ```
+
+## AI 决策日志
+
+`DecisionRecord` 是面向"做决策或辅助决策"的 AI 系统的决策型 payload：哪个系统、
+哪个模型版本、决定了什么、依据是什么，以及是否有人参与。输入在脱敏之后以哈希
+形式承诺，而不是被存下来。
+
+```python
+from waxseal import AuditLog, DecisionRecord, ModelRef, HumanOversight
+from waxseal.adapters.redactors import RegexRedactor
+from waxseal.sources.decisions import commit_input, record_decision
+
+redactor = RegexRedactor()
+log = AuditLog.open("decisions.jsonl", redactor=redactor)
+
+record_decision(log, DecisionRecord(
+    decision_id="DEC-1001",
+    decision_type="transaction_approval",
+    system_id="screening-agent",
+    model=ModelRef(name="my-model", version="2026.08.1"),
+    input_commitment=commit_input(model_input, redactor=redactor),  # 先脱敏，再哈希
+    outcome="approve",
+    rationale="低于阈值，且为已有往来的交易对手",
+    human_oversight=HumanOversight(mode="automated"),  # None = 未记录，不等于 automated
+))
+```
+
+用 `iter_decisions` 读回决策——它按链序遍历 trail，逐条 yield `(entry, record)`。
+字节已无法解析为决策的行仍会被 yield（`record=None`），而不是被悄悄跳过；
+至于该行是否被*篡改*，那是 `verify` 的问题，会单独作答：
+
+```python
+from waxseal.sources.decisions import iter_decisions
+
+for entry, record in iter_decisions(log, decision_type="transaction_approval"):
+    if record is None:
+        print(f"seq {entry.header.seq}: 无法解析 —— 请运行 `waxseal verify`")
+    else:
+        print(f"seq {entry.header.seq}: {record.decision_id} → {record.outcome}")
+```
+
+审计方读一份报告，并且不需要拿到整个日志就能核验其中某一条决策：
+
+```bash
+waxseal report decisions.jsonl              # Markdown；--json 供 SIEM/GRC 使用
+waxseal export-proof decisions.jsonl 3 > proof.json
+waxseal verify-proof proof.json             # 离线核验；不需要 trail
+```
+
+一个 proof bundle 就是一条 entry 加上它的 Merkle 路径，因此回答关于某一个主体的问题，
+不会泄露 trail 中其他所有决策。报告会把**没有执行**的检查打印为 *not checked*，
+绝不会打印成通过。
+
+- [examples/banking-poc/](examples/banking-poc/README.md) —— 可运行的端到端 demo，
+  带数据流动画演示和八个篡改场景，每个场景都会断言自己的退出码
+- [docs/architecture/banking-deployment.md](docs/architecture/banking-deployment.md) ——
+  参考部署：四个信任域、职责分离、留存与容灾
+- [docs/compliance/mapping.md](docs/compliance/mapping.md) —— 对照 EU AI Act、
+  NIST AI RMF、DORA RTS 等框架，这一层能证明什么，**并附诚实的差距分析**。
+  它是证据层：它支撑记录保存类义务，但不替你履行其中任何一项
 
 ## 锚定：checkpoint 与 consistency proof
 
@@ -234,6 +297,39 @@ entry 被重写，但没有破坏 `prev_hash` 链）。`domain.anchoring` 还提
 §2.1.4 的 `consistency_proof`/`verify_consistency` —— 证明后来的链头是早先链头
 的延伸，而无需重放整个日志 —— 以及 RFC 6962 的
 `membership_proof`/`verify_membership`，用于单条 entry 的 inclusion proof。
+
+## 经证明的时间、pin 与 witness
+
+一个 anchor 的价值，取决于它所依附的权威。下面三条命令把 checkpoint 移出写入者
+够得到的范围：
+
+```bash
+waxseal anchor trail.jsonl --tsa-url https://freetsa.org/tsr    # RFC 3161 timestamp
+waxseal anchor trail.jsonl --ots-calendar https://a.pool.opentimestamps.org
+waxseal anchor trail.jsonl --witness https://witness.example/anchor
+waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https://witness.example/anchor
+```
+
+- **RFC 3161** 让 `ts` 从"自己声称"变成"有外部作证"。waxseal 只对回执做*结构性*检查
+  —— status、message imprint、nonce、digest 算法 —— 并且在它打印的每一行里都写明这一点。
+  它**不**验证 CMS/X.509 签名；那一步被委托给 `openssl ts -verify`，具体做法见文档。
+  它读不懂的回执算*不可验证*（exit 2）；只有为不同字节作证的回执才算*断链*（exit 1）。
+- **OpenTimestamps** 存的是一份*待定（pending）*的比特币证明，不透明是有意为之。
+  日后用 `ots upgrade` / `ots verify` 把它补完。
+- **`--pin`** 是 trail 的 `known_hosts`：验证方保存一份自己算出来的 checkpoint，
+  并拒绝与之矛盾的历史。首次使用会被明确标注，pin 只在一次干净的运行之后才前进，
+  已损坏的 pin 绝不会被悄悄重新 pin。
+- **`--witness`** 是 pin 无法充当的外部通道。pin 能抓住一台为你重写历史的服务器；
+  只有位于*不同*信任域的 witness，才能抓住一台向两个客户端出示两份不同历史的服务器。
+  连不上的 witness 会打印 `unreachable — NOT checked`，并以退出码 2（不可验证）结束：
+  没有执行的检查既不是通过，也不是篡改。
+
+- [docs/anchoring-external-time.md](docs/anchoring-external-time.md) —— `openssl ts`
+  委托验证的具体做法、OTS 的升级路径，以及如何为另一条链（EVM、Hyperledger、私有链）
+  编写 `AnchorSink`
+- [docs/security/threat-model.md](docs/security/threat-model.md) —— 为什么纯软件做不到
+  tamper-*proof*、面对拜占庭式的链服务器客户端能检测到什么、又可证明地检测不到什么，
+  以及如何在不夸大的前提下引用 waxseal 的输出
 
 ## 签名与前向安全封印
 
@@ -303,7 +399,7 @@ attestation 存放在 `.attest` 边车文件中（不改动任何后端 schema�
 
 ## 集成
 
-为七个 agent 框架与编码工具提供审计 hook。每个集成都针对目标当前的
+为七个 agent 框架与编码工具提供审计 hook，另有一个面向自带账本的宿主（OpenClaw）的导出器。每个集成都针对目标当前的
 hook 契约做过验证（版本记录在各自 README 中），在执行*之前*记录 dispatch，在哈希前
 完成密钥脱敏，超大输出做可见截断，并且**绝不阻塞或否决宿主的工作** —— 任何失败都
 退化为带标注、有计数的 dropped write。
@@ -312,7 +408,7 @@ hook 契约做过验证（版本记录在各自 README 中），在执行*之前
 
 ```bash
 pip install waxseal
-waxseal install hermes        # 或 claude-code / codex / cursor / hermes-gateway
+waxseal install hermes        # 或 claude-code / codex / cursor / hermes-gateway / openclaw
 ```
 
 `install` 会把轻量 shim 写入宿主的配置目录（shim 只 import
@@ -330,6 +426,7 @@ install 步骤 —— 直接 import，例如
 | CrewAI | 事件监听器（`crewai.events`） | [integrations/crewai/](integrations/crewai/) |
 | OpenAI Agents SDK | `RunHooks` | [integrations/openai-agents/](integrations/openai-agents/) |
 | hermes-agent | plugin + gateway hook | [integrations/hermes/](integrations/hermes/) |
+| OpenClaw | 审计账本导出器（`openclaw audit --json`，非 hook） | [integrations/openclaw/](integrations/openclaw/) |
 
 对编码工具类集成的范围说明：这些 hook 给你一份并行的、篡改可检测（tamper-evident）的、**不含密钥**的
 行动记录。它们不会（也无法）改写工具自身的 transcript 文件 —— 如果密钥已经落入
@@ -342,14 +439,21 @@ transcript，请轮换密钥；waxseal 的 trail 才是你可以保留、分享�
   单独报告此事；`None` 表示*未测量*——永远不与 `0` 混同。
 - 并发写入者无法让链分叉（见后端表格）；对 `RemoteBackend` 而言这是服务端的
   compare-and-swap，而不是客户端持有的锁。
-- waxseal 提供的是篡改可检测（tamper-evident），而非防止篡改（tamper-proof）：
-  拥有写权限的攻击者可以重写链的整个后缀。把链头锚定到外部信任域 —— 手动
-  （`waxseal head` → OpenTimestamps、RFC 3161 时间戳、推送到远端的 git 提交）或
-  自动（`anchor_every=N` 配合 `FileAnchorSink`/`HTTPAnchorSink`）—— 即可约束这种
-  攻击。
-- `RemoteBackend` 的目标是*受信任的写入者*，不是拜占庭容错节点：不诚实的
-  chain server 可以给出一份从头到尾一致伪造的重写版本，客户端单独检查抓不出来。
-  请把 anchor sink 指向 chain server 之外的另一个服务。
+- waxseal 提供的是篡改可检测（tamper-evident），而非防止篡改（tamper-proof），
+  任何版本都不会改变这一点：拥有写权限的攻击者可以重写链的整个后缀。纯软件无法
+  阻止它 —— 本地的每一个字节都可被改写，软件唯一能做的，是让这种改写在与一份
+  攻击者够不到的副本比对时*显现出来*。把链头锚定到外部信任域：
+  `waxseal anchor --tsa-url`（RFC 3161）、`--ots-calendar`（OpenTimestamps）、
+  `--witness`，或 `anchor_every=N` 配合自写的 sink。这只在 sink 位于*另一个管理
+  权限*之下时才真正约束攻击；与轨迹同盘的 sidecar 什么也约束不了。
+- `RemoteBackend` 的目标是*受信任的写入者*，不是拜占庭容错节点 —— 但有两项客户端
+  检查能收窄它。`--pin` 能抓到重写你此前已确认过的那段历史的服务器
+  （`pin_mismatch`），以及返回更短历史的服务器（`pin_beyond_head`）。`--witness`
+  能抓到向两个客户端展示两份各自自洽历史的服务器 —— 这是单个客户端被证明无法
+  独自察觉的情形（fork consistency，Mazières 与 Shasha）。仍然够不到的是：尚无
+  pin、也无 witness 的首次连接客户端；与服务器串通的 witness；以及整条网络路径
+  都被攻击者掌握的客户端。请把 pin、witness 和 anchor sink 都指向 chain server
+  之外的地方 —— 这一权限分离就是全部的安全论据。
 
 ## 规范与设计
 
