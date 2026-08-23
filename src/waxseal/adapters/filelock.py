@@ -20,7 +20,7 @@ def file_lock(target: Path) -> Iterator[None]:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
-        if sys.platform == "win32":  # pragma: no cover - exercised on Windows CI
+        if sys.platform == "win32":  # pragma: no cover - exercised on the windows-latest CI job
             import msvcrt
 
             msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
@@ -29,7 +29,7 @@ def file_lock(target: Path) -> Iterator[None]:
             finally:
                 os.lseek(fd, 0, os.SEEK_SET)
                 msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-        else:
+        else:  # pragma: no cover - exercised on the ubuntu-latest CI job
             import fcntl
 
             fcntl.flock(fd, fcntl.LOCK_EX)

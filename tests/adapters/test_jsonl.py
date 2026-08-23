@@ -75,6 +75,16 @@ class TestRoundTrip:
     def test_missing_file_yields_nothing(self, tmp_path: Path) -> None:
         assert list(JSONLBackend(tmp_path / "absent.jsonl").entries()) == []
 
+    def test_a_blank_line_in_the_trail_is_skipped_not_parsed(self, tmp_path: Path) -> None:
+        # An editor that leaves a trailing newline, or a partial flush, must
+        # not turn into a JSON error mid-audit — nor into a phantom entry.
+        path = tmp_path / "trail.jsonl"
+        backend = JSONLBackend(path)
+        backend.append(lambda seq, prev: build_entry(seq, prev, b"a"))
+        body = path.read_text(encoding="utf-8")
+        path.write_text(f"\n{body}\n\n", encoding="utf-8")
+        assert len(list(backend.entries())) == 1
+
 
 class TestTrailPermissions:
     def test_trail_file_is_created_owner_only(self, tmp_path) -> None:

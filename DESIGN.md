@@ -85,23 +85,25 @@ prevent split-view attacks", c2sp.org/tlog-cosignature).
 
 Minimal-infrastructure ladder for waxseal users, lowest cost first:
 
-1. `waxseal head trail.jsonl` prints `{"seq": N, "entry_hash": "..."}`. Anchor it
-   with **OpenTimestamps** (free, no registration, verifiable offline against Bitcoin
-   headers: "A timestamp proves that some data existed prior to some point in time" —
-   opentimestamps.org), or an **RFC 3161** TSA ("assertions of proof that a datum
-   existed before a particular time"), or simply commit it to a pushed git repo /
-   email it to a third party.
+1. `waxseal anchor trail.jsonl --ots-calendar <url>` publishes to **OpenTimestamps**
+   (free, no registration, verifiable offline against Bitcoin headers: "A timestamp
+   proves that some data existed prior to some point in time" — opentimestamps.org);
+   `--tsa-url <url>` publishes to an **RFC 3161** TSA ("assertions of proof that a
+   datum existed before a particular time"). `waxseal head` still prints
+   `{"seq": N, "entry_hash": "..."}` for anyone who would rather commit it to a pushed
+   git repo or email it to a third party.
 2. Diversify trust roots: any one anchor bounds a suffix rewrite to the window since
    the last anchor; multiple independent anchors force the attacker to compromise all
-   of them.
-3. Prevention-grade guarantees (witnessed logs, Sigsum-style quorums) are real
-   infrastructure and out of scope for an embedded library.
+   of them. `--witness <url>` (repeatable) is the same idea aimed at split-view rather
+   than rewrite.
+3. Prevention-grade guarantees (Sigsum-style quorums, a witness network operated as
+   infrastructure) remain out of scope for an embedded library. What 0.1.3 adds is the
+   client half — a pinned head and witness cross-check — not the network.
 
 The residual risk to state plainly: entries written since the last anchor are
 rewritable by a write-capable attacker. Anchor frequency is the knob.
 
-**Rung 1 of that ladder is now automatable rather than a manual `waxseal head`
-copy-paste.** `AuditLog(anchor_sink=..., anchor_every=N)` publishes a `Checkpoint`
+**Rung 1 is also automatable, not just a one-shot command.** `AuditLog(anchor_sink=..., anchor_every=N)` publishes a `Checkpoint`
 (a batch root, not just the bare tip) to an `AnchorSink` every `N` entries,
 best-effort and outside the append critical section — a failed anchor never blocks
 a write, it only counts against `anchor_failures` (SPEC §9). `FileAnchorSink` is the
@@ -180,7 +182,7 @@ Two facts from the literature shape waxseal's position:
 **Decision for v1: no key evolution.** It demands key management, secure zeroization,
 and often a trusted verifier — all contradicting the zero-dependency, embeddable goal,
 and its truncation hole still needs anchoring anyway. waxseal covers the same
-practical threats with `waxseal head` anchoring (rewrite AND truncation bounded by
+practical threats with checkpoint anchoring (rewrite AND truncation bounded by
 anchor frequency, at near-zero cost). The fingerprint descriptor gives a keyed scheme
 (HMAC per epoch, FssAgg-style aggregate) a clean home as a NEW fingerprint — a later
 version added both (`fs-hmac-sha256-v1`, then the FssAgg aggregate below) as opt-in
@@ -205,7 +207,7 @@ the signer is injected, `algorithm` names the scheme.
 CT/RFC 9162 signs tree heads, never individual entries; per-entry signatures alone
 give no truncation protection (Ma-Tsudik: "there is no single authentication tag
 protecting the integrity of the entire log file"). waxseal's split: cheap per-entry
-forward-secure HMAC seals for fine-grained attribution, plus `waxseal head` external
+forward-secure HMAC seals for fine-grained attribution, plus `waxseal anchor` external
 anchoring as the O(1) checkpoint. Key IDs follow the DSSE rule — "MUST NOT be used
 for security decisions; it may only be used to narrow the selection of possible keys".
 
@@ -263,8 +265,10 @@ memory copies are best-effort, stated plainly.
 
 ## 9. The integration observer contract
 
-Every integration under `integrations/` (Claude Code, Codex CLI, Cursor, LangChain,
-CrewAI, OpenAI Agents SDK, hermes-agent) implements the same observer contract,
+Every hook/callback integration under `integrations/` (Claude Code, Codex CLI, Cursor,
+LangChain, CrewAI, OpenAI Agents SDK, hermes-agent) implements the same observer
+contract — the OpenClaw integration is an audit-ledger exporter with no hook, so
+nothing below applies to it —
 derived from how each host actually treats hook failures — verified per host and
 pinned to a version in each integration's README:
 
@@ -325,13 +329,17 @@ racers at once.
 peer.** `verify_chain` runs entirely client-side against whatever the server
 returns, so it still catches corruption, truncation, and reordering exactly as it
 would for a local file — but a server that is itself dishonest can serve a
-consistently-forged full rewrite that no client-side check can distinguish from
+consistently-forged full rewrite that `verify_chain` alone cannot distinguish from
 the truth, the same whole-suffix-rewrite gap section 3 describes for a local
 attacker with write access. This is not a weaker promise made quietly: REMOTE.md
 states it as the wire contract's first normative fact, and the mitigation is the
 one this document already recommends — anchor the head independently
 (`checkpoint_for` + an `AnchorSink` pointed at a service *other than* the chain
-server, e.g. `HTTPAnchorSink` against a separate host). A chain server and its
+server, e.g. `HTTPAnchorSink` against a separate host). A pinned head and a
+witness in a separate trust domain narrow it further: the first gives the client
+a memory the server does not hold, the second an outside view that a split-view
+attack has to fool as well. Neither promotes the server to untrusted-but-checked;
+they relocate the trust to whoever holds the pin and operates the witnesses. A chain server and its
 anchor witness colluding is out of scope for the same reason a compromised
 machine and its own attestation keyfile colluding is (section 6): a witness that
 shares the attacker's trust boundary was never a witness.

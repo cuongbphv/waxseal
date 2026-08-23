@@ -4,7 +4,7 @@ Appends every tool call (dispatch, result, error) and agent decision to a
 tamper-evident hash chain. Attach it at invoke time so it inherits down to
 tool runs:
 
-    from handler import WaxsealCallbackHandler
+    from waxseal.integrations.langchain import WaxsealCallbackHandler
     agent.invoke(input, config={"callbacks": [WaxsealCallbackHandler(trail)]})
 
 Contract verified against langchain-core 1.6.0 (installed source, 2026-08-21):

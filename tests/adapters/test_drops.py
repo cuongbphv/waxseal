@@ -139,3 +139,33 @@ class TestNeverRaises:
             recorder.record(reason="ValueError")  # must not raise
         finally:
             trail_dir.chmod(0o700)
+
+
+class TestTheRecorderNeverRaises:
+    def test_a_failure_after_the_descriptor_is_open_still_closes_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # ports/drops.py's contract is "never raises", and record() is called
+        # from an except-block that is already handling a dropped write. A
+        # leaked descriptor here would also be invisible: the caller is not
+        # looking at this code path at all.
+        import os as os_module
+
+        recorder = FileDropRecorder(tmp_path / "trail.jsonl")
+
+        def explode(*args: object, **kwargs: object) -> object:
+            raise OSError("no file object for you")
+
+        monkeypatch.setattr(os_module, "fdopen", explode)
+        recorder.record(reason="ValueError")  # must not raise
+
+    def test_an_unserializable_field_is_swallowed_like_a_failed_write(
+        self, tmp_path: Path
+    ) -> None:
+        # Deliberately broader than OSError: a broken now_fn must not turn an
+        # already-handled drop into an unhandled exception.
+        recorder = FileDropRecorder(
+            tmp_path / "trail.jsonl", now_fn=lambda: (_ for _ in ()).throw(RuntimeError("clock"))
+        )
+        recorder.record(reason="ValueError")
+        assert recorder.count() == 0

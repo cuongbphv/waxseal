@@ -120,6 +120,34 @@ class TestPublicApiFrozen:
             "checkpoint_frame",
             "consistency_proof",
             "verify_consistency",
+            # Verifiable AI decision log. Two groups, added under the rule
+            # the existing set already follows: domain schema types and
+            # verification primitives are public; source helpers are not.
+            #
+            # The decision schema (DecisionRecord/ModelRef/HumanOversight) is
+            # the type an integrating system writes against, so it belongs
+            # with Entry/EntryHeader rather than behind a submodule import.
+            #
+            # Proof bundles join membership_proof/verify_membership as
+            # verification primitives: they let an auditor check one exported
+            # decision offline, against an anchored root, without receiving
+            # the rest of the trail — which is the only way to answer a
+            # question about one customer without disclosing every other one.
+            #
+            # Deliberately NOT here: record_decision/iter_decisions/
+            # commit_input (source helpers, matching sources.files, whose
+            # record_file is likewise not exported) and build_report/
+            # AuditReport (a renderer for the CLI, not a primitive). Widening
+            # a frozen surface later is easy; narrowing it is a breaking
+            # change, so these stay behind their modules until something
+            # actually needs them here.
+            "DecisionRecord",
+            "HumanOversight",
+            "ModelRef",
+            "BundleResult",
+            "ProofBundle",
+            "build_proof_bundle",
+            "verify_proof_bundle",
         }
 
 
@@ -145,3 +173,79 @@ class TestNoInternalNames:
                 if re.search(rf"(?<![a-z0-9]){token}(?![a-z0-9])", text):
                     offenders.append(f"{path.relative_to(REPO)}: {token!r}")
         assert offenders == []
+
+
+class TestVersionIsStatedOnce:
+    def test_pyproject_and_dunder_version_and_changelog_agree(self) -> None:
+        # Three hand-edited copies of one number. A release that ships
+        # __version__ = "0.1.2" inside a 0.1.3 wheel makes every bug report
+        # name the wrong build.
+        declared = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["version"]
+        import waxseal
+
+        assert waxseal.__version__ == declared
+        changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+        assert f"## [{declared}]" in changelog
+
+
+class TestDocumentationLinks:
+    """A README link to a file that never ships is a dead link for everyone
+    but the author.
+
+    `docs/` is ignored wholesale with per-directory exceptions, so adding a
+    doc and linking it are two steps and the second one looks finished on the
+    author's disk. That is how `docs/security/threat-model.md` was linked from
+    three READMEs while still being gitignored.
+
+    Falsifiability receipt: deleting the `!docs/security/` line from
+    `.gitignore` fails `test_no_linked_path_is_gitignored` with
+    `docs/security/threat-model{,.vi}.md` in the diff.
+    """
+
+    def linked_repo_paths(self, doc: Path) -> list[str]:
+        text = doc.read_text(encoding="utf-8")
+        return [
+            target
+            for target in re.findall(r"\]\(([^)\s]+)\)", text)
+            if not target.startswith(("http://", "https://", "#", "mailto:"))
+        ]
+
+    def docs(self) -> list[Path]:
+        return sorted(p for p in REPO.glob("*.md") if p.name != "CHANGELOG.md")
+
+    def test_every_linked_path_exists(self) -> None:
+        missing = [
+            f"{doc.name} -> {target}"
+            for doc in self.docs()
+            for target in self.linked_repo_paths(doc)
+            if not (REPO / target.split("#")[0]).exists()
+        ]
+        assert missing == []
+
+    def test_no_linked_path_is_gitignored(self) -> None:
+        import shutil
+        import subprocess
+
+        git = shutil.which("git")
+        if git is None:  # pragma: no cover - git is present in CI and dev
+            return
+        # Trailing slash stripped and paths passed as argv, not stdin: git
+        # reports a directory queried as "dir/" against an empty pattern, and
+        # text-mode stdin on Windows turns each "\n" into "\r\n", which git
+        # then reads as part of the filename. Both make a clean tree look dirty.
+        targets = sorted(
+            {
+                target.split("#")[0].rstrip("/")
+                for doc in self.docs()
+                for target in self.linked_repo_paths(doc)
+            }
+        )
+        # check-ignore exits 0 when something matched, 1 when nothing is
+        # ignored; anything else (128: not a repo) means we learned nothing
+        # and must not report that as a pass.
+        proc = subprocess.run(
+            [git, "check-ignore", *targets], capture_output=True, text=True, cwd=REPO
+        )
+        if proc.returncode not in (0, 1):  # pragma: no cover - not a git checkout
+            return
+        assert proc.stdout.split() == []

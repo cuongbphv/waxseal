@@ -11,6 +11,13 @@ from waxseal.domain.anchoring import (
     verify_membership,
 )
 from waxseal.domain.checkpoint import Checkpoint, checkpoint_for, checkpoint_frame
+from waxseal.domain.decision import DecisionRecord, HumanOversight, ModelRef
+from waxseal.domain.export import (
+    BundleResult,
+    ProofBundle,
+    build_proof_bundle,
+    verify_proof_bundle,
+)
 from waxseal.domain.fingerprint import fingerprint_for, fingerprint_v1
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
 from waxseal.domain.registry import VersionRegistry
@@ -20,12 +27,18 @@ from waxseal.log import AuditLog
 __all__ = [
     "GENESIS_PREV_HASH",
     "AuditLog",
+    "BundleResult",
     "Checkpoint",
+    "DecisionRecord",
     "Entry",
     "EntryHeader",
+    "HumanOversight",
+    "ModelRef",
+    "ProofBundle",
     "VerifyResult",
     "VersionRegistry",
     "batch_root",
+    "build_proof_bundle",
     "checkpoint_for",
     "checkpoint_frame",
     "consistency_proof",
@@ -35,6 +48,7 @@ __all__ = [
     "verify_chain",
     "verify_consistency",
     "verify_membership",
+    "verify_proof_bundle",
 ]
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"

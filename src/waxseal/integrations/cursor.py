@@ -3,8 +3,9 @@
 
 Appends every hook event (shell commands, MCP tool calls, file edits,
 prompts, lifecycle) to a tamper-evident hash chain. Configure it in
-.cursor/hooks.json or ~/.cursor/hooks.json (see README.md next to this
-file). Requires `pip install waxseal` in the interpreter this runs under.
+.cursor/hooks.json or ~/.cursor/hooks.json (see the repo's
+integrations/cursor/README.md). Requires `pip install waxseal` in the
+interpreter this runs under.
 
 Contract verified against https://cursor.com/docs/hooks (2026-08-21):
 

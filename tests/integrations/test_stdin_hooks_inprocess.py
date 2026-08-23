@@ -67,6 +67,23 @@ def test_malformed_stdin_exits_zero_with_labelled_drop(
     assert "dropped" in err
 
 
+def test_json_that_is_not_an_object_is_reported_unreadable_not_crashed(
+    monkeypatch, hook, tmp_path: Path, capsys
+) -> None:
+    # Valid JSON of the wrong shape: a list parses, and then every
+    # event.get() in build_payload would raise. Unrecognized input is
+    # opaque, never a crash and never an exit code the host reads as a veto.
+    trail = tmp_path / "trail.jsonl"
+    assert run_main(monkeypatch, hook, "[1, 2]", trail) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unreadable hook event" in captured.err
+    assert "dropped" in captured.err
+    # Nothing was read into the chain, so nothing may be written to it —
+    # a placeholder entry would be an invented record of an event.
+    assert not trail.exists()
+
+
 def test_unopenable_trail_exits_zero_with_labelled_drop(
     monkeypatch, hook, tmp_path: Path, capsys
 ) -> None:
@@ -101,3 +118,30 @@ def test_open_failure_still_leaves_a_drop_record(
     drops = trail.parent / (trail.name + ".drops")
     assert drops.exists()
     assert len(drops.read_text().splitlines()) == 1
+
+
+class TestToolResultFieldNaming:
+    """One action must not split across two field names because the host
+    renamed the field between releases — a reviewer filtering the trail on
+    the spelling they know would silently miss half the results."""
+
+    def test_claude_code_folds_the_legacy_spelling_into_tool_output(self) -> None:
+        claude_code = importlib.import_module("waxseal.integrations.claude_code")
+        documented = claude_code.build_payload(
+            {"hook_event_name": "PostToolUse", "tool_output": "total 0\n"}
+        )
+        legacy = claude_code.build_payload(
+            {"hook_event_name": "PostToolUse", "tool_response": {"stdout": "ok"}}
+        )
+        assert documented["tool_output"] == "total 0\n"
+        assert legacy["tool_output"] == {"stdout": "ok"}
+        assert "tool_response" not in legacy
+
+    def test_codex_records_its_own_tool_response_field(self) -> None:
+        # Codex only ever sent tool_response (rust-v0.149.0); recording it
+        # under a Claude-shaped name would misdescribe the host.
+        codex = importlib.import_module("waxseal.integrations.codex")
+        payload = codex.build_payload(
+            {"hook_event_name": "PostToolUse", "tool_response": "total 0\n"}
+        )
+        assert payload["tool_response"] == "total 0\n"

@@ -103,6 +103,24 @@ class TestRegistration:
         assert declared == set(ctx.hooks)
 
 
+class TestOneWriterPerTrail:
+    def test_repeated_calls_reuse_the_same_open_log(self, plugin, tmp_path: Path) -> None:
+        # Rule 7: read-tail + append is one critical section. Handing each
+        # hook call its own AuditLog would put two writers on one trail
+        # inside a single process, and both could extend the same prev_hash.
+        first = plugin._get_log()
+        assert plugin._get_log() is first
+
+    def test_a_different_hermes_home_gets_its_own_log(
+        self, plugin, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The cache is keyed by resolved path, not "one per process": a
+        # relocated HERMES_HOME must not keep appending to the old trail.
+        first = plugin._get_log()
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "other-home"))
+        assert plugin._get_log() is not first
+
+
 class TestPostToolCall:
     def test_appends_one_verified_entry_per_tool_result(self, ctx, tmp_path: Path) -> None:
         ctx.hooks["post_tool_call"](**post_tool_call_kwargs())

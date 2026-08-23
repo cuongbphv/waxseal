@@ -6,6 +6,16 @@ readable. The evolving seal key lives in `<trail>.sealkey` (0600), atomically
 replaced on every append so only the CURRENT epoch key exists on disk —
 forward security rests on old keys being gone.
 
+Under the aggregate scheme the running FssAgg accumulator lives in
+`<trail>.sealagg`, atomically replaced the same way: only the LATEST value is
+ever stored, because an attacker who truncates the trail and copies a
+surviving intermediate mu forward reopens exactly the hole the scheme closes.
+
+All three files sit on the same disk as the trail and are attacker-writable by
+the same threat model. Nothing here trusts their contents: a stale epoch is
+refused rather than re-aligned, and the verify side turns malformed bytes into
+a verdict instead of a crash.
+
 Signature frame: signers sign SEAL_FRAME_PREFIX + entry_hash bytes — the same
 domain-separated frame the HMAC seals use.
 """
@@ -51,6 +61,10 @@ class FileAttestor:
         if scheme not in _KNOWN_FS_HMAC_SCHEMES:
             raise ValueError(f"unknown scheme {scheme!r}, expected one of {_KNOWN_FS_HMAC_SCHEMES}")
         trail = Path(trail_path).expanduser()
+        # Kept so a caller holding only the attestor can find the trail's
+        # other sidecars (AuditLog.verify_anchored_aggregates needs the
+        # `.anchors` file) without re-deriving a path from a second source.
+        self.trail_path = trail
         self._attest_path = trail.with_name(trail.name + ".attest")
         self._key_path = trail.with_name(trail.name + ".sealkey")
         self._agg_path = trail.with_name(trail.name + ".sealagg")
@@ -169,10 +183,7 @@ class FileAttestor:
         """(agg_start, epoch, agg) from ``.sealagg``, or None if it does not
         exist yet (fs-hmac mode, or the agg scheme has never attested a
         row). Only the LATEST value is ever stored — see module docstring."""
-        if not self._agg_path.exists():
-            return None
-        obj = json.loads(self._agg_path.read_text(encoding="utf-8"))
-        return int(obj["agg_start"]), int(obj["epoch"]), str(obj["agg"])
+        return _read_aggregate(self._agg_path)
 
     def _write_aggregate(self, agg_start: int, epoch: int, agg: str) -> None:
         # Atomic replace-only (same single-owner helper as the keyfile): keeping
@@ -197,3 +208,28 @@ class FileAttestor:
         atomic_write_bytes(
             self._key_path, json.dumps({"epoch": epoch, "key": key.hex()}).encode("ascii")
         )
+
+
+def _read_aggregate(agg_path: Path) -> tuple[int, int, str] | None:
+    if not agg_path.exists():
+        return None
+    obj = json.loads(agg_path.read_text(encoding="utf-8"))
+    return int(obj["agg_start"]), int(obj["epoch"]), str(obj["agg"])
+
+
+class AggregateReader:
+    """Read-only view of a trail's ``.sealagg`` accumulator.
+
+    FileAttestor refuses to exist without a key or signer, because anything
+    holding one can seal. Anchoring only needs to COMMIT to the accumulator
+    already on disk, so it gets this instead: the same bytes, none of the
+    authority. See ports/aggregate.py for why the two are separated.
+    """
+
+    def __init__(self, trail_path: Path | str) -> None:
+        trail = Path(trail_path).expanduser()
+        self.trail_path = trail
+        self._agg_path = trail.with_name(trail.name + ".sealagg")
+
+    def read_aggregate(self) -> tuple[int, int, str] | None:
+        return _read_aggregate(self._agg_path)

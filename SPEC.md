@@ -246,6 +246,18 @@ independent reference implementation before being frozen into
 `tests/vectors/`, per this repository's existing golden-vector discipline
 (section 8) — new vectors only ever ADD, never edit or delete an existing one.
 
+`waxseal consistency <trail> --old-seq N --old-root HEX` (read-only) runs the
+consistency check against a state recorded earlier — the two values printed by
+`waxseal checkpoint`, with `old_size = N + 1`. Exit 0 = the current head
+extends that state; exit 1 = INCONSISTENT, reported as split-view/rewrite
+EVIDENCE naming the root the current prefix actually produces (never a
+tampering pronouncement — which state is honest is an operator's decision);
+exit 2 = unverifiable (an `--old-seq` beyond the current head, a root that is
+not 64 hex characters, an empty trail) — malformed operator input MUST be
+screened out before proving, because `verify_consistency` fails closed and a
+typo reported as INCONSISTENT would manufacture split-view evidence; exit 3 =
+the trail does not exist.
+
 ## 11. Aggregate attestation scheme `fs-hmac-agg-sha256-v1`
 
 An opt-in FssAgg-style (Ma & Tsudik, 2009) extension of the forward-secure
@@ -375,3 +387,306 @@ sidecar's own existence too). Consequently:
   the caller's own best-effort failure path, and a recorder that raised there
   would turn a dropped write into an unhandled exception — worse than the
   drop it was trying to record.
+
+## 13. Pinned-head verification (trust-on-first-use)
+
+Sections 9-11 defend a trail against edits by an attacker who cannot rewrite
+everything. A remote chain server can. The pin closes the part of that gap a
+client can close on its own: the verifier records a `Checkpoint` it computed
+itself, keeps it in its OWN trust domain, and refuses to accept a later
+history inconsistent with it — SSH `known_hosts` for an audit trail.
+
+State file (JSON, one object, mode 0600):
+
+```
+{"chain_id": "<str or null>", "entry_hash": "<hex64>", "pinned_ts": "<str>", "root": "<hex64>", "seq": <int>, "target": "<str>", "v": 1}
+```
+
+The checkpoint triple is stored flat, and the section 15 aggregate fields are
+deliberately NOT part of a pin. A pin is checked by recomputing the trail's own
+entry hashes and comparing; `agg_commit` cannot be recomputed without the seal
+key, so a pin carrying one would carry a field the check silently skips — a
+stored value that looks verified and is not. `pinned_ts` is informative only and
+is not part of any hashed frame.
+
+`v` is the state format version. A file whose `v` this build does not know is
+**unverifiable by name** (exit 2), not a break: the pin was written by a newer
+waxseal, which is version skew, not evidence of anything (CLAUDE.md rule 5,
+the beads-v1.2.2 class).
+
+Reasons, mapped from section 9's checkpoint reasons so the two vocabularies
+never merge:
+
+| Checkpoint reason | Pin reason | Meaning |
+|---|---|---|
+| `anchor_beyond_head` | `pin_beyond_head` | the trail is SHORTER than what was verified before — rollback or truncation |
+| `anchor_entry_hash_mismatch` | `pin_mismatch` | history under the pinned seq was rewritten |
+| `anchor_root_mismatch` | `pin_mismatch` | same, caught by the batch root |
+| `malformed_checkpoint` | `malformed_pin` | the state file is not a checkpoint |
+| — | `pin_target_mismatch` | this pin describes a different trail or chain |
+
+Three further values appear in the same `reason` field and are outcomes of the
+pin check rather than failures of it: `trust_on_first_use` (no pin existed;
+one was recorded), `empty_trail_not_pinned` (nothing to pin yet), and
+`pin_version_unknown` (section above). A downstream system keying off
+`pin.reason` in `report --json` sees all eight.
+
+Normative rules:
+
+- A pin MUST NOT be advanced on a run that reported a break. Advancing then
+  would launder the break into the new baseline. A run that exits 2 — intact,
+  with rows this build cannot verify by name — DOES advance the pin: the pin
+  records what was served, and refusing to pin any trail containing an unknown
+  fingerprint would disable pinning for exactly the forward-compatible case
+  this specification is built around. Note what that means: for an
+  unverifiable row the pinned hash is the one read from the trail, not one
+  this build recomputed. It still detects any later change to that row, which
+  is all a pin ever claims.
+- A malformed pin file MUST NOT be silently replaced. Re-pinning would give an
+  attacker who can corrupt the pin a way to downgrade the verifier back to
+  trust-on-first-use, which is precisely the state the pin exists to leave.
+- First use MUST be labelled in the output. A verifier that pins silently
+  cannot be distinguished, by its operator, from one that checked something.
+- The pin file is verifier state, NOT a sidecar of the log. Writing it does
+  not violate the CLI's never-writes-to-the-log contract, and its path is
+  always given explicitly by the operator.
+- A pin stored on the same disk as the trail SHOULD be treated as no pin at
+  all against an attacker who holds that disk. The security argument is
+  entirely the separation of authority.
+
+## 14. Witness cross-check
+
+A pin catches a server that rewrites history for THIS client. It cannot catch
+a server that shows two clients two different consistent histories — a
+split-view (fork) attack. Fork consistency (Mazieres and Shasha, SUNDR) says
+this is not detectable from inside a single client's view: if the server
+controls every response, two clients that never compare notes cannot tell one
+history from two. A witness is that comparison, made explicit.
+
+A witness is any party that (a) receives checkpoints as they are published and
+(b) will read them back. Wire format is REMOTE.md section 8. Verdicts:
+
+| Status | Meaning | Effect on exit |
+|---|---|---|
+| `consistent` | every checkpoint the witness holds is a prefix of the local trail | none |
+| `inconsistent` | one is not — evidence of a split view or a rewrite | exit 1 |
+| `unreachable` | the witness could not be asked | exit 2, and ALWAYS printed |
+
+Normative rules:
+
+- An empty witness MUST report `consistent` with `checked=0` and the reason
+  `no_checkpoints_witnessed`. A witness holding nothing has proved nothing;
+  reporting `checked=0` as coverage is CLAUDE.md rule 5 again.
+- `unreachable` MUST NOT be reported as a pass and MUST NOT be silent. A
+  witness that cannot be asked is coverage the run does not have:
+  unverifiable-by-witness, exit 2 — the same verdict class as an unknown
+  fingerprint, because unverifiable is never tampered. It MUST NOT escalate
+  to exit 1, which is reserved for `inconsistent` (evidence, not absence of
+  evidence); when both appear in one run, exit 1 wins.
+- A witness under the same administrative authority as the chain server
+  provides no fork detection at all. This is a deployment requirement, not a
+  recommendation the software can enforce.
+
+Honest limits, which no configuration removes:
+
+1. Witnesses colluding with the server. Witnessing narrows trust; it does not
+   eliminate it.
+2. A client whose entire network path is controlled (an eclipse) sees whatever
+   that adversary chooses. This library uses TLS through urllib and does not
+   pin certificate authorities.
+3. The window after the last witnessed checkpoint is unwitnessed by
+   construction.
+4. A witness that returns FEWER checkpoints than it holds silently reduces
+   coverage. That is why a verdict reports `checked=K` and never "complete".
+
+## 15. Checkpoint frame v2 and the aggregate binding
+
+Section 11's aggregate closes truncation as long as the accumulator on disk is
+honest. An attacker holding every local file can replay an older `.sealagg`
+over a truncated trail, and every local check agrees. Binding the aggregate
+into an ANCHORED checkpoint moves that claim outside the attacker's reach.
+
+What is anchored is a commitment, never the accumulator:
+
+```
+AGG_COMMIT_FRAME_PREFIX = "waxseal-aggcommit-v1\n"
+agg_commit = SHA-256( PREFIX || u64be(2) || lp(str(epoch)) || lp(agg) )
+```
+
+Publishing the accumulator itself would hand a truncating attacker the value
+section 11 forbids persisting. The commitment reveals nothing foldable.
+
+Checkpoint frame v2 (used only when BOTH `agg_commit` and `agg_epoch` are
+present; a checkpoint with neither produces byte-identical v1 output, so every
+existing anchor and vector is unaffected):
+
+```
+"waxseal-checkpoint-v2\n" || u64be(5) || lp(str(seq)) || lp(entry_hash) || lp(root) || lp(str(agg_epoch)) || lp(str(agg_commit))
+```
+
+The binding lives INSIDE the framed bytes rather than beside them in the
+sidecar's JSON because a signing sink (an RFC 3161 TSA, OpenTimestamps, a
+signed git commit) attests `SHA-256(checkpoint_frame(cp))` and nothing else. A
+JSON side-channel would be unattested by exactly the sinks that matter most.
+Setting one of the two fields without the other is an error, not a v1 frame.
+
+`verify_anchored_aggregate` reasons:
+
+| Reason | Meaning |
+|---|---|
+| `malformed_anchored_aggregate` | the anchored fields are not readable as a commitment |
+| `anchored_aggregate_epoch_mismatch` | the anchor describes more folded rows than exist — the replay-plus-truncate case |
+| `anchored_aggregate_mismatch` | the recomputed commitment differs |
+
+Rows PAST the anchored epoch are not a failure: an anchor describes a past
+state, and a trail is expected to have grown since.
+
+Sidecar records carrying a binding are stamped `"v": 2`. A reader MUST treat a
+record version it does not know as unreadable-by-name (exit 2), never as a
+failure and never as a crash.
+
+A record whose receipt came from a nonced RFC 3161 request also carries the
+request nonce, as an OPTIONAL additive field:
+
+```
+{"...": "...", "nonce": "<decimal string>", ...}
+```
+
+The field does NOT bump the record version: it is additive, a reader that
+predates it keeps reading the record unchanged, and a reader that knows it
+MUST treat absence as "no comparison to make" — skipped, never failed
+(absence ≠ mismatch). It is a decimal string rather than a bare JSON number
+because a 64-bit value is lossy in readers that parse numbers as doubles. A
+present-but-unconvertible nonce is malformed sidecar content — this format's
+own bytes, so a break (exit 1), not a foreign format. What the stored nonce
+buys is section 17's re-verify replay detection.
+
+## 16. Scope statement
+
+Every auditor report carries a fixed, machine-identifiable scope statement:
+
+```
+{"scope": {"id": "waxseal-scope-v1", "statement": "..."}}
+```
+
+The statement says the output attests hash-chain integrity and completeness
+measurements of RECORDED entries only, and does NOT attest that an obligation
+was met, that payload content is truthful, or that unrecorded events did not
+occur.
+
+Changing the wording MUST produce a NEW `id`. The id is what a downstream
+system cites; silently editing the text under a stable id would change the
+meaning of every citation already made. The exact text of both forms below is
+frozen by `tests/test_scope_statement.py`, so a reword fails the suite rather
+than shipping quietly under the old id.
+
+The CLI prints an ABBREVIATED form of the same statement — one trailing line,
+because the full paragraph would bury the verdict it qualifies. The two
+wordings ship under one id, and the short one MUST NOT assert anything the
+long one does not. Only verdict-bearing commands print it, and only once they
+have a verdict to qualify: `verify` on exits 0, 1 and 2. Exit 3 (no trail was
+read) prints no verdict and therefore no scope line, and `tail`/`inspect`/
+`head`/`checkpoint` print data rather than verdicts and never carry it.
+
+## 17. RFC 3161 structural anchoring
+
+An entry's `ts` is asserted by its writer. A Time-Stamp Authority's token is
+asserted by a different authority, which is the entire point.
+
+Request: DER `TimeStampReq` (RFC 3161 section 2.4.1) over
+`SHA-256(checkpoint_frame(cp))` — the frame, so a v2 binding is timestamped
+too. `version` = 1, `messageImprint.hashAlgorithm` = SHA-256
+(`2.16.840.1.101.3.4.2.1`) with NULL parameters, `nonce` OPTIONAL (minimal
+two's complement, zero-padded when the top bit is set), `certReq` TRUE.
+Byte layout is frozen in `tests/vectors/rfc3161.json` and cross-checked
+against `openssl ts -query` by `tools/gen_rfc3161_vectors.py`.
+
+Receipt: stored in the `.anchors` record's `receipt` field as
+`"rfc3161:" || base64(TimeStampResp DER)`.
+
+Checking is STRUCTURAL ONLY. This library compares status, messageImprint,
+digest algorithm and nonce. It does NOT verify the CMS signature or the X.509
+chain, and every output line reporting a token MUST say so. Full verification
+is delegated:
+
+```
+openssl ts -verify -in receipt.tsr -data frame.bin -CAfile tsa-chain.pem
+```
+
+`waxseal receipt <trail> [--seq N] --out DIR` produces both inputs from the
+stored records: the raw receipt bytes (`.tsr` for `rfc3161:` receipts, `.ots`
+for `ots:` receipts) and the checkpoint frame they attest (`.frame`,
+recomputed from the record's own checkpoint). It is read-only against the
+trail and the sidecar. Exit 0 = wrote at least one receipt; exit 2 = the
+sidecar holds no matching receipts (absence — not success, not tampering);
+exit 3 = the trail or the sidecar does not exist (nothing read, nothing
+created, `--out` included); exit 1 = the sidecar itself is malformed (this
+project's own format, so a break rather than a foreign format).
+
+Reason names and their exit classes:
+
+| Reason | Class | Exit |
+|---|---|---|
+| (none) | the token commits to these exact bytes | 0 |
+| `receipt_imprint_mismatch` | checked and false — attests other bytes | 1 |
+| `nonce_mismatch` | checked and false — a replayed token | 1 |
+| `malformed_token` | not readable by this build | 2 |
+| `timestamp_rejected` | the TSA declined | 2 |
+| `unsupported_digest_algorithm` | a digest this build does not compare | 2 |
+| `unknown_receipt_type` | a receipt type from a newer build | 2 |
+| `unreadable_record_version` | a record format from a newer build | 2 |
+
+The request nonce is stored in the anchor record (section 15's optional
+`nonce` field), and a verifier reading a stored receipt passes it back as the
+expected nonce. With it, re-verify detects cross-request token substitution:
+a token that is valid DER, carries the right imprint, but answers a DIFFERENT
+request is checked-and-false (`nonce_mismatch`, exit 1) — the same class as
+`receipt_imprint_mismatch`, because the token attests something other than
+what sits beside it. Without it — every record written before the field
+existed — detection is anchor-time-only: `waxseal anchor` refuses to file a
+token whose nonce does not match and exits 1, but a later `verify` has
+nothing to compare and MUST skip the comparison rather than fail it (absence
+≠ mismatch). For those records a verifier learns that the token commits to
+these exact bytes, not that this token was the one issued for this request.
+
+Note the deliberate asymmetry with section 12's sidecars: malformed bytes in a
+format this project defines are a break (exit 1); unreadable third-party bytes
+inside a receipt are unverifiable (exit 2).
+
+A checker MUST NOT raise on any input. Definite lengths only, every TLV
+bounds-checked, trailing bytes refused, and no reason string contains the word
+"tamper".
+
+Honest limit worth stating plainly: an attacker who rewrites BOTH the record
+and its receipt is caught only by the delegated signature verification, never
+by the structural check.
+
+## 18. OpenTimestamps anchoring
+
+Submission: POST the raw 32-byte `SHA-256(checkpoint_frame(cp))` to
+`<calendar>/digest` with `Accept: application/vnd.opentimestamps.v1`. This
+client sets no request `Content-Type` of its own, but the stdlib transport
+underneath it leaves urllib's default (`application/x-www-form-urlencoded`)
+in place on a POST carrying a body, so that header does reach the wire.
+[Unverified] whether any given calendar rejects that header — this has not
+been exercised against a live calendar, only against a local server capturing
+the request.
+
+Receipt: `"ots:" || base64(calendar response)`. The proof is PENDING — the
+Bitcoin attestation does not exist until a block confirms — and this library
+neither parses nor upgrades it. A partial reimplementation of a format the
+OpenTimestamps project owns would manufacture "malformed" verdicts on valid
+proofs, which is the failure class this specification exists to prevent.
+
+A verifier meeting an `ots:` receipt MUST print that it is pending and
+unchecked, and MUST NOT change the exit code on account of it. Unlike an
+unknown receipt prefix (section 17), this is opacity by design rather than
+version skew, and an operator who anchors to a calendar must not be trained to
+ignore exit 2. Completing and verifying it is `ots upgrade` / `ots verify`
+from the opentimestamps-client.
+
+[Unverified] The commitment semantics of `GET /timestamp/<hex>` on upgrade, and
+the recipe for assembling a detached `.ots` file from a raw calendar response,
+have not been confirmed against python-opentimestamps and are not specified
+here. [Unverified] Which public calendars are currently live also changes over
+time; the sink therefore requires an explicit URL and ships no default.

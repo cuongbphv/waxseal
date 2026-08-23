@@ -12,6 +12,7 @@ from __future__ import annotations
 import http.server
 import json
 import threading
+import urllib.error
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,13 @@ from tests.adapters.fake_chain_server import FakeChainServer, fake_transport
 from tests.adapters.test_jsonl import build_entry
 from waxseal.adapters._envelope import to_obj
 from waxseal.adapters.jsonl import JSONLBackend
-from waxseal.adapters.remote import RemoteBackend, RemoteError, RemoteResponse, urllib_transport
+from waxseal.adapters.remote import (
+    RemoteBackend,
+    RemoteError,
+    RemoteRequest,
+    RemoteResponse,
+    urllib_transport,
+)
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 from waxseal.domain.registry import VersionRegistry
 from waxseal.domain.verify import verify_chain
@@ -93,6 +100,99 @@ class TestRealLocalhostServer:
                 f"http://127.0.0.1:{port}", transport=urllib_transport(timeout=5.0)
             )
             assert list(backend.entries()) == []  # 404 -> empty, not an exception
+        finally:
+            httpd.shutdown()
+            thread.join(timeout=5)
+
+
+class TestSchemeGuard:
+    """urllib's opener speaks file:// and ftp:// too.
+
+    Every network adapter in the package funnels through this one transport,
+    so an anchor URL that reaches it from a config file, an env var, or a CI
+    variable would otherwise turn `--tsa-url file:///etc/shadow` into a local
+    file read dressed up as a timestamp reply. The URL is data; the scheme is
+    a capability, and only two of them are ours to hand out.
+    """
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "file:///etc/passwd",
+            "ftp://example.invalid/x",
+            "data:text/plain,hello",
+            "gopher://example.invalid/",
+            "/no/scheme/at/all",
+        ],
+    )
+    def test_a_non_http_scheme_is_refused_before_any_request(self, url: str) -> None:
+        transport = urllib_transport()
+        with pytest.raises(ValueError, match="scheme"):
+            transport(RemoteRequest(method="GET", url=url, headers={}, body=None))
+
+    @pytest.mark.parametrize("scheme", ["http", "https", "HTTP", "HttpS"])
+    def test_http_and_https_are_accepted_case_insensitively(self, scheme: str) -> None:
+        # Refused for the right reason: it must fail to CONNECT, not fail the
+        # scheme check. A guard that also rejected https would be worse than
+        # no guard, because it would push operators to disable it.
+        transport = urllib_transport(timeout=0.5)
+        with pytest.raises(urllib.error.URLError):
+            transport(
+                RemoteRequest(
+                    method="GET",
+                    url=f"{scheme}://127.0.0.1:9/unreachable",
+                    headers={},
+                    body=None,
+                )
+            )
+
+
+class TestRedirectsAreNeverFollowed:
+    """Redirects are not part of REMOTE.md's wire contract, and stdlib's
+    HTTPRedirectHandler re-sends EVERY header on the hop — including
+    `Authorization: Bearer <WAXSEAL_API_KEY>` — to whatever host the Location
+    header names, even across an https→http downgrade (the
+    CVE-2018-1000007 / CVE-2018-18074 class). A server that answers 3xx must
+    surface as a plain non-2xx the caller rejects, never be followed."""
+
+    def test_302_is_not_followed_and_authorization_never_reaches_target(self) -> None:
+        target: dict[str, Any] = {"hits": 0, "auth": None}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                if self.path == "/target":
+                    target["hits"] += 1
+                    target["auth"] = self.headers.get("Authorization")
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"{}")
+                else:
+                    self.send_response(302)
+                    self.send_header("Location", "/target")
+                    self.end_headers()
+
+            def log_message(self, *args: object) -> None:
+                pass  # keep test output quiet
+
+        httpd = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        port = httpd.server_address[1]
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            transport = urllib_transport(timeout=5.0)
+            resp = transport(
+                RemoteRequest(
+                    method="GET",
+                    url=f"http://127.0.0.1:{port}/redirect",
+                    headers={"Authorization": "Bearer secret-token-123"},
+                    body=None,
+                )
+            )
+            # The 3xx surfaces exactly like any other non-2xx status today
+            # (the HTTPError-capture path), so every caller already rejects it.
+            assert resp.status == 302
+            assert target["hits"] == 0  # the Location was never fetched
+            assert target["auth"] is None  # the bearer token never left home
         finally:
             httpd.shutdown()
             thread.join(timeout=5)
@@ -458,3 +558,39 @@ class TestConcurrencyFalsifiability:
         result = verify_chain(_read_back(server), VersionRegistry())
         assert not result.ok
         assert result.reason == "seq_gap"  # two seq=0 rows: position 1 expects seq=1
+
+
+class TestPaginationTerminates:
+    """A hostile or broken server must never be able to hold a verifier in a
+    loop. Both guards exist because "it hung" is the failure mode nobody
+    alerts on — the audit simply never produces a verdict."""
+
+    def paging_backend(self, monkeypatch: pytest.MonkeyPatch, cursors: list[str | None]):
+        from waxseal.adapters import remote as remote_module
+
+        served = iter(cursors)
+
+        def transport(request: object) -> RemoteResponse:
+            return RemoteResponse(
+                status=200,
+                body=json.dumps({"entries": [], "next_cursor": next(served)}).encode(),
+            )
+
+        monkeypatch.setattr(remote_module, "_MAX_PAGES", 3)
+        return RemoteBackend("http://chain.example", transport=transport)
+
+    def test_a_cursor_that_never_advances_fails_loudly(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = self.paging_backend(monkeypatch, ["c1", "c1"])
+        with pytest.raises(RemoteError, match="same cursor twice"):
+            list(backend.entries())
+
+    def test_a_server_that_pages_forever_hits_the_ceiling(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Distinct cursors every time, so the same-cursor guard above cannot
+        # fire: only the page ceiling can stop this.
+        backend = self.paging_backend(monkeypatch, ["c1", "c2", "c3", "c4"])
+        with pytest.raises(RemoteError, match="did not terminate"):
+            list(backend.entries())

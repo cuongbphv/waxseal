@@ -35,5 +35,6 @@ coverage.xml
 # Claude Code — personal overrides only; .claude/settings.json is shared
 .claude/settings.local.json
 
-# Private research notes — not part of the public repo
-docs/
+# banking PoC demo output (recreated on every run)
+examples/poc-out/
+poc-out/

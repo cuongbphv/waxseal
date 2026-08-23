@@ -3,8 +3,8 @@
 
 Appends every hook event (tool dispatch, tool result, user prompt, session
 lifecycle) to a tamper-evident hash chain. Configure it under "hooks" in
-settings.json (see README.md next to this file). Requires `pip install
-waxseal` in the interpreter this script runs under.
+settings.json (see the repo's integrations/claude-code/README.md). Requires
+`pip install waxseal` in the interpreter this script runs under.
 
 Contract verified against https://code.claude.com/docs/en/hooks.md (2026-08):
 

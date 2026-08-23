@@ -4,7 +4,7 @@ Appends tool usage, task, and crew lifecycle events to a tamper-evident hash
 chain. Instantiate it once at your entry point (crew.py / main.py / flow.py)
 and keep the reference alive — construction IS the registration:
 
-    from listener import WaxsealEventListener
+    from waxseal.integrations.crewai import WaxsealEventListener
     audit = WaxsealEventListener("~/.waxseal/crewai-trail.jsonl")
 
 Contract verified against crewai 1.15.17 (PyPI wheel source, 2026-08-21):

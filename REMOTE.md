@@ -22,9 +22,18 @@ deliberate scope boundary, not an oversight:
   server that corrupts, truncates, or reorders entries is caught exactly as a corrupted
   local file would be (`entry_hash_mismatch`, `seq_gap`, `prev_hash_mismatch`) — this is
   tamper-**evident**, the same guarantee every other backend gives.
-- What no client-side check can catch is a server that **consistently forges a whole
-  rewrite**: every header, every hash, self-consistent from genesis. A locally-writable
-  disk has the identical blind spot. This is not specific to the remote backend.
+- What `verify_chain` **alone** cannot catch is a server that **consistently forges a
+  whole rewrite**: every header, every hash, self-consistent from genesis. A
+  locally-writable disk has the identical blind spot. This is not specific to the
+  remote backend.
+- Two later additions narrow that blind spot without changing this trust model. A
+  pinned head (SPEC.md section 13) catches a server that rewrites history this client
+  already confirmed, or serves a shorter one — memory the server does not hold. Witness
+  cross-check (section 8 below, SPEC.md section 14) catches a server showing two
+  clients two different self-consistent histories, which fork consistency says a single
+  client cannot detect from inside its own view. Neither makes the server trusted: they
+  move the question to whether the pin and the witnesses sit under a different
+  authority than the server does.
 - The mitigation is the same one waxseal already gives local backends: **anchor the
   head independently** — `AuditLog.anchor()` / `checkpoint_for` plus an `AnchorSink`
   (e.g. `HTTPAnchorSink`, posting to a *different* service than the chain server
@@ -152,3 +161,49 @@ URL and expects `200`/`201`, optionally with `{"receipt": "<opaque string>"}` in
 response body. This URL SHOULD point at a service **independent of the chain server
 itself** (section 1) — anchoring a chain server to itself proves nothing about that
 server's honesty.
+
+## 8. Witness read-back
+
+A witness is an anchor endpoint that will also hand its checkpoints back, so a
+client can check that the chain server has not shown it a different history
+than it showed the witness (SPEC.md section 14).
+
+```
+GET <anchor-url>
+200 {"checkpoints": [{"seq": <int>, "entry_hash": "<hex64>", "root": "<hex64>"}, ...]}
+404                      # this witness has seen nothing yet — NOT an error
+```
+
+- Checkpoints SHOULD be returned oldest first. A client MUST NOT depend on the
+  order: no checkpoint's verdict depends on another's. A client MAY stop at the
+  first disagreement (this one does), so `checked` is a count of checkpoints
+  reached before the verdict, never a claim of full coverage.
+- A receiver MUST ignore keys it does not recognize, and a client MUST ignore
+  extra keys on a checkpoint (that is how `agg_commit`/`agg_epoch` reached
+  existing deployments without a version bump).
+- Authentication uses section 5's `Authorization: Bearer` header shape, but a
+  DIFFERENT credential: witness requests (both the POST of section 7 when the
+  target is a witness, and this GET) carry the token from
+  `WAXSEAL_WITNESS_API_KEY`. The chain server's `WAXSEAL_API_KEY` MUST NOT be
+  sent to a witness: it is a WRITE credential for the chain, and a witness is
+  by definition a different administrative authority — a witness holding the
+  chain key could append forged entries to the very chain it exists to
+  cross-check. When `WAXSEAL_WITNESS_API_KEY` is unset, witness requests are
+  sent unauthenticated rather than falling back to the chain key.
+- A record the client cannot parse is COUNTED, not skipped silently: the
+  verdict reports how many were unreadable alongside how many were checked.
+- Normative, and not enforceable by software: a witness is only worth asking
+  if it is under a DIFFERENT administrative authority than the chain server.
+  A server witnessing itself proves nothing (mirrors section 7).
+
+## 9. Anchor body: aggregate binding
+
+The POST body of section 7 MAY carry two additional keys when the checkpoint
+binds a forward-secure aggregate (SPEC.md section 15):
+
+```
+{"seq": <int>, "entry_hash": "<hex64>", "root": "<hex64>", "agg_commit": "<hex64>", "agg_epoch": <int>}
+```
+
+Both appear together or neither appears. A receiver that predates them ignores
+them under section 8's unknown-key rule, so no version negotiation is needed.

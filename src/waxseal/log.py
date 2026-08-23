@@ -8,16 +8,16 @@ because chain integrity ≠ trail completeness (CLAUDE.md rule 5).
 
 from __future__ import annotations
 
-import json
 import os
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from waxseal.adapters.jsonl import JSONLBackend
+from waxseal.domain.canonical import canonical_json
 from waxseal.domain.checkpoint import Checkpoint, checkpoint_for
 from waxseal.domain.fingerprint import fingerprint_v1
 from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash
@@ -27,10 +27,13 @@ from waxseal.domain.sealing import (
     FS_HMAC_AGG_SCHEME,
     SEAL_FRAME_PREFIX,
     AttestResult,
+    aggregate_commit,
     verify_aggregate,
+    verify_anchored_aggregate,
     verify_seals,
 )
 from waxseal.domain.verify import VerifyResult, verify_chain
+from waxseal.ports.aggregate import AggregateSource
 from waxseal.ports.drops import DropRecorder
 from waxseal.ports.redact import Redactor
 from waxseal.ports.sign import Verifier
@@ -64,14 +67,41 @@ class AuditLog:
         anchor_sink: Any | None = None,
         anchor_every: int | None = None,
         drop_recorder: DropRecorder | None = None,
+        aggregate_source: AggregateSource | None = None,
+        trail_path: Path | None = None,
     ) -> None:
         if anchor_every is not None and anchor_every < 1:
             raise ValueError("anchor_every must be a positive integer")
         self._backend = backend
+        # Where the trail lives on disk; None for backends with no local file
+        # (memory, remote). Public and read-only in spirit: sources key their
+        # cross-process coordination (e.g. the openclaw ingest lock) off the
+        # trail's location, and exposing the path keeps them from reaching for
+        # the backend this facade exists to encapsulate.
+        self.trail_path = trail_path
         self._redactor = redactor
         self._now = now_fn or _default_now
         self._registry = registry or VersionRegistry()
         self._attestor = attestor
+        # Resolved once, here, so "where the aggregate comes from" has exactly
+        # one answer. An attestor is an AggregateSource when it keeps an
+        # accumulator; a key-less caller supplies a read-only one instead.
+        self._aggregate_source: Any = attestor if aggregate_source is None else aggregate_source
+        if anchor_sink is not None and trail_path is not None:
+            # The README-advertised pattern (open + external sink +
+            # anchor_every) contacted the TSA and DISCARDED every returned
+            # receipt — only the CLI wrapped sinks in RecordingAnchorSink, so
+            # library callers paid for evidence that landed nowhere. Wrap here,
+            # at the one seam open() and with_anchor_sink() both pass through.
+            # Sinks that already write the sidecar (RecordingAnchorSink,
+            # FileAnchorSink) must not be wrapped again: a double-filed
+            # checkpoint would overstate anchor coverage. Path-less backends
+            # (memory, remote) have no sidecar location and keep the sink
+            # as given. Deferred import, same as verify_anchored_aggregates.
+            from waxseal.adapters.anchors import FileAnchorSink, RecordingAnchorSink
+
+            if not isinstance(anchor_sink, (FileAnchorSink, RecordingAnchorSink)):
+                anchor_sink = RecordingAnchorSink(trail_path, anchor_sink)
         self._anchor_sink = anchor_sink
         self._anchor_every = anchor_every
         self._drop_recorder = drop_recorder
@@ -154,6 +184,7 @@ class AuditLog:
             anchor_sink=anchor_sink,
             anchor_every=anchor_every,
             drop_recorder=drop_recorder,
+            trail_path=p,
         )
 
     def append(self, *, payload: dict[str, Any] | bytes, payload_type: str) -> Entry:
@@ -367,8 +398,15 @@ class AuditLog:
         return result
 
     def try_append(self, *, payload: dict[str, Any] | bytes, payload_type: str) -> bool:
-        """Best-effort append: never raises. A failure increments
-        dropped_writes so the loss is measured, not silent (CLAUDE.md rule 6)."""
+        """Best-effort append: never raises. A lost write increments
+        dropped_writes and returns False, so the loss is measured, not silent
+        (CLAUDE.md rule 6).
+
+        An AttestationFailure is NOT a lost write and returns True: the entry
+        is durably on the chain, only its seal is missing. It increments
+        attest_failures instead and surfaces as attestation_gap on verify —
+        counting it as dropped would make dropped_writes lie (rule 5).
+        """
         try:
             self.append(payload=payload, payload_type=payload_type)
             return True
@@ -399,6 +437,58 @@ class AuditLog:
     def anchor_failures(self) -> int:
         return self._anchor_failures
 
+    def with_anchor_sink(
+        self,
+        sink: Any,
+        *,
+        anchor_every: int | None = None,
+        aggregate_source: AggregateSource | None = None,
+    ) -> AuditLog:
+        """A view of this same trail that publishes checkpoints to ``sink``.
+
+        Lets a read-only caller (the CLI's `anchor`) attach a sink without
+        reaching for the backend object, which would hand it an append path
+        outside this facade's attestation and anchoring. Shares the backend
+        deliberately — it is the same trail, not a copy — but takes its own
+        append lock, so this view is for anchoring, not for concurrent writes
+        alongside the original.
+
+        ``aggregate_source`` lets a caller holding no seal key still bind the
+        trail's accumulator into the checkpoint (ports/aggregate.py); omitted,
+        the view keeps whatever source this log already had.
+        """
+        return AuditLog(
+            self._backend,
+            redactor=self._redactor,
+            now_fn=self._now,
+            registry=self._registry,
+            attestor=self._attestor,
+            anchor_sink=sink,
+            anchor_every=anchor_every,
+            drop_recorder=self._drop_recorder,
+            aggregate_source=(
+                self._aggregate_source if aggregate_source is None else aggregate_source
+            ),
+            trail_path=self.trail_path,
+        )
+
+    def entries(self) -> Iterator[Entry]:
+        """Every entry in write order — the read side of the facade.
+
+        Readers (the CLI, reports, proof export) go through this rather than
+        the backend attribute: which backend is behind an AuditLog is the
+        facade's business, and a caller holding the backend directly would be
+        free to append behind the attestation and anchoring this class owns.
+        """
+        return iter(self._backend.entries())
+
+    def entry_hashes(self) -> list[str]:
+        """Entry hashes in write order — the input every checkpoint, pin, and
+        witness check is computed over. One materializing pass, defined once,
+        because two spellings of "the trail's hashes" are two chances to
+        disagree about them."""
+        return [entry.entry_hash for entry in self.entries()]
+
     def anchor(self) -> Checkpoint:
         """Checkpoint the current trail and publish it via ``anchor_sink``.
 
@@ -410,12 +500,117 @@ class AuditLog:
         """
         if self._anchor_sink is None:
             raise ValueError("this log was opened without an anchor_sink")
-        hashes = [entry.entry_hash for entry in self._backend.entries()]
+        hashes = self.entry_hashes()
         if not hashes:
             raise ValueError("cannot anchor an empty trail")
-        cp = checkpoint_for(hashes)
+        agg_commit, agg_epoch = self._aggregate_binding()
+        cp = checkpoint_for(hashes, agg_commit=agg_commit, agg_epoch=agg_epoch)
         self._anchor_sink.anchor(cp)
         return cp
+
+    def _aggregate_binding(self) -> tuple[str | None, int | None]:
+        """The forward-secure aggregate commitment to include in a checkpoint.
+
+        ``(None, None)`` whenever there is no accumulator to commit to: no
+        aggregate source at all (the default, since an attestor only becomes
+        one by keeping an accumulator), a source that exposes no
+        ``read_aggregate``, or one whose ``read_aggregate`` returns None
+        because nothing has aggregated yet. A checkpoint must not claim a
+        binding that nothing can be checked against, and most trails have none.
+
+        Only the commitment leaves this method. The accumulator itself is
+        never published: an attacker who can copy an intermediate value can
+        restore it over a truncated trail, which is the hole the aggregate
+        scheme exists to close.
+        """
+        read_aggregate = getattr(self._aggregate_source, "read_aggregate", None)
+        if read_aggregate is None:
+            return (None, None)
+        state = read_aggregate()
+        if state is None:
+            return (None, None)
+        _, epoch, agg = state
+        return (aggregate_commit(epoch, agg), epoch)
+
+    def verify_anchored_aggregates(self, *, initial_key: bytes) -> AttestResult:
+        """Check every anchored aggregate commitment against the attestations.
+
+        The check the local sidecars cannot make. ``verify_attestations``
+        compares `.sealagg` against `.attest`, both under whoever owns the
+        trail, so an attacker who truncates the trail and restores an older
+        accumulator satisfies it. The commitments here come from anchor
+        records a third party witnessed, so passing this requires not having
+        rewritten what that third party holds.
+
+        Anchor records with no binding (every record written before it
+        existed, and every trail that never aggregated) are counted
+        ``unverifiable`` — no aggregate claim was made, so there is none to
+        check, and calling that a pass would report coverage nobody has.
+        """
+        if self._attestor is None:
+            raise ValueError("verify_anchored_aggregates needs an attestor")
+        read_aggregate = getattr(self._aggregate_source, "read_aggregate", None)
+        agg_start = 0
+        if read_aggregate is not None:
+            state = read_aggregate()
+            if state is not None:
+                agg_start = state[0]
+
+        from waxseal.adapters.anchors import read_anchor_records
+
+        try:
+            sidecar = read_anchor_records(self._attestor.trail_path)
+        except (ValueError, KeyError, TypeError):
+            # Attacker-writable sidecar: malformed bytes are a verdict, never
+            # a crash that denies the audit (same contract as verify_seals).
+            return AttestResult(
+                ok=False,
+                checked=0,
+                broken_seq=None,
+                reason="malformed_anchor",
+                unverifiable=(),
+            )
+
+        if not sidecar.records and not sidecar.unreadable_versions:
+            return AttestResult(
+                ok=True, checked=0, broken_seq=None, reason="no_anchors_recorded", unverifiable=()
+            )
+
+        attestations = list(self._attestor.attestations())
+        checked = 0
+        unverifiable: list[int] = []
+        for record in sidecar.records:
+            cp = record.checkpoint
+            if cp.agg_commit is None or cp.agg_epoch is None:
+                unverifiable.append(cp.seq)
+                continue
+            reason = verify_anchored_aggregate(
+                attestations,
+                initial_key,
+                agg_start=agg_start,
+                anchored_epoch=cp.agg_epoch,
+                anchored_commit=cp.agg_commit,
+            )
+            if reason is not None:
+                return AttestResult(
+                    ok=False,
+                    checked=checked,
+                    broken_seq=cp.seq,
+                    reason=reason,
+                    unverifiable=tuple(unverifiable),
+                )
+            checked += 1
+        # A record in a format this build cannot read is coverage it does not
+        # have, and saying so is the whole of rule 6. `verify --anchors` names
+        # it with this same string; two paths reading one sidecar must not
+        # come back with two different accounts of it.
+        return AttestResult(
+            ok=True,
+            checked=checked,
+            broken_seq=None,
+            reason="unreadable_record_version" if sidecar.unreadable_versions else None,
+            unverifiable=tuple(unverifiable),
+        )
 
     def verify(self, *, measure_drops: bool = True) -> VerifyResult:
         result = verify_chain(self._backend.entries(), self._registry)
@@ -439,7 +634,5 @@ class AuditLog:
         if isinstance(payload, dict):
             if self._redactor is not None:
                 payload = self._redactor.redact(payload)
-            return json.dumps(
-                payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-            ).encode("ascii")
+            return canonical_json(payload)
         raise TypeError(f"payload must be dict or bytes, got {type(payload).__name__}")

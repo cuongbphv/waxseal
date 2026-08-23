@@ -136,3 +136,108 @@ class TestStorageLayout:
         body = client.get_object(Bucket="audit", Key="trail/entries/00000000000000000000.json")
         obj = json.loads(body["Body"].read())
         assert set(obj) == {"header", "entry_hash", "payload_b64"}
+
+
+class TestConditionalWriteRetry:
+    """CLAUDE.md rule 7 for object storage. The thread test above proves the
+    two writers end up with one chain; these prove the retry path itself,
+    deterministically — a lock that happens to serialize the fake would let
+    that path rot untested and only the third writer in production would find
+    out.
+    """
+
+    def rejecting_client(self, failures: int, error: Exception) -> FakeS3Client:
+        client = FakeS3Client()
+        real_put = client.put_object
+        remaining = [failures]
+
+        def put_object(*, Bucket: str, Key: str, Body: bytes, **kwargs) -> dict:
+            if "entries/" in Key and remaining[0] > 0:
+                remaining[0] -= 1
+                raise error
+            return real_put(Bucket=Bucket, Key=Key, Body=Body, **kwargs)
+
+        client.put_object = put_object  # type: ignore[method-assign]
+        return client
+
+    def test_a_lost_race_is_rebuilt_on_a_fresh_tail(self) -> None:
+        client = self.rejecting_client(1, FakeClientError("PreconditionFailed"))
+        backend = S3Backend(client, bucket="audit", prefix="trail")
+        seen: list[int] = []
+
+        def build(seq: int, prev: str):
+            seen.append(seq)
+            return build_entry(seq, prev)
+
+        entry = backend.append(build)
+        # The entry is rebuilt, not resubmitted: a retry that reused the first
+        # build's (seq, prev_hash) would fork the chain rather than extend it.
+        assert seen == [0, 0]
+        assert entry.header.seq == 0
+
+    def test_a_412_by_status_code_is_also_a_lost_race(self) -> None:
+        client = self.rejecting_client(1, FakeClientError("412"))
+        backend = S3Backend(client, bucket="audit", prefix="trail")
+        assert backend.append(lambda seq, prev: build_entry(seq, prev)).header.seq == 0
+
+    def test_any_other_error_propagates_rather_than_looping(self) -> None:
+        # A permissions failure retried 32 times is 32 failures and then a
+        # misleading "contention is pathological" message.
+        client = self.rejecting_client(1, FakeClientError("AccessDenied"))
+        backend = S3Backend(client, bucket="audit", prefix="trail")
+        with pytest.raises(FakeClientError, match="AccessDenied"):
+            backend.append(lambda seq, prev: build_entry(seq, prev))
+
+    def test_an_error_with_no_response_payload_propagates(self) -> None:
+        # `_error_code` must survive an exception that is not a boto3
+        # ClientError at all — an injected client can raise anything.
+        client = self.rejecting_client(1, RuntimeError("socket closed"))
+        backend = S3Backend(client, bucket="audit", prefix="trail")
+        with pytest.raises(RuntimeError, match="socket closed"):
+            backend.append(lambda seq, prev: build_entry(seq, prev))
+
+    def test_endless_contention_gives_up_with_a_named_reason(self) -> None:
+        client = self.rejecting_client(10_000, FakeClientError("PreconditionFailed"))
+        backend = S3Backend(client, bucket="audit", prefix="trail")
+        with pytest.raises(RuntimeError, match="pathological"):
+            backend.append(lambda seq, prev: build_entry(seq, prev))
+
+
+class TestTailDiscovery:
+    def test_a_stale_head_hint_is_corrected_by_probing_forward(self) -> None:
+        # head.json is a hint, never the truth: a writer that crashed between
+        # the entry PUT and the head PUT leaves it behind. Trusting it would
+        # overwrite a committed entry's seq.
+        client = FakeS3Client()
+        backend = S3Backend(client, bucket="audit", prefix="trail")
+        for _ in range(3):
+            backend.append(lambda seq, prev: build_entry(seq, prev))
+
+        client.put_object(
+            Bucket="audit",
+            Key="trail/head.json",
+            Body=json.dumps({"seq": 0, "entry_hash": "0" * 64}).encode(),
+        )
+        entry = backend.append(lambda seq, prev: build_entry(seq, prev))
+        assert entry.header.seq == 3
+
+    def test_an_unreadable_head_falls_back_to_genesis_and_probes(self) -> None:
+        client = FakeS3Client()
+        backend = S3Backend(client, bucket="audit", prefix="trail")
+        backend.append(lambda seq, prev: build_entry(seq, prev))
+        client.put_object(Bucket="audit", Key="trail/head.json", Body=b"{ not json")
+        assert backend.append(lambda seq, prev: build_entry(seq, prev)).header.seq == 1
+
+    def test_a_probe_error_that_is_not_a_missing_key_propagates(self) -> None:
+        # Reading "not found" out of a permissions error would report the tail
+        # as shorter than it is, and the next append would overwrite history.
+        client = FakeS3Client()
+        backend = S3Backend(client, bucket="audit", prefix="trail")
+        backend.append(lambda seq, prev: build_entry(seq, prev))
+
+        def get_object(*, Bucket: str, Key: str) -> dict:
+            raise FakeClientError("AccessDenied")
+
+        client.get_object = get_object  # type: ignore[method-assign]
+        with pytest.raises(FakeClientError, match="AccessDenied"):
+            backend.append(lambda seq, prev: build_entry(seq, prev))

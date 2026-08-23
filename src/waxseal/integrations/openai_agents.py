@@ -3,7 +3,7 @@
 Appends every tool call, agent start/end, and handoff to a tamper-evident
 hash chain. Attach per run:
 
-    from hooks import WaxsealRunHooks
+    from waxseal.integrations.openai_agents import WaxsealRunHooks
     result = await Runner.run(agent, "input", hooks=WaxsealRunHooks(trail))
 
 Contract verified against openai.github.io/openai-agents-python

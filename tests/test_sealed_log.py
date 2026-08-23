@@ -690,3 +690,82 @@ class TestSidecarPermissions:
             assert (mode & 0o777) == 0o600
         finally:
             os.umask(old_umask)
+
+
+class TestVerifyAttestationsArguments:
+    """The three states this method must never guess its way through: no
+    attestor, no credential, and a sidecar longer than the trail."""
+
+    def test_no_attestor_is_a_caller_error_not_a_verdict(self, tmp_path: Path) -> None:
+        # Returning ok here would report a check that never ran.
+        log = AuditLog.open(tmp_path / "trail.jsonl")
+        log.append(payload={"i": 0}, payload_type=PT)
+        with pytest.raises(ValueError, match="without an attestor"):
+            log.verify_attestations(initial_key=generate_key())
+
+    def test_neither_a_key_nor_a_verifier_is_a_caller_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "trail.jsonl"
+        key = generate_key()
+        log = AuditLog.open(path, attestor=FileAttestor(path, initial_key=key))
+        log.append(payload={"i": 0}, payload_type=PT)
+        with pytest.raises(ValueError, match="initial_key"):
+            log.verify_attestations()
+
+    def test_more_attestations_than_entries_is_caught(self, tmp_path: Path) -> None:
+        # Truncating the trail while leaving the sidecar intact. The sidecar
+        # claims a row the trail no longer has, and position N has nothing to
+        # cross-check against — that is the break, not a short read.
+        path = tmp_path / "trail.jsonl"
+        key = generate_key()
+        log = AuditLog.open(path, attestor=FileAttestor(path, initial_key=key))
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type=PT)
+        kept = path.read_text(encoding="utf-8").splitlines()[:2]
+        path.write_text("".join(f"{line}\n" for line in kept), encoding="utf-8")
+
+        result = AuditLog.open(
+            path, attestor=FileAttestor(path, initial_key=key)
+        ).verify_attestations(initial_key=key)
+        assert not result.ok
+        assert result.broken_seq == 2
+
+
+class TestSignerModeUnverifiableSchemes:
+    def test_an_attestation_from_another_scheme_is_unverifiable_not_invalid(
+        self, tmp_path: Path
+    ) -> None:
+        # A trail whose sidecar mixes schemes (a signer rotation, a migration
+        # in progress) must not report the rows this verifier cannot speak for
+        # as forged. Unverifiable by name is a different verdict from
+        # signature_invalid, and only one of them is an alarm.
+        signature = bytes([0x07]) * 64
+
+        class Signer:
+            algorithm = "ed25519"
+            key_id = "k1"
+
+            def sign(self, data: bytes) -> bytes:
+                return signature
+
+        class Verifier:
+            algorithm = "ed25519"
+
+            def verify(self, data: bytes, sig: bytes) -> bool:
+                return sig == signature
+
+        path = tmp_path / "trail.jsonl"
+        log = AuditLog.open(path, attestor=FileAttestor(path, signer=Signer()))
+        for i in range(2):
+            log.append(payload={"i": i}, payload_type=PT)
+
+        sidecar = Path(str(path) + ".attest")
+        rows = [json.loads(line) for line in sidecar.read_text().splitlines() if line.strip()]
+        rows[0]["scheme"] = "sig-dilithium3-v1"
+        sidecar.write_text(
+            "".join(f"{json.dumps(row, sort_keys=True)}\n" for row in rows), encoding="utf-8"
+        )
+
+        result = log.verify_attestations(verifier=Verifier())
+        assert result.ok
+        assert result.checked == 1
+        assert result.unverifiable == (0,)

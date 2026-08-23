@@ -22,6 +22,8 @@ STDLIB_ONLY_MODULES = [
     "waxseal.integrations.cursor",
     "waxseal.integrations.hermes",
     "waxseal.integrations.hermes_gateway",
+    "waxseal.integrations.openclaw",
+    "waxseal.sources.openclaw",
 ]
 
 

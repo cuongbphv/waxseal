@@ -49,7 +49,8 @@ for the literature behind each choice):
 | Byte-level SPEC (freeze planned for v1) + golden test vectors → portable to Go/Rust/TS | ✅ | ❌ format = whatever the code does | ❌ |
 | Zero runtime dependencies (S3/Postgres clients are injected, never imported) | ✅ | often pulls crypto/serialization stacks | ✅ |
 | Redact-before-hash (secrets never reach disk, hash commits to redacted bytes) | ✅ | sometimes | ❌ |
-| Built-in external anchoring, manual (`waxseal head`) or automatic (`anchor_every=N`) | ✅ | ❌ | ❌ |
+| Built-in external anchoring: RFC 3161 TSA, OpenTimestamps, witness, or your own sink (`anchor_every=N`) | ✅ | ❌ | ❌ |
+| Pinned-head (TOFU) + witness cross-check against a dishonest chain server | ✅ | ❌ | ❌ |
 | Forward-secure seals (key-evolving HMAC, stdlib only) + injected Ed25519 signatures | ✅ | ❌ | ❌ |
 | FssAgg aggregate tag closing the truncation gap even if the keyfile leaks | ✅ | ❌ | ❌ |
 | Remote HTTP backend as a full peer to local storage, with an explicit trust model | ✅ | rare, undocumented trust model | ❌ |
@@ -78,7 +79,7 @@ flowchart LR
     G["genesis<br/>prev_hash = 000…0"] --> E0["entry 0<br/>entry_hash₀"]
     E0 -- "prev_hash = entry_hash₀" --> E1["entry 1<br/>entry_hash₁"]
     E1 -- "prev_hash = entry_hash₁" --> E2["entry 2<br/>entry_hash₂"]
-    E2 -. "waxseal head → anchor externally<br/>(OpenTimestamps / RFC 3161 / git)" .-> X["external<br/>trust domain"]
+    E2 -. "waxseal anchor --tsa-url / --ots-calendar / --witness" .-> X["external<br/>trust domain"]
 ```
 
 **Verification — every outcome is distinct, unknown is never tampered:**
@@ -202,11 +203,13 @@ log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 **Trust model, stated plainly:** the server is a *trusted writer*, not a
 Byzantine-fault-tolerant peer. `verify_chain` still runs entirely client-side
 and catches corruption, truncation, and reordering — but a dishonest server can
-serve a consistently-forged rewrite of the whole trail that no client-side
-check can catch on its own. The mitigation is the same one this README already
-recommends for a local attacker with write access: anchor the head
-independently, ideally at a service *other than* the chain server itself (see
-Anchoring, below).
+serve a consistently-forged rewrite of the whole trail that `verify_chain` alone
+cannot catch. Three things narrow that: anchor the head independently at a
+service *other than* the chain server, keep a `--pin` so a rewrite of history
+you already confirmed is caught, and add a `--witness` in a different trust
+domain so a split-view is caught (see Anchoring and Attested time, below).
+None of them make the server trusted; they move the question to who controls
+the pin, the witness and the sink.
 
 ## Metadata sources
 
@@ -218,6 +221,68 @@ from waxseal.sources.files import record_file, current_matches_last
 record_file(log, "SPEC.md", doc_id="spec")          # snapshot content hash into the chain
 current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None (never recorded)
 ```
+
+## AI decision logs
+
+`DecisionRecord` is a decision-shaped payload for AI systems that decide or assist:
+which system, which model version, what it decided and why, and whether a human was
+involved. The input is committed by hash after redaction rather than stored.
+
+```python
+from waxseal import AuditLog, DecisionRecord, ModelRef, HumanOversight
+from waxseal.adapters.redactors import RegexRedactor
+from waxseal.sources.decisions import commit_input, record_decision
+
+redactor = RegexRedactor()
+log = AuditLog.open("decisions.jsonl", redactor=redactor)
+
+record_decision(log, DecisionRecord(
+    decision_id="DEC-1001",
+    decision_type="transaction_approval",
+    system_id="screening-agent",
+    model=ModelRef(name="my-model", version="2026.08.1"),
+    input_commitment=commit_input(model_input, redactor=redactor),  # redacted, then hashed
+    outcome="approve",
+    rationale="below thresholds, established counterparty",
+    human_oversight=HumanOversight(mode="automated"),  # None = not recorded, NOT automated
+))
+```
+
+Read decisions back with `iter_decisions` — it walks the trail in chain order and
+yields `(entry, record)`. A row whose bytes no longer parse as a decision is still
+yielded (with `record=None`) rather than silently skipped; whether it was *tampered*
+is `verify`'s question, answered separately:
+
+```python
+from waxseal.sources.decisions import iter_decisions
+
+for entry, record in iter_decisions(log, decision_type="transaction_approval"):
+    if record is None:
+        print(f"seq {entry.header.seq}: unparseable — run `waxseal verify`")
+    else:
+        print(f"seq {entry.header.seq}: {record.decision_id} → {record.outcome}")
+```
+
+An auditor reads a report, and can check one decision without being handed the log:
+
+```bash
+waxseal report decisions.jsonl              # Markdown; --json for SIEM/GRC
+waxseal export-proof decisions.jsonl 3 > proof.json
+waxseal verify-proof proof.json             # offline; no trail needed
+```
+
+A proof bundle is one entry plus its Merkle path, so answering a question about one
+subject does not disclose every other decision in the trail. The report prints a check
+that was **not run** as *not checked*, never as a pass.
+
+- [examples/banking-poc/](examples/banking-poc/README.md) — runnable end-to-end demo with
+  an animated data-flow walkthrough and eight tamper scenarios, each asserting its own
+  exit code
+- [docs/architecture/banking-deployment.md](docs/architecture/banking-deployment.md) —
+  reference deployment: four trust domains, separation of duties, retention and DR
+- [docs/compliance/mapping.md](docs/compliance/mapping.md) — what this evidences against
+  EU AI Act, NIST AI RMF, the DORA RTS and others, **with an honest gap analysis**. It is
+  an evidence layer: it supports record-keeping obligations and discharges none of them
 
 ## Anchoring: checkpoints and consistency proofs
 
@@ -246,6 +311,41 @@ since the checkpoint), `anchor_entry_hash_mismatch` (the tip was rewritten), or
 `consistency_proof`/`verify_consistency` — proving a later head extends an
 earlier one without replaying the whole log — and RFC 6962 `membership_proof`/
 `verify_membership` for single-entry inclusion proofs.
+
+## Attested time, pins, and witnesses
+
+An anchor is only worth the authority it sits under. Three commands move a checkpoint out
+of the writer's reach:
+
+```bash
+waxseal anchor trail.jsonl --tsa-url https://freetsa.org/tsr    # RFC 3161 timestamp
+waxseal anchor trail.jsonl --ots-calendar https://a.pool.opentimestamps.org
+waxseal anchor trail.jsonl --witness https://witness.example/anchor
+waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https://witness.example/anchor
+```
+
+- **RFC 3161** makes `ts` attested rather than asserted. waxseal checks the reply
+  *structurally* — status, message imprint, nonce, digest algorithm — and says so in every
+  line it prints. It does **not** verify the CMS/X.509 signature; that is delegated to
+  `openssl ts -verify` and the recipe is in the docs. A receipt it cannot read is
+  *unverifiable* (exit 2); only one that attests different bytes is *broken* (exit 1).
+- **OpenTimestamps** stores a *pending* Bitcoin proof, opaquely and on purpose. Finish it
+  later with `ots upgrade` / `ots verify`.
+- **`--pin`** is `known_hosts` for a trail: the verifier keeps a checkpoint it computed
+  itself and refuses a history inconsistent with it. First use is labelled, the pin
+  advances only on a clean run, and a corrupted pin is never silently re-pinned.
+- **`--witness`** is the outside channel a pin cannot be. A pin catches a server that
+  rewrites history for you; only a witness in a *different* trust domain catches one
+  showing two clients two different histories. An unreachable witness prints
+  `unreachable — NOT checked` and exits 2 (unverifiable): a check that did not
+  run is neither a pass nor tampering.
+
+- [docs/anchoring-external-time.md](docs/anchoring-external-time.md) — the `openssl ts`
+  delegation recipe, the OTS upgrade path, and how to write an `AnchorSink` for another
+  chain (EVM, Hyperledger, private)
+- [docs/security/threat-model.md](docs/security/threat-model.md) — why tamper-*proof* is
+  unreachable for pure software, what a client can and provably cannot detect against a
+  Byzantine chain server, and how to cite waxseal output without overclaiming
 
 ## Signatures & forward-secure seals
 
@@ -321,7 +421,8 @@ payload) to a `.drops` sidecar independent of the current process, and
 
 ## Integrations
 
-Audit hooks for seven agent frameworks and coding tools. Each one is
+Audit hooks for seven agent frameworks and coding tools, plus one exporter for a
+host that already keeps its own ledger (OpenClaw). Each one is
 verified against the target's current hook contract (version noted in its README),
 records dispatch *before* execution, redacts secrets before hashing, clips huge
 outputs visibly, and **can never block or veto the host's work** — every failure
@@ -331,7 +432,7 @@ Everything ships in the wheel — no source checkout, no file copying:
 
 ```bash
 pip install waxseal
-waxseal install hermes        # or claude-code / codex / cursor / hermes-gateway
+waxseal install hermes        # or claude-code / codex / cursor / hermes-gateway / openclaw
 ```
 
 `install` writes thin shims into the host's config directory (importing
@@ -350,6 +451,7 @@ WaxsealCallbackHandler`.
 | CrewAI | event listener (`crewai.events`) | [integrations/crewai/](integrations/crewai/) |
 | OpenAI Agents SDK | `RunHooks` | [integrations/openai-agents/](integrations/openai-agents/) |
 | hermes-agent | plugin + gateway hook | [integrations/hermes/](integrations/hermes/) |
+| OpenClaw | audit-ledger exporter (`openclaw audit --json`, no hook) | [integrations/openclaw/](integrations/openclaw/) |
 
 Scope note for the coding tools: these hooks give you a parallel,
 tamper-evident, **secret-free** record of every action. They do not (and cannot)
@@ -365,14 +467,23 @@ waxseal trail is the copy you can keep, share, and verify.
   never conflated with `0`.
 - Concurrent writers cannot fork the chain (see backends table); for `RemoteBackend`
   this is a server-side compare-and-swap rather than a client-held lock.
-- waxseal is tamper-*evident*, not tamper-*proof*: an attacker with write access can
-  rewrite the whole suffix of a chain. Anchor the head in an external trust domain —
-  manually (`waxseal head` → an OpenTimestamps proof, an RFC 3161 timestamp, a git
-  commit pushed to a remote) or automatically (`anchor_every=N` with a `FileAnchorSink`
-  or `HTTPAnchorSink`) — to bound that attack.
-- A `RemoteBackend` target is a *trusted writer*, not Byzantine-fault-tolerant: a
-  dishonest chain server can serve a consistently-forged rewrite that no client-side
-  check catches. Point the anchor sink at a service other than the chain server.
+- waxseal is tamper-*evident*, not tamper-*proof*, and no release changes that: an
+  attacker with write access can rewrite the whole suffix of a chain. Pure software
+  cannot prevent it — every local byte is rewritable, and the only thing software can do
+  is make the rewrite *visible* against a copy the attacker cannot reach. Anchor the head
+  into an external trust domain: `waxseal anchor --tsa-url` (RFC 3161), `--ots-calendar`
+  (OpenTimestamps), `--witness`, or `anchor_every=N` with a sink of your own. That bounds
+  the attack only insofar as the sink sits under a *different administrative authority*;
+  a sidecar on the same disk bounds nothing.
+- A `RemoteBackend` target is a *trusted writer*, not Byzantine-fault-tolerant — but two
+  client-side checks narrow it. `--pin` catches a server that rewrites the history you
+  already confirmed (`pin_mismatch`) or serves a shorter one (`pin_beyond_head`).
+  `--witness` catches a server showing two clients two different self-consistent
+  histories, which a single client provably cannot detect on its own (fork consistency,
+  Mazières & Shasha). What stays out of reach: a first-contact client holding no pin and
+  no witness, witnesses that collude with the server, and a client whose entire network
+  path the attacker controls. Point pins, witnesses and anchor sinks at something other
+  than the chain server — the separation of authority is the whole security argument.
 
 ## Spec & design
 
