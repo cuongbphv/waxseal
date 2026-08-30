@@ -1,6 +1,6 @@
 """File placement for `waxseal install <target>`.
 
-The written shims contain no logic — they import from waxseal.integrations.*,
+The written shims contain no logic. They import from waxseal.integrations.*,
 so `pip install -U waxseal` updates hook behavior without re-running install.
 Hosts only discover hooks in their own config directories, and Python wheels
 cannot run post-install steps (by design), which is why this command exists
@@ -121,7 +121,7 @@ def _default_home(target: str) -> Path:
 
 def _write(path: Path, content: str, force: bool) -> bool:
     # utf-8 + newline="" on both sides: the locale default (cp1252 on Windows)
-    # wrote these shims' em dashes as 0x97, and Python source must be UTF-8 —
+    # wrote these shims' em dashes as 0x97, and Python source must be UTF-8, so
     # the installed hermes plugin failed to import with a SyntaxError
     # (found running `waxseal install hermes` 0.1.0 on Windows, 2026-08-21).
     if path.exists():
@@ -142,7 +142,7 @@ def _write(path: Path, content: str, force: bool) -> bool:
 def install(target: str, home: Path | None, force: bool) -> int:
     if target in _LIBRARY_USAGE:
         # These returns run before `home` is ever read, so an explicit --home
-        # was silently ignored — the same unlabelled-no-op class the CLI's
+        # was silently ignored, the same unlabelled-no-op class the CLI's
         # remote --anchors note exists for (CLAUDE.md rule 6).
         _note_home_unused(target, home)
         print(f"{target} attaches in your own code — nothing to install:\n")

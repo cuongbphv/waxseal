@@ -41,7 +41,7 @@ VECTORS_PATH = Path(__file__).parent.parent / "vectors" / "checkpoint.json"
 # long as the frame we would build today is still byte-for-byte the frame it
 # signed. A mismatch here means STOP — the framing code (or an edit to the
 # vector file) is the bug, never the frozen hash.
-FROZEN_VECTORS_SHA256 = "d2bb512e32efaa6df51916091eca4181ec084775e043fd270147f518832d11eb"
+FROZEN_VECTORS_SHA256 = "3aaac5b31461d3e3ea613523048e87b206c997fd18815b1bf4ccc9649231cfe4"
 
 
 def vectors() -> dict:

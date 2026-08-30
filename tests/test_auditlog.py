@@ -6,6 +6,11 @@ from pathlib import Path
 import pytest
 
 from waxseal import AuditLog
+from waxseal.domain.fingerprint import fingerprint
+from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash, header_frame
+from waxseal.domain.header import EntryHeader
+from waxseal.domain.registry import VersionRegistry
+from waxseal.domain.verify import verify_chain
 
 TS = "2026-08-21T06:00:00+00:00"
 PT = "application/vnd.test.event+json"
@@ -181,3 +186,109 @@ class TestBackendDispatch:
     def test_unknown_extension_is_rejected(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="backend"):
             AuditLog.open(tmp_path / "trail.txt")
+
+
+class _V1OnlyRegistry(VersionRegistry):
+    """A registry frozen to "knows only v1" -- simulates a build that
+    predates lp64v2 reading a trail this release wrote (waxseal-7tk.7.4).
+    Subclassing VersionRegistry (rather than a bespoke stand-in), same
+    pattern as tests/domain/test_verify.py's _V1OnlyRegistry, keeps this
+    exercising the real recomputable()/encoder_for() logic, just seeded
+    with one fewer built-in fingerprint."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        v2 = fingerprint()
+        del self._schemas[v2]
+        del self._encoding[v2]
+
+
+class TestLp64v2IsTheWiredDefault:
+    """W6.4 (waxseal-7tk.7.4): lp64v2 is the REAL default for every new
+    trail, no opt-in, no flag. These tests exercise AuditLog.append()'s
+    actual output -- not a hardcoded string, not a mock -- because that is
+    the one call site this whole bead changes (log.py's build() closure)."""
+
+    def test_fresh_append_is_stamped_with_the_real_fingerprint_v2_value(
+        self, tmp_path: Path
+    ) -> None:
+        log = open_log(tmp_path / "trail.jsonl")
+        entry = log.append(payload={"i": 0}, payload_type=PT)
+        assert entry.header.hash_version == fingerprint()
+
+    def test_v2_only_trail_verifies_ok_through_the_public_api(
+        self, tmp_path: Path
+    ) -> None:
+        log = open_log(tmp_path / "trail.jsonl")
+        for i in range(5):
+            log.append(payload={"i": i}, payload_type=PT)
+        result = log.verify()
+        assert result.ok is True
+        assert result.checked == 5
+        assert result.unverifiable == ()
+
+    def test_v2_trail_read_by_a_v1_only_build_is_unverifiable_not_broken(
+        self, tmp_path: Path
+    ) -> None:
+        # The concrete, end-to-end proof of the exact failure class
+        # (migration-060 / beads-v1.2.2) this whole project exists to
+        # prevent: an older build encountering a fingerprint it predates
+        # must report "unverifiable by name", never "tampered", and must
+        # never abort verification of the rest of the trail.
+        path = tmp_path / "trail.jsonl"
+        log = open_log(path)
+        for i in range(5):
+            log.append(payload={"i": i}, payload_type=PT)
+        entries = list(log._backend.entries())
+
+        result = verify_chain(entries, _V1OnlyRegistry())
+
+        assert result.ok is True
+        assert result.broken_seq is None
+        assert result.unverifiable == (0, 1, 2, 3, 4)
+        assert result.checked == 0
+
+    def test_hand_built_v1_row_mixed_with_real_v2_appends_verifies_both(
+        self, tmp_path: Path
+    ) -> None:
+        # A real mixed trail: seq 0 is a v1 row built directly (bypassing
+        # AuditLog.append() entirely, the way a row from a build predating
+        # this release would look), seq 1+ are real v2 rows produced by
+        # AuditLog.append() through the public API. Both kinds must verify
+        # correctly in the SAME chain, each under its own fingerprint's
+        # encoder, via the registry's per-row dispatch -- matching a trail
+        # whose writer was upgraded mid-life, not a hand-constructed
+        # all-v1 or all-v2 fixture.
+        path = tmp_path / "trail.jsonl"
+        log = open_log(path)
+
+        payload0 = b'{"i":0}'
+
+        def build_v1(seq: int, prev_hash: str) -> object:
+            from waxseal.domain.header import Entry
+
+            header = EntryHeader(
+                seq=seq,
+                ts=TS,
+                hash_version=fingerprint(),
+                payload_type=PT,
+                payload_hash=compute_payload_hash(payload0),
+                prev_hash=prev_hash,
+            )
+            return Entry(
+                header=header,
+                entry_hash=compute_entry_hash(header, frame=header_frame),
+                payload=payload0,
+            )
+
+        v1_entry = log._backend.append(build_v1)
+        assert v1_entry.header.hash_version == fingerprint()
+
+        for i in range(1, 4):
+            v2_entry = log.append(payload={"i": i}, payload_type=PT)
+            assert v2_entry.header.hash_version == fingerprint()
+
+        result = log.verify()
+        assert result.ok is True
+        assert result.checked == 4
+        assert result.unverifiable == ()

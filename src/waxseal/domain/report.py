@@ -1,9 +1,9 @@
 """Auditor report: what the trail contains and what was actually checked.
 
-``verify`` answers one question — do the links hold. A supervisor, an internal
+``verify`` answers one question: do the links hold. A supervisor, an internal
 audit function, or an external assessor asks a wider one: what is in this
 trail, over what period, how many decisions of which kind, how many had a
-human in the loop, and — the part that is easy to leave out — which of those
+human in the loop, and (the part that is easy to leave out) which of those
 questions nobody measured.
 
 Pure and rendering-only: it computes nothing about integrity that
@@ -15,6 +15,14 @@ of them produces a document more confident than its evidence:
 - unverifiable-by-name is not tampering (the reason exit 2 exists);
 - ``dropped_writes=None`` is "never measured", not "measured zero" (rule 5);
 - a sidecar nobody checked is not a sidecar that passed.
+
+This report states τ (the separation degree) and enumerates the authorities
+counted, computed from a caller-supplied ``declared_topology`` via
+``domain/separation``: two deployments with identical cryptography and
+different τ are not comparably secure, so a report omitting τ would omit the
+one quantity that varies between them. `None` (no topology declared) renders
+as "not declared", never as `0` or `1` (rule 5). Closes conformance.md gap G1
+(waxseal-mfi).
 """
 
 from __future__ import annotations
@@ -27,6 +35,12 @@ from typing import Any
 
 from waxseal.domain.decision import DECISION_PAYLOAD_TYPE, from_payload
 from waxseal.domain.header import Entry
+from waxseal.domain.separation import (
+    SeparationTopology,
+    counted_authorities,
+    render_counted_authorities,
+    separation_degree,
+)
 from waxseal.domain.verify import VerifyResult
 from waxseal.domain.witnessing import (
     WITNESS_INCONSISTENT,
@@ -62,7 +76,7 @@ SCOPE_LINE = (
 @dataclass(frozen=True, slots=True)
 class CheckSummary:
     """Outcome of a sidecar check. The absence of one of these (``None`` on
-    the report) means the check was never run — never that it passed."""
+    the report) means the check was never run, never that it passed."""
 
     ok: bool
     checked: int
@@ -70,12 +84,12 @@ class CheckSummary:
     # The third value the chain verdict has always had, made available to
     # sidecar checks too: this build could not read the thing by name (a pin
     # state from a newer waxseal, a timestamp token in a shape it does not
-    # parse). Not a pass and not a break — exit 2, the same distinction that
+    # parse). Not a pass and not a break: exit 2, the same distinction that
     # keeps an unknown fingerprint from being called tampering.
     unverifiable: bool = False
     # Caveats that qualify an `ok`: a check that ran but could not cover
     # everything in front of it. These belong on the summary, not on the
-    # caller's printed line — `report` is the artifact an auditor still has
+    # caller's printed line, since `report` is the artifact an auditor still has
     # six months later, and a caveat only `verify` prints is a caveat that
     # never reaches them.
     notes: tuple[str, ...] = ()
@@ -108,6 +122,13 @@ class AuditReport:
     attestations: CheckSummary | None
     pin: CheckSummary | None = None
     witnesses: tuple[WitnessVerdict, ...] | None = None
+    # `None` means no `declared_topology` was supplied: "not declared", never
+    # the smallest declared degree (1) or a bare 0 (rule 5). `counted_
+    # authorities` is the enumeration a report must carry alongside the bare
+    # number: τ is exactly the claim an assessor can check by asking who
+    # operates what (conformance.md gap G1).
+    separation_degree: int | None = None
+    counted_authorities: tuple[tuple[str, int], ...] | None = None
 
     def to_json(self) -> str:
         return json.dumps(
@@ -149,6 +170,21 @@ class AuditReport:
                 "attestations": _summary_obj(self.attestations),
                 "pin": _summary_obj(self.pin),
                 "witnesses": _witnesses_obj(self.witnesses),
+                "separation": {
+                    "tau": self.separation_degree,
+                    "counted_authorities": (
+                        None
+                        if self.counted_authorities is None
+                        else [
+                            {"name": name, "count": count}
+                            for name, count in self.counted_authorities
+                        ]
+                    ),
+                    "note": (
+                        "null means no topology was declared, which is not the same "
+                        "as a declared topology of degree 0 or 1"
+                    ),
+                },
                 "scope": {"id": SCOPE_ID, "statement": SCOPE_STATEMENT},
             },
             indent=2,
@@ -212,6 +248,19 @@ class AuditReport:
         lines.append(f"- Attestations: {_summary_text(self.attestations)}")
         lines.append(f"- Pin: {_summary_text(self.pin)}")
         lines += _witness_lines(self.witnesses)
+
+        lines += ["", "## Separation", ""]
+        if self.separation_degree is None:
+            lines.append(
+                "- τ (separation degree): **not declared** — two deployments with "
+                "identical cryptography and different τ are not comparably secure, "
+                "and this trail's pin carries no `declared_topology` to measure it "
+                "from"
+            )
+        else:
+            breakdown = render_counted_authorities(self.counted_authorities)
+            lines.append(f"- τ (separation degree): **{self.separation_degree}** ({breakdown})")
+
         # Last, so it qualifies everything above without displacing the
         # verdict a reader opened the document for.
         lines += ["", "## Scope", "", SCOPE_STATEMENT]
@@ -226,10 +275,13 @@ def build_report(
     attestations: CheckSummary | None = None,
     pin: CheckSummary | None = None,
     witnesses: tuple[WitnessVerdict, ...] | None = None,
+    declared_topology: SeparationTopology | None = None,
 ) -> AuditReport:
     """Summarize a trail. ``anchors``/``attestations``/``pin``/``witnesses``
-    left at ``None`` mean those checks were not run — the report says so
-    rather than implying a pass."""
+    left at ``None`` mean those checks were not run, and the report says so
+    rather than implying a pass. ``declared_topology`` left at ``None`` means
+    no topology was declared for this trail, so τ renders as "not declared",
+    never as ``0`` or ``1`` (rule 5)."""
     by_type: Counter[str] = Counter()
     by_fingerprint: Counter[str] = Counter()
     by_decision_type: Counter[str] = Counter()
@@ -284,6 +336,8 @@ def build_report(
         attestations=attestations,
         pin=pin,
         witnesses=witnesses,
+        separation_degree=separation_degree(declared_topology),
+        counted_authorities=counted_authorities(declared_topology),
     )
 
 
@@ -300,7 +354,7 @@ def _parse_decision(entry: Entry) -> Any:
 
 
 def _ranked(counter: Counter[str]) -> tuple[tuple[str, int], ...]:
-    """Most frequent first, ties broken by name — two audits of the same
+    """Most frequent first, ties broken by name, so two audits of the same
     trail must diff cleanly."""
     return tuple(sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])))
 
@@ -385,7 +439,7 @@ def _summary_text(summary: CheckSummary | None) -> str:
             "by name, which is NOT evidence of tampering"
         )
     else:
-        # A passing check can still carry a caveat worth printing — "the
+        # A passing check can still carry a caveat worth printing: "the
         # sidecar exists and holds nothing" passes without having measured
         # anything, and a reader must not take it for coverage.
         head = f"ok ({summary.checked} checked)"

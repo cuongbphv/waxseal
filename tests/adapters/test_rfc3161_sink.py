@@ -14,7 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from waxseal.adapters.anchors import RecordingAnchorSink, SinkReceipt, read_anchor_records
+from waxseal.adapters.anchors import (
+    MultiAnchorSink,
+    RecordingAnchorSink,
+    SinkReceipt,
+    read_anchor_records,
+)
 from waxseal.adapters.remote import RemoteRequest, RemoteResponse
 from waxseal.adapters.rfc3161 import ACCEPT, CONTENT_TYPE, Rfc3161AnchorSink
 from waxseal.domain.checkpoint import Checkpoint, checkpoint_frame
@@ -251,6 +256,98 @@ class TestRecordingAnchorSink:
         record = read_anchor_records(trail).records[0]
         assert record.version == 2
         assert record.checkpoint.agg_epoch == 2
+
+
+class TestMultiAnchorSink:
+    """waxseal-4yk: one checkpoint, fanned out to two independently-recording
+    sinks. Each ``Quiet``/``Failing`` fake below plays the same role
+    ``RecordingAnchorSink``'s own tests already give them — a real
+    ``RecordingAnchorSink`` around ``Rfc3161AnchorSink``/``OtsAnchorSink`` is
+    exercised end to end through the CLI in test_cli_receipts.py; this class
+    is the sink-fan-out contract in isolation.
+    """
+
+    def test_needs_at_least_two_sinks(self) -> None:
+        class Quiet:
+            name = "quiet"
+
+            def anchor(self, checkpoint: Checkpoint) -> str | None:
+                return None
+
+        with pytest.raises(ValueError, match="at least two"):
+            MultiAnchorSink([Quiet()])
+
+    def test_both_sinks_publish_the_identical_checkpoint(self) -> None:
+        seen: list[Checkpoint] = []
+
+        def recorder(name: str) -> object:
+            class Recorder:
+                def anchor(self, checkpoint: Checkpoint) -> str | None:
+                    seen.append(checkpoint)
+                    return None
+
+            Recorder.name = name  # type: ignore[attr-defined]
+            return Recorder()
+
+        multi = MultiAnchorSink([recorder("a"), recorder("b")])
+        multi.anchor(CP)
+
+        assert seen == [CP, CP]
+        assert multi.failures == []
+
+    def test_one_sink_failing_does_not_stop_the_other_from_recording(
+        self, tmp_path: Path
+    ) -> None:
+        trail = tmp_path / "trail.jsonl"
+
+        class Failing:
+            name = "rfc3161"
+
+            def anchor(self, checkpoint: Checkpoint) -> str | None:
+                raise RuntimeError("network down")
+
+        multi = MultiAnchorSink(
+            [Failing(), RecordingAnchorSink(trail, _Quiet())]
+        )
+        multi.anchor(CP)
+
+        records = read_anchor_records(trail).records
+        assert len(records) == 1
+        assert records[0].sink == "quiet"
+        # Labelled, not silent (CLAUDE.md rule 6): the caller can see which
+        # sink failed and why.
+        assert multi.failures == [("rfc3161", "network down")]
+
+    def test_every_sink_failing_raises_with_both_reasons(self) -> None:
+        class Failing:
+            def __init__(self, name: str, reason: str) -> None:
+                self.name = name
+                self._reason = reason
+
+            def anchor(self, checkpoint: Checkpoint) -> str | None:
+                raise RuntimeError(self._reason)
+
+        multi = MultiAnchorSink([Failing("rfc3161", "tsa down"), Failing("ots", "cal down")])
+        with pytest.raises(RuntimeError, match="rfc3161: tsa down; ots: cal down"):
+            multi.anchor(CP)
+
+    def test_the_name_joins_both_child_names(self) -> None:
+        class Named:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def anchor(self, checkpoint: Checkpoint) -> str | None:
+                return None
+
+        multi = MultiAnchorSink([Named("rfc3161"), Named("ots")])
+        assert multi.name == "rfc3161+ots"
+
+
+class _Quiet:
+    name = "quiet"
+
+    def anchor(self, checkpoint: Checkpoint) -> str | None:
+        return None
 
 
 class TestNoncePersistence:

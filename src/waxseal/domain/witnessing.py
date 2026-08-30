@@ -1,7 +1,7 @@
 """Witness cross-check: comparing the local trail against outside observers.
 
 A pinned head catches a server that rewrites history for one client. It cannot
-catch split-view — a server that serves one self-consistent history to the
+catch split-view: a server that serves one self-consistent history to the
 auditor and a different one to the operator, indefinitely. Neither client sees
 the other's, so no local check can tell the two worlds apart; the observation
 has to leave the client. That is the fork-consistency result (Mazières &
@@ -13,7 +13,7 @@ its checkpoints to and later reads back. Consistency with what a witness holds
 is checked with ``verify_checkpoint``: with the full local hash list in hand,
 "the current tree extends the tree the witness saw" is exactly what that
 already decides, so no second proof format is introduced. RFC 9162 consistency
-proofs stay the primitive for the case this module does not cover — a witness
+proofs stay the primitive for the case this module does not cover, a witness
 checking two published heads against each other without holding the log.
 
 What witnesses do NOT give, stated here so no caller has to infer it: they
@@ -78,7 +78,7 @@ def check_witnessed(
     raises: a witness response is remote input.
 
     A witness holding nothing yields ``checked=0`` and the reason
-    ``no_checkpoints_witnessed`` — it answered, and it had no coverage to
+    ``no_checkpoints_witnessed``: it answered, and it had no coverage to
     offer. That is not the same as agreeing with the trail.
     """
     checked = 0

@@ -8,7 +8,7 @@ about that.
 
 Reading back does close it. If the auditor and the operator publish to the same
 witness, each sees checkpoints the other's view has to be consistent with, and
-the server has to fork the witness too — which is a different administrative
+the server has to fork the witness too, which is a different administrative
 domain, and the point of the exercise. A witness read back from the same
 authority that serves the chain proves nothing at all.
 

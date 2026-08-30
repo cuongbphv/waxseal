@@ -2,7 +2,7 @@
 
 Appends tool usage, task, and crew lifecycle events to a tamper-evident hash
 chain. Instantiate it once at your entry point (crew.py / main.py / flow.py)
-and keep the reference alive — construction IS the registration:
+and keep the reference alive, because construction IS the registration:
 
     from waxseal.integrations.crewai import WaxsealEventListener
     audit = WaxsealEventListener("~/.waxseal/crewai-trail.jsonl")
@@ -16,13 +16,13 @@ Contract verified against crewai 1.15.17 (PyPI wheel source, 2026-08-21):
   event). ToolUsageEvent carries tool_name, tool_args (dict|str),
   agent_role/agent_id/task_id/task_name; Finished adds output/from_cache;
   Error adds error.
-- The bus wraps handlers in try/except and only PRINTS failures — a raise
+- The bus wraps handlers in try/except and only PRINTS failures, so a raise
   here is a silently dropped audit record. Every failure path below instead
   degrades to a labelled, counted dropped write (chain integrity ≠ trail
   completeness).
 
 Ships in the wheel: `pip install waxseal crewai`, then import from
-waxseal.integrations.crewai — no file copying.
+waxseal.integrations.crewai, with no file copying.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ _REDACTOR = RegexRedactor()
 PAYLOAD_TYPE = "application/vnd.crewai.event+json"
 
 # Tool outputs can be megabytes (scraped pages, file reads). Clip stored
-# fields, visibly — silent truncation would read as "the full output".
+# fields, visibly, because silent truncation would read as "the full output".
 MAX_FIELD_CHARS = 4096
 
 # Attributes copied off each event when present. Deliberately curated:
@@ -106,7 +106,7 @@ class WaxsealEventListener(BaseEventListener):
                 )
         except Exception as e:  # broken environment: never block the crew
             print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
-            # No AuditLog to route this through — record it directly,
+            # No AuditLog to route this through, so record it directly,
             # best-effort (FileDropRecorder.record() never raises).
             from waxseal.adapters.drops import FileDropRecorder
 

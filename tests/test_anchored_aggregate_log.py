@@ -576,3 +576,87 @@ class TestKeylessAggregateBinding:
         AuditLog.open(path).append(payload={"i": 0}, payload_type=PT)
         assert main(["anchor", str(path)]) == 0
         assert "agg_commit" not in json.loads(capsys.readouterr().out.strip())
+
+
+class TestFaultInjectionBetweenAnchorsAndSealagg:
+    """`anchor()` reads `.sealagg` to bind a commitment into the checkpoint,
+    THEN writes that checkpoint to `.anchors` — a read-then-write pair
+    across the two files this module's own docstring calls out ("the
+    aggregate binding reaches an anchor"). Both directions of a crash
+    between them must surface as something checkable, never a silent pass
+    and never a raw crash indistinguishable from an unrelated bug
+    elsewhere (CLAUDE.md rule 6).
+    """
+
+    def test_a_crash_mid_write_of_the_anchors_record_is_a_labelled_mismatch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The `.sealagg` read that feeds the checkpoint's binding succeeds
+        # (three appends sealed cleanly first); the crash lands DURING the
+        # dependent `.anchors` write, after some bytes already reached disk
+        # — a real torn record, not merely "raised before touching the
+        # file". `file_lock` (CLAUDE.md rule 7) only serializes this writer
+        # against OTHER writers; it cannot stop this writer's own process
+        # from dying mid-syscall.
+        import os
+
+        path = tmp_path / "trail.jsonl"
+        log = sealed_log(path)
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type=PT)
+
+        real_fdopen = os.fdopen
+
+        class TornFile:
+            def __init__(self, real: object) -> None:
+                self._real = real
+
+            def write(self, s: str) -> None:
+                self._real.write(s[:10])  # type: ignore[attr-defined]
+                self._real.flush()  # type: ignore[attr-defined]
+                raise OSError("simulated crash mid-write of the .anchors record")
+
+            def __enter__(self) -> TornFile:
+                return self
+
+            def __exit__(self, *exc: object) -> bool:
+                self._real.close()  # type: ignore[attr-defined]
+                return False
+
+        def faulty_fdopen(fd: int, *a: object, **kw: object) -> object:
+            return TornFile(real_fdopen(fd, *a, **kw))
+
+        monkeypatch.setattr(os, "fdopen", faulty_fdopen)
+        with pytest.raises(OSError, match="simulated crash"):
+            log.anchor()
+        monkeypatch.undo()
+
+        # The torn line is unreadable BY NAME (a parse failure), which is
+        # exactly what must never be silently accepted as a valid record.
+        with pytest.raises(ValueError):
+            read_anchor_records(path)
+
+        result = log.verify_anchored_aggregates(initial_key=KEY)
+        assert not result.ok
+        assert result.reason == "malformed_anchor"
+        # The CHAIN itself was never touched — a torn LOCAL sidecar must
+        # never read back as the chain having been tampered with.
+        assert log.verify().ok
+
+    def test_a_malformed_sealagg_refuses_the_anchor_with_a_named_reason(
+        self, tmp_path: Path
+    ) -> None:
+        # The other direction: the FIRST step (reading `.sealagg` to build
+        # the commitment) is itself corrupt, so the dependent `.anchors`
+        # write must never even be attempted.
+        path = tmp_path / "trail.jsonl"
+        log = sealed_log(path)
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type=PT)
+        (tmp_path / "trail.jsonl.sealagg").write_text("{not json at all")
+
+        with pytest.raises(RuntimeError, match="sealagg.*malformed"):
+            log.anchor()
+
+        assert not (tmp_path / "trail.jsonl.anchors").exists()
+        assert log.verify().ok

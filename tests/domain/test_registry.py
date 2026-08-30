@@ -2,14 +2,15 @@
 
 import pytest
 
-from waxseal.domain.fingerprint import HEADER_V1_FIELDS, fingerprint_for, fingerprint_v1
+from waxseal.domain.fingerprint import HEADER_FIELDS, fingerprint, fingerprint_for
+from waxseal.domain.hashing import header_frame
 from waxseal.domain.registry import VersionRegistry
 
 
 class TestVersionRegistry:
-    def test_v1_is_known_out_of_the_box(self) -> None:
+    def test_this_builds_schema_is_known_out_of_the_box(self) -> None:
         reg = VersionRegistry()
-        assert reg.knows(fingerprint_v1())
+        assert reg.knows(fingerprint())
 
     def test_unknown_fingerprint_is_not_known(self) -> None:
         reg = VersionRegistry()
@@ -17,19 +18,19 @@ class TestVersionRegistry:
 
     def test_register_new_schema_returns_its_fingerprint(self) -> None:
         reg = VersionRegistry()
-        widened = (*HEADER_V1_FIELDS, "redaction_version")
+        widened = (*HEADER_FIELDS, "redaction_version")
         fp = reg.register(widened)
         assert fp == fingerprint_for(widened)
         assert reg.knows(fp)
 
     def test_reregistering_same_schema_is_idempotent(self) -> None:
         reg = VersionRegistry()
-        widened = (*HEADER_V1_FIELDS, "redaction_version")
+        widened = (*HEADER_FIELDS, "redaction_version")
         assert reg.register(widened) == reg.register(widened)
 
     def test_fields_lookup_by_fingerprint(self) -> None:
         reg = VersionRegistry()
-        assert reg.fields(fingerprint_v1()) == HEADER_V1_FIELDS
+        assert reg.fields(fingerprint()) == HEADER_FIELDS
 
     def test_fields_for_unknown_fingerprint_raises_keyerror(self) -> None:
         reg = VersionRegistry()
@@ -41,3 +42,36 @@ class TestVersionRegistry:
         reg = VersionRegistry()
         assert not hasattr(reg, "unregister")
         assert not hasattr(reg, "remove")
+
+
+class TestEncoderFor:
+    """encoder_for resolves a stored identity to the code that can reproduce
+    it, and returns None rather than guessing. That None is the whole
+    doctrine: a fingerprint this build does not implement is unverifiable by
+    name, never recomputed under an encoding it was not signed with."""
+
+    def test_this_builds_fingerprint_dispatches_to_its_frame(self) -> None:
+        assert VersionRegistry().encoder_for(fingerprint()) is header_frame
+
+    def test_unknown_fingerprint_has_no_encoder(self) -> None:
+        assert VersionRegistry().encoder_for("f" * 64) is None
+
+    def test_registered_but_unimplemented_schema_has_no_encoder(self) -> None:
+        # A field tuple this build's hasher does not implement must degrade to
+        # unverifiable, never be silently hashed under the wrong frame.
+        reg = VersionRegistry()
+        other = reg.register(("seq", "ts", "actor"))
+        assert reg.knows(other)
+        assert reg.encoder_for(other) is None
+
+    def test_encoder_for_and_recomputable_agree(self) -> None:
+        reg = VersionRegistry()
+        other = reg.register(("seq", "ts", "actor"))
+        for fp in (fingerprint(), "f" * 64, other):
+            assert reg.recomputable(fp) == (reg.encoder_for(fp) is not None), fp
+
+    def test_schema_is_known_and_recomputable_out_of_the_box(self) -> None:
+        reg = VersionRegistry()
+        assert reg.knows(fingerprint())
+        assert reg.recomputable(fingerprint())
+        assert reg.fields(fingerprint()) == HEADER_FIELDS

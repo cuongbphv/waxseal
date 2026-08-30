@@ -41,9 +41,10 @@ AGG_COMMIT_PREFIX = b"waxseal-aggcommit-v1\n"
 AGG_GENESIS = "0" * 64
 
 
-def lp(value: str) -> bytes:
-    """SPEC section 2 (lp64v1): 8-byte big-endian length prefix + UTF-8 bytes."""
-    enc = value.encode("utf-8")
+def lp(value: str | None) -> bytes:
+    """SPEC section 2 (lp64): 8-byte big-endian length prefix over a tagged
+    payload -- 0x00 for absent, 0x01 before a string's UTF-8 bytes."""
+    enc = b"\x00" if value is None else b"\x01" + value.encode("utf-8")
     return struct.pack(">Q", len(enc)) + enc
 
 

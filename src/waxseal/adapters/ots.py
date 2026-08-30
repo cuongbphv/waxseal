@@ -7,7 +7,7 @@ and python-opentimestamps' ``calendar.py``, 2026-08-23.)
 
 One calendar per sink, on purpose. Redundancy in OpenTimestamps comes from
 submitting the same digest to several calendars, which here is several anchor
-events — an aggregating sink would have to decide what a partial failure means,
+events, and an aggregating sink would have to decide what a partial failure means,
 and that is an operator's call, not a default.
 
 The proof this stores is PENDING and stays opaque: see domain/ots.py for why

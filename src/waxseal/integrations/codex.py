@@ -10,7 +10,7 @@ interpreter this runs under.
 Contract verified against openai/codex source, rust-v0.149.0 (2026-08-21):
 
 - One JSON event arrives on STDIN (argv delivery is the legacy `notify`
-  mechanism — turn-level only, not used here). snake_case fields:
+  mechanism, turn-level only, not used here). snake_case fields:
   session_id, turn_id, cwd, hook_event_name, model, permission_mode,
   tool_name, tool_input, tool_use_id; PostToolUse adds tool_response.
 - Hook stdout is parsed as camelCase decision JSON (`decision`, `continue`,
@@ -41,7 +41,7 @@ _REDACTOR = RegexRedactor()
 PAYLOAD_TYPE = "application/vnd.codex.hook-event+json"
 
 # Tool responses can be megabytes (file reads, terminal dumps). Clip stored
-# fields, visibly — silent truncation would read as "the full output".
+# fields, visibly, because silent truncation would read as "the full output".
 MAX_FIELD_CHARS = 4096
 
 _COMMON_FIELDS = (
@@ -109,7 +109,7 @@ def main() -> int:
         log = AuditLog.open(_trail_path(), redactor=RegexRedactor(), record_drops=True)
     except Exception as e:
         print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
-        # No AuditLog to route this through — record it directly, best-effort
+        # No AuditLog to route this through, so record it directly, best-effort
         # (FileDropRecorder.record() never raises).
         from waxseal.adapters.drops import FileDropRecorder
 

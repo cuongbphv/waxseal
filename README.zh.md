@@ -9,27 +9,45 @@ waxseal 为你的 Agent 提供密码学审计轨迹：每个动作都被追加�
 任何对历史记录的修改、删除、插入或重排都会被检测出来。schema 演进不会触发虚假的
 篡改警报：旧行按写入时的指纹来验证。
 
+![waxseal workflow](https://raw.githubusercontent.com/cuongbphv/waxseal/main/docs/assets/waxseal-workflow.zh.gif)
+
+<sub>追加 · 篡改 · schema 演进 · 完整性 · 锚定 · 多 Agent 交接 · 裁决。重新生成：`python tools/gen_workflow_animation.py --render`。</sub>
+
 ## 为什么还需要一个审计日志库？
 
-哈希链日志在实践中崩溃的原因往往很平凡：**schema 变了**。两起真实事故塑造了这个库：
+哈希链日志在实践中崩溃的原因往往很平凡：schema 变了。有两起事故塑造了这个库。
 
-- 某生产系统在没有版本标识的情况下扩展了被哈希的字段集——所有历史行验证失败，
-  引发大规模虚假篡改警报。
-- 某 Agent 记忆工具（beads v1.2.2，2026 年 8 月）意外发布了一次 schema 迁移；
-  回滚后的二进制遇到 *"schema version mismatch: database is at v65, binary knows up
-  to v53"* 直接硬性失败，唯一的逃生通道是完全关闭安全检查。
+第一起，某生产系统扩展了被哈希的字段集，却没有给新的布局一个属于它自己的版本标识。
+于是所有历史行都按一套它们从未被写入过的字段集重新计算，全部在同一时刻验证失败，
+而响起的那声警报是虚假的。
 
-两者属于同一类故障：*序数式版本标识 + 把未知版本当作错误*。waxseal 让这类故障
-无法表达：
+第二起，一个叫 beads 的 Agent 记忆工具在 1.2.2 版（2026 年 8 月）意外发布了一次
+schema 迁移。这个版本被回滚之后，较旧的二进制遇到一个它不认识的数据库，直接拒绝
+启动，并打印出 *"schema version mismatch: database is at v65, binary knows up to
+v53"*。唯一能绕过它的办法，是一个把安全检查彻底关掉的环境变量。
 
-1. **信封设计** —— 链只哈希一个固定的 header
-   （`seq, ts, hash_version, payload_type, payload_hash, prev_hash`）。payload 是任意
-   字节；payload schema 的变化永远不会触及链本身。
-2. **自动 schema 指纹** —— `hash_version` 是 header schema 规范化描述符的 SHA-256。
-   扩展字段集*不可能*保留旧身份；旧行永远用它自己的指纹来验证。
-3. **未知指纹 → "unverifiable by name"（按名不可验证）** —— 永远不是"被篡改"，
-   永远不会崩溃（RFC 6962 原则：无法识别的类型是不透明数据，不是错误）。
-   版本回滚时优雅降级。
+两次失败的形状是一样的：版本标识只是一个序数，而未知版本被当作错误处理。waxseal
+的构造让这两件事都无法表达。
+
+链只哈希一个固定的 header，除此之外什么都不哈希（`seq`、`ts`、`hash_version`、
+`payload_type`、`payload_hash`、`prev_hash`）。你的 payload 是任意字节，只通过它的
+摘要被引用，所以改动 payload 的 schema 永远不会触及链本身。
+
+`hash_version` 不是任何人手打出来的字符串。它是 header schema 连同其编码的规范化
+描述符的 SHA-256，因此扩展字段集或更换编码都会产生一个不同的身份，无论你是否有意
+为之。旧行仍旧按它们实际被写入时所用的那个指纹来验证。
+
+当验证方遇到一个它不认识的指纹时，它把那一行报告为 unverifiable by name（按名不可
+验证）。它不报告篡改，也不会崩溃。这与 RFC 6962 对待无法识别类型的原则相同，即把
+它们看作不透明数据而非错误，也正是这一点让一次版本回滚能够平稳降级，而不是让警报
+响起来。
+
+这个库后来把这套机制用在了它自己身上。0.1.4 彻底替换了规范化编码，从 `lp64v1` 换成
+无条件单射的 `lp64`（[CHANGELOG](CHANGELOG.md) 解释了原因），而不是并行保留两套。
+由于编码本身就是描述符的一个组成部分，所有指纹都随之自行改变。不存在任何可能出错的
+迁移过程，而 0.1.3 写的 trail 被 0.1.4 读取时会报为 *unverifiable* 而非 *tampered*，
+正是上面那段所承诺的行为。这是一次破坏性格式变更，是在尚无任何以旧编码写入的 trail
+存在于开发环境之外时，有意做出的。
 
 ## 与其他哈希链方案的对比
 
@@ -316,9 +334,37 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
   它读不懂的回执算*不可验证*（exit 2）；只有为不同字节作证的回执才算*断链*（exit 1）。
 - **OpenTimestamps** 存的是一份*待定（pending）*的比特币证明，不透明是有意为之。
   日后用 `ots upgrade` / `ots verify` 把它补完。
+- 这两者**可以在同一次 `anchor` 运行中一起使用**，把同一个 checkpoint 同时发布到两边
+  —— 时间戳权威负责分钟级的检测窗口，calendar 负责长周期的不可否认性 —— 一次运行即可，
+  不必连着跑两次。其中一个 sink 连不上不会连累另一个丢掉它的记录；失败会被打上标签打印
+  出来，绝不会被悄悄吞掉。你多接通一个独立域，攻击者就要多控制一个权威。
 - **`--pin`** 是 trail 的 `known_hosts`：验证方保存一份自己算出来的 checkpoint，
   并拒绝与之矛盾的历史。首次使用会被明确标注，pin 只在一次干净的运行之后才前进，
-  已损坏的 pin 绝不会被悄悄重新 pin。
+  已损坏的 pin 绝不会被悄悄重新 pin。pin 还可以携带运维方所**期待**的状态；
+  当一次运行观察到的少于所声明的，它会以退出码 2 说出来 —— 这是缺少佐证，
+  绝不是篡改指控：
+  - `expect_anchor_binding` —— 不带 SPEC 15 聚合字段的 checkpoint frame，与从未有过
+    这些字段的 frame 逐字节完全相同，因此控制 `.anchors` sidecar 的攻击者可以悄悄
+    剥掉这层保护。开启此标志后，若 sidecar 在已 pin 的 seq 及其之后只有无绑定记录，
+    则报告 `anchor_policy_downgrade`。本构建无法解析的记录报告
+    `anchor_binding_unreadable` —— 绝不当作"没有绑定"。
+  - `max_anchor_age_s` —— 沉默的截止期限。最新的 `.anchors` 记录比它更旧（或根本
+    没有记录）即为 `anchor_stale`。无法解析的时间戳报告
+    `anchor_timestamp_unparseable`，绝不计为新鲜。
+  - `declared_topology` —— 运维方声明有多少个独立权威持有绑定。若一次运行观察到的
+    外部 anchor sink 数量更少，或没有一致的 witness，则报告 `separation_shortfall`。
+    未声明就读作*未声明*，绝不读作零。
+
+  `verify`/`report --pin` 现在接受 `--expect-anchor-binding`（一个开关）、
+  `--max-anchor-age-s SECONDS`，以及 `--declare-topology SPEC`（一次性给出
+  `SeparationTopology` 的全部四个子字段，例如
+  `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`）来写入这三项声明 ——
+  每一个都必须搭配 `--pin`，只在真正推进 pin 的那次运行才会生效，而
+  `--declare-topology` 只给出四个子字段中的一部分会被当作 CLI 用法错误，绝不会被
+  静默地补上默认值。不带这些参数的一次 pin 前进会原样保留此前已声明的内容。你仍然可以
+  直接手改 pin 状态的 JSON，格式仍是 SPEC section 13.1。`waxseal verify`/`waxseal report`
+  在每次运行时都会打印 `declared_topology` 所描述的分离度 τ —— 见
+  [docs/paper/conformance.md](docs/paper/conformance.md) 的 G2（已完成）。
 - **`--witness`** 是 pin 无法充当的外部通道。pin 能抓住一台为你重写历史的服务器；
   只有位于*不同*信任域的 witness，才能抓住一台向两个客户端出示两份不同历史的服务器。
   连不上的 witness 会打印 `unreachable — NOT checked`，并以退出码 2（不可验证）结束：
@@ -330,6 +376,9 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 - [docs/security/threat-model.md](docs/security/threat-model.md) —— 为什么纯软件做不到
   tamper-*proof*、面对拜占庭式的链服务器客户端能检测到什么、又可证明地检测不到什么，
   以及如何在不夸大的前提下引用 waxseal 的输出
+- [docs/paper/conformance.md](docs/paper/conformance.md) —— 一份对本库的独立形式化再分析
+  提出了什么要求、0.1.4 交付了什么，以及逐行附证据地说明还有什么没做。包括此前任何
+  release note 都未曾声明的那部分
 
 ## 签名与前向安全封印
 
@@ -388,6 +437,34 @@ attestation 存放在 `.attest` 边车文件中（不改动任何后端 schema�
 （`.sealagg`，只保留最新值），这样攻击者即便拿到了 trail、`.attest` 边车文件、
 甚至最终的累加器值，也无法自行重新折叠出同样的结果 —— 堵上了普通方案在 keyfile
 连同被截断的尾部一起泄露时留下的缺口。
+
+## 跨 trail 的 handoff binding
+
+当 agent B 的任务由 agent A 委派、且各自保有自己独立的 trail 时，只携带
+agent **名字** 的 handoff *phase* 在密码学意义上什么都没有承诺。
+`record_handoff` 转而把一个指针 —— `(chain_id, seq, head_hash)` —— 写进
+B 自己的 trail，记下 A 的 chain identity 以及委派那一刻 A 的准确 head：
+
+```python
+from waxseal.sources.handoff import record_handoff
+
+# 写在 DELEGATE 自己的 trail（log_b）上，指向 ORIGIN（log_a）当前的 head：
+entries = list(log_a.entries())
+seq_a, hash_a = entries[-1].header.seq, entries[-1].entry_hash
+
+record_handoff(log_b, chain_id="agent-a", seq=seq_a, head_hash=hash_a)
+```
+
+一旦 B 的 trail 上任何后续 entry 被 anchor，那次 anchor 也会一并把 A 的
+prefix 传递地 pin 到 `seq_a`：`waxseal verify-handoff <delegate-trail>
+--origin <origin-trail>` 会把 delegate trail 上记录的每一个 handoff binding
+拿去跟 origin trail 当前的历史重新核对，报告哪些（如果有）已经不再
+holds —— 对两条 trail 都只读。
+
+`record_handoff` 本身没有、也永远不会有 CLI 命令：它调用 `log.append`，而
+CLI 自身的契约就是绝不向 chain 追加 entry（这和上文 `record_file`、
+`record_decision`、`generate_key` 是 operator 自己代码直接 import 调用的
+库函数、而非 subcommand 的原因完全相同）。
 
 ## 完整性度量：统计被丢弃的写入
 
@@ -457,8 +534,8 @@ transcript，请轮换密钥；waxseal 的 trail 才是你可以保留、分享�
 
 ## 规范与设计
 
-- [SPEC.md](SPEC.md) —— 字节级格式（lp64v1 编码、PAE 风格框架、指纹构造；计划在
-  v1 冻结）附带黄金测试向量 —— 可移植到任何语言。
+- [SPEC.md](SPEC.md) 描述字节级格式（lp64 编码、PAE 风格框架、指纹构造；计划在
+  v1 冻结），并附带黄金测试向量，因此可以用任何语言重新实现。
 - [REMOTE.md](REMOTE.md) —— `RemoteBackend` 的接口约定：端点、envelope 格式、
   认证方式，以及受信任写入者这一信任模型。
 - [DESIGN.md](DESIGN.md) —— 算法选型及其背后的学术文献。

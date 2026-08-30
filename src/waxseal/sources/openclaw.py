@@ -1,6 +1,6 @@
 """OpenClaw audit-ledger source: chain a ledger that prunes itself.
 
-OpenClaw already records what its agents did — `audit_events` in
+OpenClaw already records what its agents did (`audit_events` in
 `state/openclaw.sqlite`, written off the hot path, queryable with
 `openclaw audit --json`. What it does not do is keep that record, or prove it
 was not edited. Its own docs say so (docs/gateway/audit.md):
@@ -14,7 +14,7 @@ was not edited. Its own docs say so (docs/gateway/audit.md):
 There is no hash on a ledger row and no link between rows, so a deleted or
 edited row leaves nothing behind. This module is the external archive: it
 pages the documented export into a waxseal chain, where the record becomes
-append-only, offline-verifiable, and fingerprint-versioned — the last of those
+append-only, offline-verifiable, and fingerprint-versioned. The last of those
 matters because the ledger's shape has already migrated once ("the earlier
 run/tool-only ledger"), which is the migration-060 failure class.
 
@@ -27,15 +27,15 @@ costs the agent nothing.
 Verified against openclaw/openclaw @ main, 2026-08-22:
 - record shape: src/audit/audit-event-types.ts (AUDIT_EVENT_SCHEMA_VERSION 1),
   src/audit/audit-event-store.ts parseAuditRecordBase;
-- paging: audit-event-store.ts listAuditEvents — ORDER BY sequence DESC, and
+- paging: audit-event-store.ts listAuditEvents, ORDER BY sequence DESC, and
   `--cursor` is exclusive (`where("sequence", "<", cursor)`), so the export
   walks BACKWARDS and this module has to reverse it;
 - limits and retention: docs/cli/audit.md ("--limit <count>: activity page
   size from 1 to 500"), docs/gateway/audit.md (30 days, 100,000 rows).
 
 What this proves, and what it does not: the chain proves nothing was altered
-after ingest. It cannot prove the ledger was complete when read — OpenClaw
-documents that "absence of a row proves nothing" — and it carries no tool
+after ingest. It cannot prove the ledger was complete when read, since OpenClaw
+documents that "absence of a row proves nothing", and it carries no tool
 arguments or results, because the ledger deliberately stores none.
 """
 
@@ -82,7 +82,7 @@ class Gap:
     `cause` distinguishes what the hole means, because the two causes call for
     different operator responses and neither is tampering:
 
-    - "prune_or_drop": the rows were gone before waxseal saw them — expiry,
+    - "prune_or_drop": the rows were gone before waxseal saw them, whether by expiry,
       the row cap, or a dropped write. OpenClaw's queue is documented
       best-effort, so prune and drop are indistinguishable from outside; the
       gap names the range, never a cause it cannot establish.
@@ -111,7 +111,7 @@ class IngestResult:
 def run_openclaw_audit(args: list[str]) -> str:
     """Default export runner: `openclaw <args>` → stdout.
 
-    Raises rather than returning a sentinel — `ingest` owns the fail-open
+    Raises rather than returning a sentinel, since `ingest` owns the fail-open
     decision, and a runner that silently returned "" would be indistinguishable
     from an empty ledger.
     """
@@ -144,7 +144,7 @@ def last_ingested_sequence(log: AuditLog) -> int | None:
 
     Derived from the chain itself rather than a cursor file: a cursor file can
     disagree with the chain, and the chain is the record that has to be right.
-    None is not 0 — a ledger's sequences start at 1, so 0 would be a claim
+    None is not 0: a ledger's sequences start at 1, so 0 would be a claim
     about ingested history that never happened (CLAUDE.md rule 5).
     """
     highest: int | None = None
@@ -191,7 +191,7 @@ _PROCESS_INGEST_LOCK = threading.Lock()
 def _ingest_lock_target(trail: Path) -> Path:
     # Deliberately NOT the trail itself: file_lock(trail) is the JSONL
     # backend's own append lock, which every append inside the run below
-    # takes — holding it for the whole run would deadlock the run against
+    # takes. Holding it for the whole run would deadlock the run against
     # its own appends. A dedicated <trail>.ingest.lock sits next to it.
     return trail.with_name(trail.name + ".ingest")
 
@@ -206,11 +206,11 @@ def ingest(
 ) -> IngestResult:
     """Append every ledger record newer than the last ingested one.
 
-    Idempotent: the resume point comes from the chain, and the WHOLE run —
-    resume-read through append — holds one ingest lock, because two
+    Idempotent: the resume point comes from the chain, and the WHOLE run,
+    resume-read through append, holds one ingest lock, because two
     overlapping timer runs that both read the same resume point both ingest
     the same rows (read-tail + append is one critical section, CLAUDE.md
-    rule 7, here with "tail" spelled "resume point"). Never raises — this
+    rule 7, here with "tail" spelled "resume point"). Never raises: this
     runs on a timer, and an audit exporter that crashes the timer stops being
     an audit exporter; a run that cannot take the lock (Windows'
     msvcrt.locking gives up after ~10s) backs off with a labelled notice.
@@ -283,7 +283,7 @@ def _ingest_run(
             page = json.loads(fetch(_page_args(limit=limit, kind=kind, cursor=cursor)))
         except Exception as e:
             # The export never arrived. Nothing was read, so nothing was
-            # dropped — reporting this as a dropped write would make
+            # dropped. Reporting this as a dropped write would make
             # dropped_writes mean two different things.
             return IngestResult(
                 ingested=0,

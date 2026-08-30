@@ -25,10 +25,11 @@ from waxseal.domain.decision import (
     ModelRef,
     to_payload,
 )
-from waxseal.domain.fingerprint import fingerprint_v1
+from waxseal.domain.fingerprint import fingerprint
 from waxseal.domain.hashing import compute_entry_hash
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
 from waxseal.domain.report import AuditReport, CheckSummary, build_report
+from waxseal.domain.separation import SeparationTopology
 from waxseal.domain.witnessing import (
     WITNESS_CONSISTENT,
     WITNESS_INCONSISTENT,
@@ -43,7 +44,7 @@ def entry(seq: int, payload: bytes, payload_type: str, *, prev: str = GENESIS_PR
     header = EntryHeader(
         seq=seq,
         ts=f"2026-08-23T09:00:{seq:02d}+00:00",
-        hash_version=fingerprint_v1(),
+        hash_version=fingerprint(),
         payload_type=payload_type,
         payload_hash=hashlib.sha256(payload).hexdigest(),
         prev_hash=prev,
@@ -96,7 +97,7 @@ class TestInventory:
     def test_groups_by_fingerprint(self) -> None:
         entries = chain(entry(0, b"a", TOOL_TYPE), entry(1, b"b", TOOL_TYPE))
         report = build_report(OK, entries)
-        assert dict(report.by_fingerprint) == {fingerprint_v1(): 2}
+        assert dict(report.by_fingerprint) == {fingerprint(): 2}
 
     def test_reports_the_time_span_covered(self) -> None:
         entries = chain(entry(0, b"a", TOOL_TYPE), entry(1, b"b", TOOL_TYPE))
@@ -253,6 +254,31 @@ class TestSidecarChecks:
         assert report.attestations.reason == "seal_mismatch"
 
 
+class TestSeparationDegreeReporting:
+    """τ and the enumerated authorities it counts — closing conformance.md
+    gap G1: `separation_degree()`/`render_separation_degree()` existed,
+    fully tested, and were called from nowhere in `src/` before waxseal-mfi.
+    """
+
+    def test_no_declared_topology_is_none_not_zero_or_one(self) -> None:
+        report = build_report(OK, [])
+        assert report.separation_degree is None
+        assert report.counted_authorities is None
+
+    def test_declared_topology_is_carried_through(self) -> None:
+        topology = SeparationTopology(
+            seal_escrow=True, anchor_sinks=2, witness=True, pin_separate=False
+        )
+        report = build_report(OK, [], declared_topology=topology)
+        assert report.separation_degree == 5
+        assert report.counted_authorities == (
+            ("writer", 1),
+            ("seal_escrow", 1),
+            ("anchor_sinks", 2),
+            ("witness", 1),
+        )
+
+
 class TestJsonRendering:
     def test_json_is_parseable_and_carries_the_verdict(self) -> None:
         entries = chain(entry(0, decision_bytes(), DECISION_PAYLOAD_TYPE))
@@ -290,6 +316,25 @@ class TestJsonRendering:
     def test_json_is_stable_across_identical_inputs(self) -> None:
         entries = chain(entry(0, b"a", TOOL_TYPE), entry(1, b"b", "application/vnd.z+json"))
         assert build_report(OK, entries).to_json() == build_report(OK, entries).to_json()
+
+    def test_undeclared_tau_serializes_as_null_never_zero_or_one(self) -> None:
+        obj = json.loads(build_report(OK, []).to_json())
+        assert obj["separation"]["tau"] is None
+        assert obj["separation"]["counted_authorities"] is None
+
+    def test_declared_tau_serializes_with_the_enumeration(self) -> None:
+        topology = SeparationTopology(
+            seal_escrow=False, anchor_sinks=1, witness=False, pin_separate=True
+        )
+        obj = json.loads(
+            build_report(OK, [], declared_topology=topology).to_json()
+        )
+        assert obj["separation"]["tau"] == 3
+        assert obj["separation"]["counted_authorities"] == [
+            {"name": "writer", "count": 1},
+            {"name": "anchor_sinks", "count": 1},
+            {"name": "pin_separate", "count": 1},
+        ]
 
 
 class TestMarkdownRendering:
@@ -377,6 +422,21 @@ class TestMarkdownRendering:
     def test_markdown_omits_the_decision_section_when_there_are_none(self) -> None:
         md = build_report(OK, chain(entry(0, b"a", TOOL_TYPE))).to_markdown()
         assert "aml_screening" not in md
+
+    def test_undeclared_tau_renders_as_not_declared_never_zero_or_one(self) -> None:
+        md = build_report(OK, []).to_markdown()
+        line = next(line for line in md.splitlines() if "separation degree" in line)
+        assert "not declared" in line
+        assert "0" not in line and "1" not in line
+
+    def test_declared_tau_renders_the_number_and_the_enumeration(self) -> None:
+        topology = SeparationTopology(
+            seal_escrow=True, anchor_sinks=2, witness=True, pin_separate=True
+        )
+        md = build_report(OK, [], declared_topology=topology).to_markdown()
+        line = next(line for line in md.splitlines() if "separation degree" in line)
+        assert "6" in line
+        assert "writer(1)" in line and "anchor_sinks(2)" in line and "witness(1)" in line
 
     def test_report_is_immutable(self) -> None:
         report = build_report(OK, [])

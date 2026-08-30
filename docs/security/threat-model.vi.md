@@ -137,6 +137,38 @@ và điều gì là chứng minh được là bất khả?
 | phục vụ một trail mâu thuẫn với một anchor | `--anchors` | `anchor_root_mismatch` |
 | cắt đuôi một trail đã niêm phong | epoch của keyfile (SPEC 11) | `keyfile_epoch_mismatch` |
 | replay một aggregate cũ lên một trail đã bị cắt | ràng buộc đã neo (SPEC 15) | `anchored_aggregate_epoch_mismatch` |
+| gỡ ràng buộc aggregate khỏi sidecar | pin `expect_anchor_binding` (SPEC 13.1) | `anchor_policy_downgrade` |
+| ngừng anchor rồi chờ | pin `max_anchor_age_s` (SPEC 13.1) | `anchor_stale` |
+| trình ra ít thẩm quyền độc lập hơn đã khai báo | pin `declared_topology` (SPEC 13.1) | `separation_shortfall` |
+
+Ba dòng cuối là **exit 2, không phải exit 1**, và sự phân biệt này mang tải trọng chứ
+không phải câu nệ. Mỗi dòng nói rằng *sự chứng thực mà chính sách của deployment này
+kỳ vọng đã không được quan sát thấy* — đó là sự thật về độ phủ, không phải về trail.
+Verdict của chain được báo riêng và không bị ảnh hưởng. Người đánh giá đọc chúng thành
+"đã phát hiện giả mạo" là nói quá; đọc thành "không sao" là nói thiếu. Nghĩa đúng là:
+kiểm tra lại đường anchoring, rồi chạy lại.
+
+Hai trong số đó đáng gọi tên vì bản phát hành trước hoàn toàn không thấy được:
+
+- **Hạ cấp chính sách anchoring.** Một checkpoint frame không mang field aggregate thì
+  giống hệt từng byte với một frame viết trước khi các field đó tồn tại. Nên attacker
+  giữ được sidecar `.anchors` chỉ cần trình ra toàn record không ràng buộc là âm thầm
+  gỡ bỏ bảo vệ replay-plus-truncate của SPEC 15: mọi check còn lại đều pass, và không
+  gì trong trust domain của chính verifier ghi rằng đã từng kỳ vọng có ràng buộc. Thứ
+  thiếu là **chính sách** ngoại sinh, không phải **giá trị** ngoại sinh — và khác với
+  bản thân aggregate commitment (không recompute được nếu không có seal key), một kỳ
+  vọng dạng boolean là thứ verifier kiểm được. Record sidecar mà build này không parse
+  nổi sẽ báo `anchor_binding_unreadable`: vắng mặt trong số các record đọc được không
+  phải bằng chứng của vắng mặt.
+- **Sự im lặng.** Anchoring bị động chỉ trả lời khi được hỏi. Một timestamp authority
+  đáp khi có người hỏi; nó không thể nhận ra là **không ai hỏi**. Attacker có quyền ghi
+  chỉ cần *ngừng anchor* rồi rewrite thong thả — và trạng thái lưu trữ sau đó không
+  phân biệt được với một hệ thống vốn nhàn rỗi. `max_anchor_age_s` khép lỗ hổng này cho
+  verifier nào giữ deadline trong trust domain của chính nó: im lặng quá hạn trở thành
+  một finding được báo cáo thay vì một sự vắng mặt của finding. Điều này **không** làm
+  cho sự im lặng trở nên phân xử được công khai — muốn vậy cần một bên thứ ba giữ
+  deadline, và hợp đồng liveness on-chain phác trong `docs/paper/` vẫn là thiết kế,
+  chưa được xây.
 
 ### Chứng minh được là bất khả nếu không có kênh bên ngoài
 

@@ -1,7 +1,7 @@
 """Default regex-based redactor.
 
 Runs BEFORE payload_hash (SPEC section 6): the hash commits to the redacted
-payload, so a miss here is unrecoverable by design — patterns err toward
+payload, so a miss here is unrecoverable by design: patterns err toward
 matching. Value patterns catch secrets embedded in strings; key-based
 redaction catches structured fields regardless of value shape.
 """
@@ -31,7 +31,7 @@ SECRET_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     # GitLab personal access tokens
     re.compile(r"(?<![A-Za-z0-9])glpat-[A-Za-z0-9_-]{20,}"),
     # Bare JWTs (header is base64 of '{"' so always eyJ). The Bearer pattern
-    # misses JWTs pasted into command bodies / env dumps — the exact leak the
+    # misses JWTs pasted into command bodies / env dumps, the exact leak the
     # AI-agent transcripts this library audits are full of.
     re.compile(r"(?<![A-Za-z0-9])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}"),
     # npm automation/publish tokens
@@ -59,8 +59,8 @@ class RegexRedactor:
     def redact_text(self, text: str) -> str:
         """Value-pattern redaction for a bare string. Exists so callers that
         bound/clip text (the integration hooks) can redact FIRST: a clip can
-        split a secret across the boundary — a PEM losing its END marker no
-        longer matches the private-key pattern — and land it on disk."""
+        split a secret across the boundary (a PEM losing its END marker no
+        longer matches the private-key pattern) and land it on disk."""
         for pattern in SECRET_PATTERNS:
             text = pattern.sub(REDACTED, text)
         return text

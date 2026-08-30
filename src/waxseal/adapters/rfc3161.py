@@ -1,8 +1,8 @@
 """Rfc3161AnchorSink: timestamp a checkpoint at an external Time-Stamp Authority.
 
 This is the sink that makes a checkpoint's time attested rather than asserted.
-It stamps ``sha256(checkpoint_frame(checkpoint))`` — the same bytes every other
-sink witnesses — which is why the aggregate binding lives inside the frame
+It stamps ``sha256(checkpoint_frame(checkpoint))``, the same bytes every other
+sink witnesses, which is why the aggregate binding lives inside the frame
 (domain/checkpoint.py) rather than beside it in JSON: a TSA signs the imprint,
 so anything outside the framed bytes is outside the attestation.
 
@@ -14,7 +14,7 @@ The check that gate runs is STRUCTURAL ONLY. The token's CMS signature and the
 TSA's certificate chain are not verified here or anywhere else in this library
 (domain/rfc3161.py says why, and names the ``openssl ts -verify`` command that
 does it). So a filed receipt means "a well-formed token committing to these
-exact bytes came back from this URL", never "a genuine TSA issued it" — a
+exact bytes came back from this URL", never "a genuine TSA issued it", so a
 receipt this sink stored is still unauthenticated evidence.
 """
 
@@ -86,6 +86,6 @@ class Rfc3161AnchorSink:
         # The nonce rides along for recording: checked here and then merely
         # dropped, a later verify would have nothing to compare, and a token
         # swapped in from a DIFFERENT request over the same imprint would pass
-        # re-verify — the anchor-time-only gap SPEC.md section 17 describes
+        # re-verify: the anchor-time-only gap SPEC.md section 17 describes
         # for records with no stored nonce.
         return SinkReceipt(encode_receipt(response.body), nonce=nonce)

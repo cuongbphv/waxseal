@@ -255,6 +255,69 @@ class TestReport:
             thread.join(timeout=5)
 
 
+class TestReportSeparationDegree:
+    """τ and the enumerated authorities `waxseal report` prints — closing
+    conformance.md gap G1. Điều kiện R: these run `main()` for real and
+    assert on stdout, not just `build_report()` directly."""
+
+    def test_no_pin_at_all_reports_tau_not_declared(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        make_trail(path, 2)
+        assert main(["report", str(path), "--json"]) == 0
+        obj = json.loads(capsys.readouterr().out)
+        assert obj["separation"]["tau"] is None
+        assert obj["separation"]["counted_authorities"] is None
+
+        assert main(["report", str(path)]) == 0
+        out = capsys.readouterr().out
+        line = next(line for line in out.splitlines() if "separation degree" in line)
+        assert "not declared" in line
+
+    def test_pin_without_declared_topology_still_reports_not_declared(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(path, 2)
+        assert main(["report", str(path), "--pin", str(pin), "--json"]) == 0
+        obj = json.loads(capsys.readouterr().out)
+        assert obj["separation"]["tau"] is None
+
+    def test_declared_topology_reports_the_number_and_the_enumeration(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(path, 2)
+        main(["report", str(path), "--pin", str(pin)])  # trust-on-first-use
+        capsys.readouterr()
+
+        state = json.loads(pin.read_text())
+        state["declared_topology"] = {
+            "seal_escrow": True, "anchor_sinks": 2, "witness": True, "pin_separate": True,
+        }
+        pin.write_text(json.dumps(state))
+
+        assert main(["report", str(path), "--pin", str(pin), "--json"]) == 0
+        obj = json.loads(capsys.readouterr().out)
+        assert obj["separation"]["tau"] == 6
+        assert obj["separation"]["counted_authorities"] == [
+            {"name": "writer", "count": 1},
+            {"name": "seal_escrow", "count": 1},
+            {"name": "anchor_sinks", "count": 2},
+            {"name": "witness", "count": 1},
+            {"name": "pin_separate", "count": 1},
+        ]
+
+        assert main(["report", str(path), "--pin", str(pin)]) == 0
+        out = capsys.readouterr().out
+        line = next(line for line in out.splitlines() if "separation degree" in line)
+        assert "6" in line
+        assert "writer(1)" in line and "anchor_sinks(2)" in line and "witness(1)" in line
+
+
 class TestExportProof:
     def test_prints_a_bundle_for_the_named_seq(
         self, tmp_path: Path, capsys: pytest.CaptureFixture

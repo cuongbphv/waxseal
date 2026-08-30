@@ -5,7 +5,7 @@ Appends every lifecycle event to a tamper-evident hash chain at
 environment running the hermes gateway.
 
 Hermes hook contract: handle(event_type, context), errors must never block
-the pipeline — so every failure path degrades to a counted dropped write
+the pipeline, so every failure path degrades to a counted dropped write
 (chain integrity ≠ trail completeness) instead of an exception.
 """
 
@@ -83,7 +83,7 @@ def handle(event_type: str, context: dict[str, Any] | None) -> None:
         log = _get_log()
     except Exception as e:  # broken environment: never block the pipeline
         print(f"[waxseal-audit] cannot open trail (event dropped): {e}", flush=True)
-        # No AuditLog to route this through — record it directly,
+        # No AuditLog to route this through, so record it directly,
         # best-effort (FileDropRecorder.record() never raises).
         from waxseal.adapters.drops import FileDropRecorder
 

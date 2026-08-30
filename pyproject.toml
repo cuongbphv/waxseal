@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "waxseal"
-version = "0.1.3"
+version = "0.1.4"
 description = "Tamper-evident, schema-evolution-safe audit hash chain for AI agent frameworks. Zero dependencies."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -61,6 +61,20 @@ Homepage = "https://github.com/cuongbphv/waxseal"
 [tool.hatch.build.targets.wheel]
 packages = ["src/waxseal"]
 
+# hatchling's sdist default is "everything git does not ignore", which is the
+# right default right up until internal working files get committed. The beads
+# issue database alone is 13 MB and has no business in a release artifact, and
+# 0.1.3's sdist was 523 KB against the 6.5 MB this would otherwise have shipped.
+# The GIFs are build output of tools/gen_workflow_animation.py and the READMEs
+# reference them by absolute URL, so an sdist does not need a copy.
+[tool.hatch.build.targets.sdist]
+exclude = [
+  ".beads",
+  ".claude",
+  "tools/pm",
+  "docs/assets",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
@@ -103,6 +117,11 @@ disallow_subclassing_any = false
 disallow_untyped_decorators = false
 
 [tool.ruff]
+# tools/pm is vendored: it carries its own "beads-pm-kit v0.1.0" header and is
+# rewritten whenever that skill is reinstalled. Linting it would either fail CI
+# on code this project does not own, or be undone by the next install. It is
+# excluded from the sdist for the same reason.
+extend-exclude = ["tools/pm"]
 line-length = 100
 target-version = "py311"
 

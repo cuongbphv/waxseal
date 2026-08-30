@@ -5,13 +5,13 @@ service: POST a checkpoint, GET the checkpoints it holds. Shares
 ``HTTPAnchorSink``'s publish behavior and ``RemoteBackend``'s Transport, so
 there is one stdlib-only HTTP path and one Bearer-header shape across the
 package. The CREDENTIAL is not shared: the CLI hands witnesses
-``WAXSEAL_WITNESS_API_KEY``, never the chain server's ``WAXSEAL_API_KEY`` —
+``WAXSEAL_WITNESS_API_KEY``, never the chain server's ``WAXSEAL_API_KEY``,
 a witness holding the chain's write credential could append to the very
 chain it exists to cross-check (REMOTE.md section 8).
 
 Point it at a host that is NOT the chain server. A witness in the same
 administrative domain as the writer it is supposed to check can be forked
-alongside it, and the arrangement proves nothing — this class cannot enforce
+alongside it, and the arrangement proves nothing. This class cannot enforce
 that, and says so here because the deployment is the security argument.
 """
 
@@ -56,7 +56,7 @@ class HTTPWitness:
         """Read back what this witness holds.
 
         A 404 is an answer: the witness has seen nothing. Anything else that
-        is not a checkpoint list raises — a proxy error page or a changed API
+        is not a checkpoint list raises: a proxy error page or a changed API
         must never reach a verifier disguised as an empty observation, which
         would read as "no disagreement found".
         """
@@ -98,7 +98,7 @@ class HTTPWitness:
 def _parse_checkpoint(record: Any) -> Checkpoint | None:
     """One witnessed checkpoint, or ``None`` if this build cannot read it.
 
-    Unknown extra keys are ignored on purpose — a witness that records more
+    Unknown extra keys are ignored on purpose, since a witness that records more
     than waxseal knows about is a newer witness, not a broken one.
     """
     if not isinstance(record, dict):

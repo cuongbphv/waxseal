@@ -32,7 +32,9 @@ class TestCheckpointFrame:
         cp = Checkpoint(seq=2, entry_hash="ab" * 32, root="cd" * 32)
 
         def lp(s: str) -> bytes:
-            enc = s.encode("utf-8")
+            # SPEC section 2 (lp64), re-derived here rather than imported so a
+            # framing change fails loudly instead of tracking the code.
+            enc = b"\x01" + s.encode("utf-8")
             return struct.pack(">Q", len(enc)) + enc
 
         expected = (
@@ -111,6 +113,26 @@ class TestVerifyCheckpoint:
         swapped = list(hashes)
         swapped[1], swapped[2] = swapped[2], swapped[1]
         assert verify_checkpoint(swapped, cp) == "anchor_root_mismatch"
+
+    def test_non_hex_entry_hash_earlier_in_the_trail_is_root_mismatch_not_a_crash(
+        self,
+    ) -> None:
+        # waxseal-lmv (never-raise fuzzing sweep): the local trail file is
+        # attacker-writable by the same threat model as the sidecar
+        # (CLAUDE.md) -- a corrupted `entry_hash` field elsewhere in the
+        # prefix must not crash this function's own documented "fails closed
+        # and never raises" promise. `batch_root` calls `bytes.fromhex` with
+        # no guard, and a non-hex entry earlier in the prefix let ValueError
+        # escape uncaught before this fix, even though the checkpointed TIP
+        # itself matches. Root cannot be recomputed -> cannot be confirmed to
+        # match -> the existing anchor_root_mismatch reason (same vocabulary
+        # domain.anchoring's bad-hex-returns-False convention already uses),
+        # not a crash.
+        hashes = entry_hashes(2)
+        cp = checkpoint_for(hashes)
+        corrupted = [hashes[0], hashes[1]]
+        corrupted[0] = "not-hex-at-all"
+        assert verify_checkpoint(corrupted, cp) == "anchor_root_mismatch"
 
 
 class TestSinkReceiptLivesInDomain:

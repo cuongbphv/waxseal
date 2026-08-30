@@ -14,7 +14,7 @@ Contract verified against https://cursor.com/docs/hooks (2026-08-21):
   as {} → allow. before* events parse stdout for permission/continue
   decisions.
 - An audit observer therefore exits 0 on EVERY path and never writes to
-  stdout — printing even an explicit "allow" could override a real policy
+  stdout, since printing even an explicit "allow" could override a real policy
   hook's decision. Diagnostics go to stderr.
 
 Secrets are redacted BEFORE hashing/storage (RegexRedactor): a key leaked
@@ -40,7 +40,7 @@ _REDACTOR = RegexRedactor()
 PAYLOAD_TYPE = "application/vnd.cursor.hook-event+json"
 
 # Shell outputs and file contents can be megabytes. Clip stored fields,
-# visibly — silent truncation would read as "the full output".
+# visibly, because silent truncation would read as "the full output".
 MAX_FIELD_CHARS = 4096
 
 # Per-event fields worth keeping, on top of the common envelope. Unlisted
@@ -110,7 +110,7 @@ def main() -> int:
         log = AuditLog.open(_trail_path(), redactor=RegexRedactor(), record_drops=True)
     except Exception as e:
         print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
-        # No AuditLog to route this through — record it directly, best-effort
+        # No AuditLog to route this through, so record it directly, best-effort
         # (FileDropRecorder.record() never raises).
         from waxseal.adapters.drops import FileDropRecorder
 

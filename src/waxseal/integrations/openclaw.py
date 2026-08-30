@@ -9,7 +9,7 @@ The ingest logic lives in `waxseal.sources.openclaw`; this module is the shell
 around it. Two contracts it keeps:
 
 - **Exit 0 on every path.** A missing binary, a stopped gateway, an unwritable
-  trail — all report on stderr and return 0. A timer that flaps on a degraded
+  trail: all report on stderr and return 0. A timer that flaps on a degraded
   audit is a timer the operator disables.
 - **Nothing on stdout.** Same rule as the stdin hooks: stdout belongs to
   whoever invoked us, and a cron mail full of ingest chatter trains people to

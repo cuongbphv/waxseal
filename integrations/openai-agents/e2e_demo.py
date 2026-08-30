@@ -17,6 +17,8 @@ Scenarios:
   4. Schema skew (the beads-v1.2.2 class): rows written by a NEWER schema are
      read by this binary -> exit 2 "unverifiable", NOT a false tampering alarm
   5. Secret in tool arguments is redacted before disk
+  6. The mirror of 4: ordinary rows read by an OUT-OF-DATE verifier, which
+     must report them unverifiable rather than tampered
 """
 
 from __future__ import annotations
@@ -130,7 +132,7 @@ def main() -> int:
     check("reason is seq_gap", "seq_gap" in out)
 
     print("\nScenario 4 — schema skew (beads-v1.2.2 class): newer writer, older verifier")
-    from waxseal.domain.fingerprint import HEADER_V1_FIELDS, fingerprint_for
+    from waxseal.domain.fingerprint import HEADER_FIELDS, fingerprint_for
     from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash
     from waxseal.domain.header import EntryHeader
 
@@ -139,7 +141,7 @@ def main() -> int:
     header = EntryHeader(
         seq=last["header"]["seq"] + 1,
         ts="2026-08-21T07:00:00+00:00",
-        hash_version=fingerprint_for((*HEADER_V1_FIELDS, "agent_id")),
+        hash_version=fingerprint_for((*HEADER_FIELDS, "agent_id")),
         payload_type="application/vnd.openai-agents.run-event+json",
         payload_hash=compute_payload_hash(new_payload),
         prev_hash=last["entry_hash"],
@@ -157,6 +159,42 @@ def main() -> int:
     code, out = run_verify(future)
     check("unknown schema -> exit 2, not broken", code == 2, out)
     check("reported unverifiable, NOT tampering", "NOT evidence of tampering" in out)
+
+    print("\nScenario 6 — a verifier that does not recognise the schema")
+    from waxseal.adapters.jsonl import JSONLBackend
+    from waxseal.domain.fingerprint import fingerprint
+    from waxseal.domain.registry import VersionRegistry
+    from waxseal.domain.verify import verify_chain
+
+    # Scenario 4 forges a row from a FUTURE schema. This is the mirror image,
+    # and the commoner case in practice: the rows are ordinary and it is the
+    # VERIFIER that is out of date -- a rolled-back binary reading a trail
+    # written by a build it predates. It must say so, not cry tampering.
+    written = list(JSONLBackend(trail).entries())
+    check(
+        "the hook stamped every row with the derived schema fingerprint",
+        bool(written) and all(e.header.hash_version == fingerprint() for e in written),
+        f"hash_version={fingerprint()[:12]}...",
+    )
+
+    class OutdatedVerifier(VersionRegistry):
+        """A build predating this schema: it recognises no fingerprint at all.
+
+        Overriding encoder_for is enough -- recomputable() is defined in terms
+        of it, so the two can never disagree about what this build can verify.
+        """
+
+        def encoder_for(self, fingerprint_: str):
+            return None
+
+    rolled_back = verify_chain(written, OutdatedVerifier())
+    check(
+        "it reports them unverifiable, NOT tampered",
+        rolled_back.ok
+        and rolled_back.broken_seq is None
+        and len(rolled_back.unverifiable) == len(written),
+        f"unverifiable={list(rolled_back.unverifiable)} broken_seq={rolled_back.broken_seq}",
+    )
 
     print()
     failed = [name for status, name in results if status == FAIL]

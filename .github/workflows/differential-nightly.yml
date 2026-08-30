@@ -1,0 +1,48 @@
+name: differential-nightly
+
+# Paper eval protocol item 1 (docs/paper/conformance.md section 4) asks for a
+# randomised differential sweep of 10**6 headers between domain/hashing.py and
+# an independent reimplementation of SPEC.md prose (tools/gen_vectors.py).
+# ci.yml's matrix runs a MUCH smaller, seeded N of that same sweep
+# (tests/domain/test_differential.py) on every push/PR — see that file's
+# docstring for why the per-push N is a labelled reduction, not a silent cap.
+# This workflow is the other half of the owner's two-tier decision
+# (bead waxseal-jsk): the SAME test function, driven to the paper's full
+# N=1,000,000 on a weekly schedule instead of every push, because 10**6
+# iterations is not a cost worth paying on every commit but is one worth
+# paying regularly.
+#
+# Deliberately does NOT touch .github/workflows/ci.yml (owner instruction:
+# add a new file rather than risk conflicting with anything else that
+# touches CI).
+on:
+  schedule:
+    # Every Monday 03:00 UTC. Cron is evaluated in UTC regardless of the
+    # repository's default branch timezone.
+    - cron: "0 3 * * 1"
+  # Manual trigger so a run can be confirmed without waiting for the schedule.
+  workflow_dispatch: {}
+
+jobs:
+  differential:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.13"
+      # A single OS/Python combination is enough here: the differential
+      # harness is pure Python over domain/hashing.py and tools/gen_vectors.py,
+      # neither of which carries an OS-conditional branch (unlike
+      # adapters/atomic.py's filelock.py, which is why ci.yml runs its own
+      # suite across both operating systems).
+      #
+      # Benchmarked locally at ~32s per 10**6 iterations — comfortably inside
+      # this job's time budget even on a slower shared runner. If a future
+      # change to the encoding makes that no longer true, lower N here and
+      # say why in this comment, per CLAUDE.md rule 6: a lowered bound must be
+      # labelled, never silent.
+      - name: Run the paper's full N=1,000,000 differential sweep
+        env:
+          WAXSEAL_DIFFERENTIAL_N: "1000000"
+        run: uv run --extra dev pytest tests/domain/test_differential.py -v -s

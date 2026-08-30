@@ -1,4 +1,4 @@
-"""waxseal-audit — hermes-agent plugin (action-level audit trail).
+"""waxseal-audit: the hermes-agent plugin (action-level audit trail).
 
 Appends every tool call (dispatch + result) to a tamper-evident hash chain
 at <hermes home>/audit/trail.jsonl. This is the action-focused record
@@ -10,7 +10,7 @@ Contract verified against hermes-agent v2026.8.18:
 - Callbacks take **kwargs: hook payloads evolve additively and a narrow
   signature silently loses new fields (hermes_cli/plugins.py:5074-5076).
 - pre_tool_call return values are parsed as block/approve/modify directives
-  (hermes_cli/plugins.py:5968+) — an audit observer MUST return None or it
+  (hermes_cli/plugins.py:5968+), so an audit observer MUST return None or it
   can veto/mutate real tool calls.
 - The dispatcher isolates callback exceptions, but raising still logs a
   plugin failure per call; every failure path here degrades to a counted,
@@ -53,7 +53,7 @@ PLUGIN_MANIFEST = (
 )
 
 # Tool results can be megabytes (file reads, terminal dumps). Clip stored
-# fields, visibly — silent truncation would read as "the full result".
+# fields, visibly, because silent truncation would read as "the full result".
 MAX_FIELD_CHARS = 4096
 
 # One log per resolved trail path: hermes loads this module once per
@@ -107,7 +107,7 @@ def _append(phase: str, kwargs: dict[str, Any], fields: tuple[str, ...]) -> None
         log = _get_log()
     except Exception as e:  # broken environment: never block the pipeline
         print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", flush=True)
-        # No AuditLog to route this through — record it directly,
+        # No AuditLog to route this through, so record it directly,
         # best-effort (FileDropRecorder.record() never raises).
         from waxseal.adapters.drops import FileDropRecorder
 

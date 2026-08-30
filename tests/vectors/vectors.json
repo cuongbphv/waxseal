@@ -1,57 +1,58 @@
 {
   "spec": "waxseal SPEC v1",
-  "descriptor_fingerprint": "78ad67a7bde897ef1a6cfcf388f993fe31bc2c3007d3f9a8d516971efbf1f91c",
+  "descriptor_fingerprint": "bd2fec069793bf45c0ee5e1f36e50afd6629a2c863c8a9f5f9f68651108a2660",
+  "encoding": "lp64",
   "lp_examples": [
     {
       "input": "abc",
-      "hex": "0000000000000003616263"
+      "hex": "000000000000000401616263"
     },
     {
       "input": "",
-      "hex": "0000000000000000"
+      "hex": "000000000000000101"
     },
     {
       "input": "Việt",
-      "hex": "00000000000000065669e1bb8774"
+      "hex": "0000000000000007015669e1bb8774"
     }
   ],
-  "null_sentinel_lp_hex": "0000000000000006004e554c4c00",
+  "null_lp_hex": "000000000000000100",
   "entries": [
     {
       "header": {
         "seq": 0,
         "ts": "2026-08-21T00:00:00+00:00",
-        "hash_version": "78ad67a7bde897ef1a6cfcf388f993fe31bc2c3007d3f9a8d516971efbf1f91c",
+        "hash_version": "bd2fec069793bf45c0ee5e1f36e50afd6629a2c863c8a9f5f9f68651108a2660",
         "payload_type": "application/vnd.waxseal.vector+json",
         "payload_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
         "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000"
       },
       "payload_utf8": "{}",
-      "entry_hash": "0e006ca87d619be212464b26f7fb9d20d5be6b058f046efee6732137c477d392"
+      "entry_hash": "c7c5dc556be81dd9b984d65e799594c0162405ec3f7ace7906960c215692bb91"
     },
     {
       "header": {
         "seq": 1,
         "ts": "2026-08-21T00:00:01+00:00",
-        "hash_version": "78ad67a7bde897ef1a6cfcf388f993fe31bc2c3007d3f9a8d516971efbf1f91c",
+        "hash_version": "bd2fec069793bf45c0ee5e1f36e50afd6629a2c863c8a9f5f9f68651108a2660",
         "payload_type": "application/vnd.waxseal.vector+json",
         "payload_hash": "b5844cfb1e762fa907bb2f2c4b1708796d3ab56cd6791a3e9bc43fa4e26dc197",
-        "prev_hash": "0e006ca87d619be212464b26f7fb9d20d5be6b058f046efee6732137c477d392"
+        "prev_hash": "c7c5dc556be81dd9b984d65e799594c0162405ec3f7ace7906960c215692bb91"
       },
       "payload_utf8": "{\"action\":\"tool_call\",\"tool\":\"bash\"}",
-      "entry_hash": "7e07fcb2c427f590601a4d4e4a1bf081eadb1b7a991555f3ab99d1e2e4498f71"
+      "entry_hash": "743fb07659458562bd1c514e312064c6431ec3aabee8020a269b808025b087c1"
     },
     {
       "header": {
         "seq": 2,
         "ts": "2026-08-21T00:00:02+00:00",
-        "hash_version": "78ad67a7bde897ef1a6cfcf388f993fe31bc2c3007d3f9a8d516971efbf1f91c",
+        "hash_version": "bd2fec069793bf45c0ee5e1f36e50afd6629a2c863c8a9f5f9f68651108a2660",
         "payload_type": "application/vnd.waxseal.vector+json",
         "payload_hash": "d6d7d9508fd8198b7cf24d9edb943df874783918dab3934c80f15a686415341d",
-        "prev_hash": "7e07fcb2c427f590601a4d4e4a1bf081eadb1b7a991555f3ab99d1e2e4498f71"
+        "prev_hash": "743fb07659458562bd1c514e312064c6431ec3aabee8020a269b808025b087c1"
       },
       "payload_utf8": "{\"vi\":\"Việt\"}",
-      "entry_hash": "ee32900c98253e78405f5de78f2d9adb2bde5864c8f292af9a7a0d42651830d4"
+      "entry_hash": "8fa5d90309d2da553fd8e4f9c480e7888f6d9206dd665d5c8e78d2cc58b1e71f"
     }
   ]
 }

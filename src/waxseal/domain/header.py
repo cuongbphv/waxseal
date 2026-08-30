@@ -1,11 +1,11 @@
 """Entry envelope model (SPEC.md section 1).
 
 The chain hashes only ``EntryHeader``; payload is arbitrary bytes referenced by
-``payload_hash``. Both classes are frozen — an entry is immutable by construction.
+``payload_hash``. Both classes are frozen, so an entry is immutable by construction.
 
 ``header_to_obj``/``header_from_obj`` are the single owner of the header's
-JSON shape. Every wire format that carries a header — the storage envelope in
-``adapters/_envelope.py`` and the proof bundle in ``domain/export.py`` — goes
+JSON shape. Every wire format that carries a header, the storage envelope in
+``adapters/_envelope.py`` and the proof bundle in ``domain/export.py``, goes
 through them, because the last time this mapping was copy-pasted the two
 copies could silently disagree about stored bytes (see _envelope's own note).
 """
@@ -35,7 +35,7 @@ class Entry:
     header: EntryHeader
     entry_hash: str
     # None = payload bytes not available to this reader (header-only source),
-    # which skips the payload check — distinct from b"" (an empty payload).
+    # which skips the payload check. That is distinct from b"" (an empty payload).
     payload: bytes | None
 
 
@@ -56,7 +56,7 @@ def header_from_obj(obj: Any) -> EntryHeader:
 
     Every field is coerced rather than trusted: these bytes come off disk or
     off the wire, where the threat model says an attacker may have written
-    them. Anything that cannot be coerced raises ValueError — a single
+    them. Anything that cannot be coerced raises ValueError, a single
     catchable type, so a caller can report "malformed" instead of dying.
     """
     if not isinstance(obj, dict):

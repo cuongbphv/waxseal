@@ -10,36 +10,56 @@ vào một hash chain SHA-256, nên mọi hành vi sửa, xóa, chèn hoặc đ�
 bị phát hiện. Schema tiến hóa không gây báo động giả về giả mạo: row cũ verify dưới
 đúng fingerprint đã ghi nó.
 
+![waxseal workflow](https://raw.githubusercontent.com/cuongbphv/waxseal/main/docs/assets/waxseal-workflow.vi.gif)
+
+<sub>Ghi · giả mạo · tiến hóa schema · độ bao phủ · neo thời gian · handoff đa agent · kết luận. Sinh lại bằng `python tools/gen_workflow_animation.py --render`.</sub>
+
 ## Vì sao cần thêm một audit log nữa?
 
-Log dạng hash chain trong thực tế thường vỡ vì một lý do rất tầm thường: **schema thay
-đổi**. Hai sự cố thực tế đã định hình thư viện này:
+Log dạng hash chain trong thực tế thường vỡ vì một lý do rất tầm thường: schema thay
+đổi. Có hai sự cố đã định hình thư viện này.
 
-- Một hệ thống production mở rộng field set được hash mà không có định danh version —
-  toàn bộ row lịch sử fail verify. Một đợt báo động giả về giả mạo hàng loạt.
-- Một công cụ bộ nhớ agent (beads v1.2.2, 08/2026) vô tình phát hành một migration
-  schema; binary sau khi revert gặp lỗi *"schema version mismatch: database is at v65,
-  binary knows up to v53"* và chết cứng. Lối thoát duy nhất là tắt toàn bộ cơ chế an toàn.
+Sự cố thứ nhất: một hệ thống production mở rộng tập field được đem đi hash mà không cấp
+cho bố cục mới một định danh version riêng. Toàn bộ row lịch sử vì thế bị tính lại theo
+một tập field mà chúng chưa từng được ghi dưới đó, nên tất cả cùng fail verify một lượt,
+và cái chuông báo động reo lên là một báo động giả.
 
-Cả hai cùng một lớp lỗi: *định danh version kiểu thứ tự (ordinal) + version lạ bị coi là
-lỗi*. waxseal khiến lớp lỗi này không thể biểu diễn được:
+Sự cố thứ hai: một công cụ bộ nhớ agent tên là beads vô tình phát hành một migration
+schema ở bản 1.2.2 (tháng 8/2026). Khi bản đó được revert, binary cũ gặp một database nó
+không nhận ra và từ chối khởi động, in ra *"schema version mismatch: database is at v65,
+binary knows up to v53"*. Cách duy nhất đi tiếp là một biến môi trường tắt hẳn cơ chế an
+toàn.
 
-1. **Thiết kế envelope** — chain chỉ hash một header cố định
-   (`seq, ts, hash_version, payload_type, payload_hash, prev_hash`). Payload là bytes
-   tùy ý; đổi schema payload không bao giờ đụng vào chain.
-2. **Schema fingerprint tự động** — `hash_version` là SHA-256 của descriptor chuẩn hóa
-   mô tả schema header. Mở rộng field set *không thể* giữ định danh cũ; row cũ luôn
-   verify bằng đúng fingerprint của chính nó.
-3. **Fingerprint lạ → "unverifiable by name"** — không bao giờ là "tampered", không bao
-   giờ crash (nguyên tắc RFC 6962: kiểu không nhận diện được là dữ liệu đục, không phải
-   lỗi). Rollback version chỉ giảm khả năng verify một cách có kiểm soát (degrade
-   gracefully), không gây lỗi.
+Cả hai thất bại có cùng một hình dạng: định danh version chỉ là một số thứ tự, và version
+lạ bị coi là lỗi. waxseal được dựng sao cho không cái nào trong hai thứ đó biểu diễn được.
+
+Chain chỉ hash một header cố định và không hash gì khác (`seq`, `ts`, `hash_version`,
+`payload_type`, `payload_hash`, `prev_hash`). Payload của bạn là bytes tùy ý, chỉ được
+tham chiếu qua digest của nó, nên đổi schema payload không bao giờ đụng tới chain.
+
+`hash_version` không phải một chuỗi do ai đó gõ ra. Nó là SHA-256 của descriptor chuẩn
+hóa mô tả schema header cùng với encoding của schema đó, nên mở rộng tập field hay đổi
+encoding đều sinh ra một định danh khác, dù bạn có chủ ý hay không. Row cũ vẫn tiếp tục
+verify được bằng đúng fingerprint mà chúng thực sự được ghi dưới đó.
+
+Khi một verifier gặp fingerprint nó không biết, nó báo row đó là unverifiable by name. Nó
+không báo giả mạo, và nó cũng không crash. Đây chính là nguyên tắc RFC 6962 áp dụng cho
+các kiểu không nhận diện được, coi chúng là dữ liệu đục chứ không phải lỗi, và đó là thứ
+cho phép một lần rollback version suy giảm êm thay vì làm chuông báo động reo lên.
+
+Thư viện đã dùng chính cơ chế đó lên bản thân nó. Bản 0.1.4 thay hẳn encoding chuẩn hóa,
+chuyển từ `lp64v1` sang `lp64` vốn đơn ánh vô điều kiện ([CHANGELOG](CHANGELOG.md) giải
+thích vì sao), chứ không mang song song cả hai. Vì encoding là một thành phần của
+descriptor, mọi fingerprint tự đổi theo. Không tồn tại migration nào để làm sai, và một
+trail 0.1.3 đọc bằng 0.1.4 sẽ báo *unverifiable* chứ không phải *tampered*, đúng như đoạn
+ở trên đã hứa. Đây là một thay đổi format phá vỡ tương thích, được làm có chủ đích vào
+lúc chưa có trail nào viết dưới encoding cũ tồn tại ngoài môi trường phát triển.
 
 ## So sánh với các hướng hash-chain khác
 
-Lib hash-chain nào cũng phát hiện được 1 byte bị lật. Dưới đây là những thứ các lib
-khác KHÔNG làm (khảo sát các thư viện audit-log Python, tháng 8/2026 — xem
-[DESIGN.md](DESIGN.md) cho nền tảng học thuật của từng lựa chọn):
+Lib hash-chain nào cũng phát hiện được một byte bị lật. Bảng dưới đây nói về những thứ
+phần lớn các lib khác không làm. Nó đến từ một khảo sát các thư viện audit-log Python vào
+tháng 8/2026, và [DESIGN.md](DESIGN.md) có nền tảng học thuật cho từng dòng.
 
 |  | waxseal | lib audit-chain thông thường | DIY hash chain |
 |---|---|---|---|
@@ -61,7 +81,7 @@ nền tảng học thuật của từng dòng.
 
 ## Cách hoạt động
 
-**Data flow — mỗi lần append:**
+Mỗi lần append đi theo đường này:
 
 ```mermaid
 flowchart LR
@@ -73,7 +93,7 @@ flowchart LR
     EH --> S["attestation sidecar<br/>fs-HMAC seal / chữ ký Ed25519"]
 ```
 
-**Cấu trúc chain — vì sao mọi chỉnh sửa đều bị bắt:**
+Mỗi entry cam kết vào entry ngay trước nó, và đó là thứ khiến một chỉnh sửa bị lộ:
 
 ```mermaid
 flowchart LR
@@ -83,7 +103,8 @@ flowchart LR
     E2 -. "waxseal anchor --tsa-url / --ots-calendar / --witness" .-> X["trust domain<br/>bên ngoài"]
 ```
 
-**Luồng verify — mỗi kết cục một mã riêng, unknown không bao giờ là tampered:**
+Verify giữ các kết cục tách bạch, và một fingerprint lạ không bao giờ nằm trong nhóm
+giả mạo:
 
 ```mermaid
 flowchart TD
@@ -181,12 +202,12 @@ log = AuditLog(PostgresBackend(lambda: psycopg.connect("postgresql://...")))
 ```
 
 > Lưu ý về Kafka: compacted topic xóa record cũ (tombstone) nên **không** phải
-> append-only — đừng dùng làm store cho tamper-evidence.
+> append-only, nên đừng dùng chúng làm store cho tamper-evidence.
 
 ### Remote backend
 
 `RemoteBackend` nói chuyện với bất kỳ server nào hiện thực wire contract trong
-[REMOTE.md](REMOTE.md) — một bề mặt HTTP nhỏ (`GET /v1/chains/{id}/head`,
+[REMOTE.md](REMOTE.md). Hợp đồng đó là một bề mặt HTTP nhỏ (`GET /v1/chains/{id}/head`,
 `POST .../entries`, `GET .../entries?cursor=`) thay vì một protocol riêng.
 Critical section mà mọi backend khác giữ bằng lock thì ở đây được giữ phía
 server: `POST` là compare-and-swap trên `(seq, prev_hash)`, writer thua race
@@ -203,7 +224,7 @@ log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 
 **Trust model, nói thẳng:** server là *trusted writer*, không phải một peer
 Byzantine-fault-tolerant. `verify_chain` vẫn chạy hoàn toàn phía client và bắt
-được corruption, truncation, reorder — nhưng một server không trung thực có
+được corruption, truncation, reorder, nhưng một server không trung thực có
 thể trả về một bản rewrite giả mạo nhất quán toàn bộ trail mà riêng
 `verify_chain` không bắt được. Ba thứ thu hẹp điều đó: anchor head độc lập tại
 một service KHÁC với chính chain server, giữ một `--pin` để bắt việc viết lại
@@ -250,7 +271,7 @@ record_decision(log, DecisionRecord(
 ))
 ```
 
-Đọc lại các quyết định bằng `iter_decisions` — nó duyệt trail theo đúng thứ tự chuỗi và
+Đọc lại các quyết định bằng `iter_decisions`, hàm này duyệt trail theo đúng thứ tự chuỗi và
 yield `(entry, record)`. Một dòng mà bytes không còn parse được thành quyết định vẫn được
 yield (với `record=None`) chứ không bị bỏ qua trong im lặng; còn dòng đó có bị *sửa đổi*
 hay không là câu hỏi của `verify`, được trả lời riêng:
@@ -278,20 +299,21 @@ Một proof bundle là một entry cộng đường Merkle của nó, nên trả
 không làm lộ mọi quyết định khác trong trail. Báo cáo in kiểm tra **không được chạy** thành
 *not checked*, không bao giờ in thành đã đạt.
 
-- [examples/banking-poc/](examples/banking-poc/README.vi.md) — demo end-to-end chạy được,
-  có animation minh hoạ luồng dữ liệu và tám kịch bản tấn công, mỗi kịch bản tự assert
-  đúng exit code của nó
+- [examples/banking-poc/](examples/banking-poc/README.vi.md) là một demo end-to-end chạy
+  được, có animation minh hoạ luồng dữ liệu và tám kịch bản tấn công, mỗi kịch bản tự
+  assert đúng exit code của nó.
 - [docs/architecture/banking-deployment.vi.md](docs/architecture/banking-deployment.vi.md)
-  — triển khai tham chiếu: bốn miền tin cậy, phân tách nhiệm vụ, lưu trữ và DR
-- [docs/compliance/mapping.vi.md](docs/compliance/mapping.vi.md) — lớp này chứng minh được
-  gì đối với EU AI Act, NIST AI RMF, RTS của DORA và các khung khác, **kèm phân tích
-  khoảng trống trung thực**. Đây là lớp bằng chứng: nó hỗ trợ các nghĩa vụ lưu trữ hồ sơ
-  và không hoàn thành thay nghĩa vụ nào cả
+  là một triển khai tham chiếu, bao gồm bốn miền tin cậy, phân tách nhiệm vụ, lưu trữ và
+  khôi phục thảm hoạ.
+- [docs/compliance/mapping.vi.md](docs/compliance/mapping.vi.md) trình bày lớp này chứng
+  minh được gì đối với EU AI Act, NIST AI RMF, RTS của DORA và các khung khác, kèm một
+  phân tích khoảng trống trung thực. Đây là lớp bằng chứng, nên nó hỗ trợ các nghĩa vụ
+  lưu trữ hồ sơ và không hoàn thành thay nghĩa vụ nào cả.
 
 ## Anchoring: checkpoint và consistency proof
 
 Bản thân hash chain không chống lại được kẻ tấn công có quyền ghi lại toàn bộ
-trail — mọi `prev_hash` phía sau chỗ sửa đều tính lại được. `checkpoint_for
+trail, vì mọi `prev_hash` phía sau chỗ sửa đều tính lại được. `checkpoint_for
 (entry_hashes)` chốt `(seq, entry_hash, root)`, với `root` là batch root RFC
 6962 trên toàn bộ entry hash tính đến thời điểm đó; anchor checkpoint này ở
 nơi writer không với tới được sẽ đóng lỗ hổng rewrite-toàn-trail mà bản thân
@@ -312,8 +334,8 @@ tại và báo lỗi đầu tiên: `anchor_beyond_head` (trail bị truncate sau
 checkpoint), `anchor_entry_hash_mismatch` (tip bị rewrite), hoặc
 `anchor_root_mismatch` (một entry trước đó bị rewrite mà không phá vỡ chuỗi
 `prev_hash`). `domain.anchoring` còn có RFC 9162 §2.1.4
-`consistency_proof`/`verify_consistency` — chứng minh một head sau này mở
-rộng từ head trước đó mà không cần replay toàn bộ log — và RFC 6962
+`consistency_proof` và `verify_consistency`, dùng để chứng minh một head sau này
+mở rộng từ head trước đó mà không cần replay toàn bộ log, cùng với RFC 6962
 `membership_proof`/`verify_membership` cho membership proof của từng entry.
 
 ## Thời gian được chứng thực, pin và witness
@@ -329,37 +351,71 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 ```
 
 - **RFC 3161** biến `ts` từ chỗ tự khai thành được chứng thực. waxseal kiểm tra reply
-  *về mặt cấu trúc* — status, message imprint, nonce, thuật toán digest — và nói rõ điều đó
+  *về mặt cấu trúc* (status, message imprint, nonce, thuật toán digest) và nói rõ điều đó
   trong mọi dòng nó in ra. Nó **không** verify chữ ký CMS/X.509; việc đó được ủy quyền cho
   `openssl ts -verify`, công thức nằm trong docs. Receipt mà nó không đọc được là
   *unverifiable* (exit 2); chỉ receipt chứng thực cho bytes khác mới là *gãy* (exit 1).
 - **OpenTimestamps** lưu một proof Bitcoin ở trạng thái *pending*, mờ đục và có chủ ý. Hoàn
   tất nó về sau bằng `ots upgrade` / `ots verify`.
+- Hai cái này **có thể dùng cùng nhau trong một lần chạy `anchor`**, publish cùng một
+  checkpoint sang cả hai trong một lượt thay vì chạy hai lượt liên tiếp. Authority cho bạn
+  cửa sổ phát hiện cỡ phút, còn calendar cho bạn non-repudiation dài hạn. Một sink không
+  tới được không làm mất record của sink kia; lỗi được in ra có nhãn, không bao giờ bị nuốt
+  âm thầm. Mỗi domain độc lập bạn với tới được là thêm một thẩm quyền mà kẻ tấn công phải nắm.
 - **`--pin`** là `known_hosts` cho một trail: verifier giữ lại checkpoint do chính nó tính ra
   và từ chối lịch sử nào mâu thuẫn với checkpoint đó. Lần dùng đầu tiên được ghi nhãn rõ, pin
   chỉ tiến lên sau một lần chạy sạch, và pin đã hỏng thì không bao giờ bị âm thầm pin lại.
+  Pin còn mang được cả những gì operator **kỳ vọng**, và một lần chạy quan sát thấy ít hơn
+  mức đã khai báo sẽ nói ra ở exit 2. Đó là thiếu chứng thực, không bao giờ là một cáo
+  buộc giả mạo:
+  - `expect_anchor_binding`: checkpoint frame không có field aggregate của SPEC 15 thì
+    giống hệt từng byte với frame chưa từng có chúng, nên attacker giữ sidecar `.anchors`
+    có thể âm thầm gỡ lớp bảo vệ đó. Bật cờ này, sidecar chỉ toàn record không ràng buộc
+    tại/sau seq đã pin sẽ báo `anchor_policy_downgrade`. Record build này không đọc nổi
+    thì báo `anchor_binding_unreadable`, và không bao giờ hiểu thành "không có ràng buộc".
+  - `max_anchor_age_s` đặt ra một hạn chót của sự im lặng. Record `.anchors` mới nhất cũ hơn mốc
+    này (hoặc không có record nào) là `anchor_stale`. Timestamp không parse được là
+    `anchor_timestamp_unparseable`, không bao giờ được tính là còn tươi.
+  - `declared_topology` ghi lại việc operator khai có bao nhiêu thẩm quyền độc lập đang giữ binding.
+    Lần chạy quan sát thấy ít anchor sink ngoài hơn, hoặc không có witness nhất quán, so
+    với mức khai báo sẽ báo `separation_shortfall`. Chưa khai báo đọc là *chưa khai báo*,
+    không bao giờ là số không.
+
+  `verify`/`report --pin` giờ nhận `--expect-anchor-binding` (một cờ), `--max-anchor-age-s
+  SECONDS`, và `--declare-topology SPEC` (đủ 4 thành phần của `SeparationTopology` cùng lúc,
+  ví dụ `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`) để ghi ba khai báo
+  này. Mỗi cờ cần có `--pin` đi kèm, chỉ có tác dụng trên một lượt chạy thực sự advance pin,
+  và `--declare-topology` khai một phần trong 4 thành phần là lỗi sử dụng CLI chứ không tự
+  điền mặc định. Một lần pin advance không kèm cờ nào giữ nguyên những gì đã khai từ trước.
+  Bạn vẫn có thể tự sửa tay file JSON pin state; format vẫn là SPEC section 13.1. `waxseal
+  verify` và `waxseal report` in ra τ, tức bậc tách biệt mà `declared_topology` mô tả, trên mọi
+  lượt chạy, xem [docs/paper/conformance.vi.md](docs/paper/conformance.vi.md), khoảng trống
+  G2 (đã xong).
 - **`--witness`** là kênh bên ngoài mà pin không thể thay thế. Pin bắt được server viết lại
   lịch sử cho chính bạn; chỉ witness nằm ở một miền tin cậy *khác* mới bắt được server đưa
   hai lịch sử khác nhau cho hai client. Witness không kết nối được sẽ in
   `unreachable — NOT checked` và trả exit code 2 (không thể xác minh): một
   phép kiểm chưa chạy không phải là đạt, cũng không phải là bằng chứng bị sửa.
 
-- [docs/anchoring-external-time.vi.md](docs/anchoring-external-time.vi.md) — công thức ủy
+- [docs/anchoring-external-time.vi.md](docs/anchoring-external-time.vi.md) có công thức ủy
   quyền cho `openssl ts`, đường nâng cấp OTS, và cách viết một `AnchorSink` cho chain khác
-  (EVM, Hyperledger, private)
-- [docs/security/threat-model.vi.md](docs/security/threat-model.vi.md) — vì sao
+  (EVM, Hyperledger, private).
+- [docs/security/threat-model.vi.md](docs/security/threat-model.vi.md) giải thích vì sao
   tamper-*proof* là bất khả thi với phần mềm thuần, client phát hiện được gì và chứng minh
   được là không thể phát hiện gì trước một chain server Byzantine, và cách trích dẫn output
-  của waxseal mà không nói quá
+  của waxseal mà không nói quá.
+- [docs/paper/conformance.vi.md](docs/paper/conformance.vi.md) ghi lại một bài phân tích
+  hình thức độc lập về thư viện này đòi những gì, 0.1.4 giao được những gì, và từng dòng
+  kèm bằng chứng, những gì chưa, gồm cả những phần chưa release note nào khai báo.
 
 ## Chữ ký & forward-secure seal
 
 Hash chain không khóa thì ai có quyền ghi cũng tính lại được. Tầng attestation đóng
-lỗ hổng đó — mà không thêm một dependency nào:
+lỗ hổng đó, và làm được vậy mà không thêm một dependency nào.
 
 **Forward-secure seal (HMAC thuần stdlib, construction Bellare–Yee / Schneier–Kelsey):**
-key seal tiến hóa một chiều theo từng entry (`A_{j+1} = SHA-256(A_j)`), key cũ bị bỏ —
-kẻ chiếm máy tại epoch *t* không thể giả mạo hay re-seal bất kỳ thứ gì viết trước *t*.
+key seal tiến hóa một chiều theo từng entry (`A_{j+1} = SHA-256(A_j)`) và key cũ bị bỏ,
+nên kẻ chiếm máy tại epoch *t* không thể giả mạo hay re-seal bất kỳ thứ gì viết trước *t*.
 Rewrite cả đoạn đuôi một cách "nhất quán" giờ sẽ FAIL verify thay vì lọt:
 
 ```mermaid
@@ -386,8 +442,8 @@ log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 log.verify_attestations(initial_key=k0)  # AttestResult(ok=True, checked=1, ...)
 ```
 
-**Chữ ký số thật (Ed25519...)** — signer được inject, waxseal không bao giờ import
-thư viện crypto:
+**Chữ ký số thật (Ed25519 và tương tự).** Signer được inject, nên waxseal không bao giờ
+tự import một thư viện crypto nào:
 
 ```python
 # bất kỳ object nào có .algorithm, .key_id, .sign(bytes) -> bytes
@@ -397,29 +453,61 @@ log.verify_attestations(verifier=my_ed25519_verifier)
 ```
 
 Attestation nằm trong sidecar `.attest` (không đổi schema backend nào; log cũ vẫn đọc
-được), và scheme mà verifier không biết sẽ được báo unverifiable-by-name — đúng luật
-never-cry-wolf của chính chain. Verify còn tích hợp sẵn bài học từ các CVE của
+được), và scheme mà verifier không biết sẽ được báo unverifiable by name, theo đúng luật
+never-cry-wolf mà chính chain vẫn dùng. Verify còn tích hợp sẵn bài học từ các CVE của
 systemd-journald FSS (2023-31437/38/39): seal bị ràng vào vị trí theo cả hai chiều,
 cross-check với hash được TÍNH LẠI từ trail, và **truncate đuôi cả trail + sidecar
-cùng lúc vẫn bị phát hiện** — epoch trong keyfile là một chiều, không thể quay lui.
-Giới hạn: Python không zeroize được memory, và entry viết *sau* thời điểm máy bị
-chiếm là do attacker kiểm soát dưới mọi scheme — xem [DESIGN.md](DESIGN.md) §6.
+cùng lúc vẫn bị phát hiện**, vì epoch trong keyfile là một chiều và không thể quay lui.
+Có hai giới hạn đáng nói: Python không zeroize được memory, và entry viết *sau* thời điểm
+máy bị chiếm là do attacker kiểm soát dưới mọi scheme. Xem [DESIGN.md](DESIGN.md) §6.
 
 **Khi bản thân keyfile không được tin cậy**, truyền
 `scheme="fs-hmac-agg-sha256-v1"` cho `FileAttestor`: mọi seal được fold vào MỘT
 accumulator keyed duy nhất (`.sealagg`, chỉ lưu giá trị mới nhất), nên kẻ tấn
 công dù copy được trail, sidecar `.attest`, và cả giá trị accumulator cuối cùng
-vẫn không tự refold được — đóng lỗ hổng mà scheme thường để lại nếu keyfile bị
-lộ cùng lúc với đuôi trail bị truncate.
+vẫn không tự refold được. Điều đó đóng lỗ hổng mà scheme thường để lại nếu keyfile
+bị lộ cùng lúc với đuôi trail bị truncate.
+
+## Handoff binding liên trail
+
+Khi task của agent B được delegate từ agent A và mỗi bên giữ trail RIÊNG, một
+*phase* handoff chỉ mang **tên** agent thì không cam kết gì về mặt mật mã.
+Thứ `record_handoff` ghi vào trail của B thay cho điều đó là một con trỏ,
+`(chain_id, seq, head_hash)`, nêu tên chain identity của A và đúng head của nó
+tại thời điểm delegate:
+
+```python
+from waxseal.sources.handoff import record_handoff
+
+# Trên trail của chính DELEGATE (log_b), trỏ vào head hiện tại của ORIGIN (log_a):
+entries = list(log_a.entries())
+seq_a, hash_a = entries[-1].header.seq, entries[-1].entry_hash
+
+record_handoff(log_b, chain_id="agent-a", seq=seq_a, head_hash=hash_a)
+```
+
+Một khi bất kỳ entry nào sau đó trên trail của B được anchor, anchor đó cũng
+bắc cầu pin luôn prefix của A tới `seq_a`. `waxseal verify-handoff
+<delegate-trail> --origin <origin-trail>` kiểm lại từng handoff binding đã ghi
+trên trail delegate so với lịch sử hiện tại của trail origin, rồi báo binding
+nào không còn giữ được, nếu có. Nó đọc cả hai trail và không ghi vào trail
+nào.
+
+Bản thân `record_handoff` không có, và sẽ không bao giờ có, lệnh CLI: nó gọi
+`log.append`, mà luật của chính CLI là không bao giờ append entry vào chain
+(cùng lý do `record_file`, `record_decision`, và `generate_key` ở trên là các
+lệnh gọi thư viện mà code của operator tự import và gọi trực tiếp, không phải
+subcommand).
 
 ## Đo độ đầy đủ: dropped writes
 
-Toàn vẹn chain không đồng nghĩa với đầy đủ trail — một write bị rơi trước khi
+Toàn vẹn chain không đồng nghĩa với đầy đủ trail. Một write bị rơi trước khi
 chạm storage không để lại khoảng trống `seq` nào cho `verify` bắt được.
-`AuditLog.open(path, record_drops=True)` ghi lý do (không bao giờ ghi payload)
-của mỗi lần drop vào sidecar `.drops` độc lập với process hiện tại, và
-`verify`/`inspect` báo cáo dưới dạng `dropped_writes >= N (measured minimum,
-...)` — `None` vẫn nghĩa là *chưa từng đo*, khác với `0` đã đo được.
+`AuditLog.open(path, record_drops=True)` ghi lý do của mỗi lần drop, nhưng không
+bao giờ ghi payload, vào một sidecar `.drops` sống lâu hơn process đã viết ra nó,
+và `verify` cùng `inspect` báo cáo dưới dạng `dropped_writes >= N (measured
+minimum, ...)`. Một giá trị `None` ở đó vẫn nghĩa là con số chưa từng được đo, và
+đó là một khẳng định khác hẳn với một số `0` đã đo được.
 
 ## Tích hợp
 
@@ -427,10 +515,10 @@ Hook audit cho bảy agent framework và coding tool, cộng một exporter cho 
 tự giữ ledger riêng (OpenClaw). Mỗi integration
 được verify với hook contract hiện hành của đích (phiên bản ghi trong README riêng),
 ghi lại dispatch *trước khi* thực thi, redact secret trước khi hash, clip output lớn
-một cách hiển thị, và **không bao giờ chặn/veto công việc của host** — mọi lỗi đều
-degrade thành dropped write có nhãn, có đếm.
+một cách hiển thị, và **không bao giờ chặn hay veto công việc của host**, vì mọi lỗi đều
+degrade thành một dropped write có nhãn và có đếm.
 
-Tất cả nằm sẵn trong wheel — không cần checkout source, không copy file:
+Tất cả nằm sẵn trong wheel, nên không cần checkout source và không phải copy file:
 
 ```bash
 pip install waxseal
@@ -440,7 +528,7 @@ waxseal install hermes        # hoặc claude-code / codex / cursor / hermes-gat
 `install` ghi các shim mỏng vào thư mục config của host (import
 `waxseal.integrations.*`, nên `pip install -U waxseal` là hook được nâng cấp
 tại chỗ) và in ra đoạn settings mà host còn cần. Các integration LangChain,
-CrewAI, OpenAI Agents không cần bước install — import trực tiếp, ví dụ
+CrewAI, OpenAI Agents không cần bước install nào; cứ import trực tiếp, ví dụ
 `from waxseal.integrations.langchain import WaxsealCallbackHandler`.
 
 | Đích | Cơ chế | Thư mục |
@@ -456,45 +544,51 @@ CrewAI, OpenAI Agents không cần bước install — import trực tiếp, ví
 
 Ghi chú phạm vi cho nhóm coding tool: các hook này cho bạn một bản ghi
 song song, tamper-evident, **không chứa secret** của mọi hành động. Chúng không (và
-không thể) sửa file transcript của chính tool — nếu key đã lọt vào đó, hãy rotate
-key; trail của waxseal là bản ghi bạn có thể giữ, chia sẻ và verify.
+không thể) sửa file transcript của chính tool. Nếu key đã lọt vào đó, hãy rotate key.
+Trail của waxseal là bản ghi bạn có thể giữ, chia sẻ và verify.
 
 ## Đảm bảo và KHÔNG đảm bảo
 
-- Phát hiện: entry bị sửa, bị xóa (seq gap), bị chèn/đảo thứ tự (gãy prev-hash),
-  payload bị tráo.
-- **Toàn vẹn chain ≠ đầy đủ trail**: một write bị rơi trước khi chạm storage không để
-  lại khoảng trống. `dropped_writes` báo cáo riêng chuyện này; `None` nghĩa là *chưa đo* —
-  không bao giờ đánh đồng với `0`.
-- Writer song song không thể fork chain (xem bảng backend); với `RemoteBackend` đây
-  là compare-and-swap phía server, không phải lock giữ ở client.
-- waxseal là tamper-*evident* (phát hiện giả mạo), không phải tamper-*proof* (chống
-  giả mạo tuyệt đối), và không bản phát hành nào thay đổi điều đó: kẻ tấn công có
-  quyền ghi vẫn viết lại được toàn bộ phần đuôi chain. Phần mềm thuần không ngăn được
-  — mọi byte cục bộ đều ghi đè được, và thứ duy nhất phần mềm làm được là khiến việc
-  ghi đè *lộ ra* khi đối chiếu với một bản sao nằm ngoài tầm với của kẻ tấn công.
-  Anchor head ra một trust domain bên ngoài: `waxseal anchor --tsa-url` (RFC 3161),
-  `--ots-calendar` (OpenTimestamps), `--witness`, hoặc `anchor_every=N` với một sink
-  tự viết. Điều đó chỉ thu hẹp được tấn công đúng bằng mức sink nằm dưới một *quyền
-  quản trị khác*; một sidecar nằm cùng ổ đĩa thì không thu hẹp được gì.
-- Một target `RemoteBackend` là *trusted writer*, không phải Byzantine-fault-tolerant —
-  nhưng hai phép kiểm phía client thu hẹp điều đó. `--pin` bắt được server viết lại
-  đoạn lịch sử bạn đã xác nhận trước đó (`pin_mismatch`) hoặc trả về bản ngắn hơn
-  (`pin_beyond_head`). `--witness` bắt được server cho hai client xem hai lịch sử
-  tự-nhất-quán khác nhau — điều mà một client đơn lẻ chứng minh được là không thể tự
-  phát hiện (fork consistency, Mazières & Shasha). Cái vẫn nằm ngoài tầm: client lần
-  đầu kết nối, chưa có pin và chưa có witness; witness thông đồng với server; và client
-  bị kẻ tấn công nắm toàn bộ đường mạng. Hãy trỏ pin, witness và anchor sink tới nơi
-  khác với chính chain server — sự tách quyền đó chính là toàn bộ lập luận bảo mật.
+waxseal phát hiện được entry bị sửa, entry bị xóa (để lại một `seq` gap), entry bị chèn
+hoặc đảo thứ tự (làm gãy liên kết prev-hash), và payload bị tráo.
+
+Toàn vẹn chain không phải là một thứ với đầy đủ trail. Một write bị rơi trước khi chạm
+storage không để lại khoảng trống nào, nên `verify` chẳng có gì để bắt. Độ đầy đủ được
+báo cáo riêng qua `dropped_writes`, trong đó `None` nghĩa là con số này chưa từng được
+đo, và nó không bao giờ bị đánh đồng với một số `0` đã đo được.
+
+Writer song song không thể fork chain. Bảng backend ở trên nêu cơ chế của từng loại;
+riêng với `RemoteBackend` thì đó là compare-and-swap phía server chứ không phải một lock
+giữ ở client.
+
+waxseal là tamper-*evident* (phát hiện giả mạo) chứ không phải tamper-*proof* (chống giả
+mạo tuyệt đối), và sẽ không có bản phát hành nào thay đổi điều đó. Kẻ tấn công có quyền
+ghi vẫn viết lại được toàn bộ phần đuôi của một chain, và phần mềm thuần không ngăn nổi,
+bởi mọi byte cục bộ đều ghi đè được. Thứ phần mềm làm được là khiến việc ghi đè lộ ra khi
+đối chiếu với một bản sao nằm ngoài tầm với của kẻ tấn công. Hãy anchor head ra một trust
+domain bên ngoài bằng `waxseal anchor --tsa-url` (RFC 3161), `--ots-calendar`
+(OpenTimestamps), `--witness`, hoặc `anchor_every=N` với một sink bạn tự viết. Điều đó chỉ
+thu hẹp được tấn công đúng bằng mức mà sink nằm dưới một *quyền quản trị khác*. Một
+sidecar nằm cùng ổ đĩa thì không thu hẹp được gì cả.
+
+Một target `RemoteBackend` là *trusted writer* chứ không phải một peer chịu được lỗi
+Byzantine, dù hai phép kiểm phía client có thu hẹp phạm vi nó làm càn được. `--pin` bắt
+được server viết lại đoạn lịch sử bạn đã xác nhận trước đó (`pin_mismatch`) hoặc trả về
+một bản ngắn hơn (`pin_beyond_head`). `--witness` bắt được server cho hai client xem hai
+lịch sử tự nhất quán khác nhau, thứ mà một client đơn lẻ chứng minh được là không thể tự
+phát hiện (fork consistency, Mazières và Shasha). Có ba thứ vẫn nằm ngoài tầm: client lần
+đầu kết nối và chưa có pin lẫn witness, witness thông đồng với server, và client bị kẻ tấn
+công nắm toàn bộ đường mạng. Hãy trỏ pin, witness và anchor sink tới nơi khác với chính
+chain server, vì sự tách quyền đó là chỗ dựa của toàn bộ lập luận bảo mật.
 
 ## Spec & thiết kế
 
-- [SPEC.md](SPEC.md) — format byte-level (lp64v1 encoding, PAE-style framing, cách
-  dựng fingerprint; dự kiến freeze ở v1) kèm golden test vectors — port được sang mọi
-  ngôn ngữ.
-- [REMOTE.md](REMOTE.md) — wire contract của `RemoteBackend`: endpoint, khuôn dạng
+- [SPEC.md](SPEC.md) mô tả format byte-level (encoding lp64, PAE-style framing, và cách
+  dựng một fingerprint; dự kiến freeze ở v1) kèm golden test vectors, nên có thể cài đặt
+  lại ở bất kỳ ngôn ngữ nào.
+- [REMOTE.md](REMOTE.md) là wire contract của `RemoteBackend`: endpoint, khuôn dạng
   envelope, authentication, và trust model trusted-writer.
-- [DESIGN.md](DESIGN.md) — các lựa chọn thuật toán và nền tảng học thuật phía sau.
+- [DESIGN.md](DESIGN.md) trình bày các lựa chọn thuật toán và nền tảng học thuật phía sau.
 
 ## Giấy phép
 

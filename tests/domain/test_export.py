@@ -29,7 +29,7 @@ from waxseal.domain.export import (
     bundle_to_json,
     verify_proof_bundle,
 )
-from waxseal.domain.fingerprint import fingerprint_v1
+from waxseal.domain.fingerprint import fingerprint
 from waxseal.domain.hashing import compute_entry_hash
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
 
@@ -44,7 +44,7 @@ def make_entries(n: int) -> list[Entry]:
         header = EntryHeader(
             seq=seq,
             ts=f"2026-08-23T09:00:0{seq}+00:00",
-            hash_version=fingerprint_v1(),
+            hash_version=fingerprint(),
             payload_type="application/vnd.test.decision+json",
             payload_hash=hashlib.sha256(payload).hexdigest(),
             prev_hash=prev,
@@ -115,6 +115,22 @@ class TestVerifyProofBundle:
     def test_a_tampered_header_field_is_caught(self) -> None:
         bundle = build_proof_bundle(make_entries(4), 1)
         forged = replace(bundle, header=replace(bundle.header, ts="2026-01-01T00:00:00+00:00"))
+        result = verify_proof_bundle(forged, REGISTRY)
+        assert not result.ok
+        assert result.reason == "entry_hash_mismatch"
+
+    def test_an_unencodable_header_field_reports_entry_hash_mismatch_not_a_crash(
+        self,
+    ) -> None:
+        # waxseal-lmv (never-raise fuzzing sweep): same gap as
+        # test_verify.py's sibling test -- a lone UTF-16 surrogate is valid
+        # `str` (json.loads('"\\ud800"') produces one; a bundle is exactly
+        # the "operator- and attacker-supplied JSON" this module's own
+        # docstring names) but `lp()` raises `LpEncodingError`, uncaught here
+        # before this fix. "Never raises" (this function's own docstring)
+        # must hold for this case too, not just malformed bundle shape.
+        bundle = build_proof_bundle(make_entries(4), 1)
+        forged = replace(bundle, header=replace(bundle.header, ts="\ud800"))
         result = verify_proof_bundle(forged, REGISTRY)
         assert not result.ok
         assert result.reason == "entry_hash_mismatch"

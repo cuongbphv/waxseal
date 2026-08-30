@@ -166,6 +166,32 @@ in-band), và vì sao sentinel NULL là một thể hiện của chủ đề xuy
 và *rỗng* là hai khẳng định khác nhau, và một mã hoá chuẩn tắc gộp chúng lại sẽ cho phép hai
 bản ghi khác nhau băm ra giống hệt nhau.
 
+**Rồi lật chính ví dụ đó lại — đây là đoạn mạnh nhất có thể viết.** Sentinel của lp64v1 là
+`b"\x00NULL\x00"`, mà bản thân nó *là UTF-8 hợp lệ*: nó decode ra một chuỗi 6 ký tự. Nên
+đúng một giá trị trường bằng chuỗi đó sẽ mã hoá giống hệt *vắng mặt*. Mã hoá được chọn để
+giữ "vắng mặt" và "rỗng" tách nhau lại gộp "vắng mặt" với một giá trị *có mặt* cụ thể —
+đúng cái lỗi mà mục này lập luận chống lại, ngay trong ví dụ minh hoạ cho lập luận đó. Nó
+tiềm ẩn (không call site nào đã ship chạm tới được) và vẫn là sai, vì đúng lý do bài báo
+quan tâm: mã hoá này được chào là portable, và một implementation độc lập viết từ phần văn
+xuôi sẽ tái tạo lại sự nhập nhằng đó một cách trung thành.
+
+lp64 sửa nó về mặt cấu trúc: một type tag *nằm trong* vùng có tiền tố độ dài (`0x00` cho
+vắng mặt, `0x01` trước các byte UTF-8 của chuỗi), nên hai bên khác nhau ngay từ byte đầu
+với mọi input có thể. Tính đơn ánh trở thành vô điều kiện — không điều kiện phụ, không bất
+biến phải duy trì, không input nào phải từ chối.
+
+Việc nâng cấp mới là tải trọng thật của mục này, và nó thuộc về đây chứ không phải §3.3: vì
+tên mã hoá là một thành phần của descriptor phiên bản, việc đổi mặc định đã *tự động đổi
+fingerprint*. Không có migration nào phải viết và không định danh đã phát hành nào bị định
+nghĩa lại tại chỗ; một binary có trước thay đổi này báo các row mới là *unverifiable*, không
+phải *tampered*. Nói thẳng cái giá phải trả: lp64v1 bị **gỡ bỏ** chứ không mang theo, nên
+trail viết dưới nó không build hiện tại nào verify được — cái giá chỉ trả được vì chưa có
+trail nào như vậy tồn tại ngoài môi trường phát triển, và được ghi lại như một ngoại lệ
+một lần chứ không phải tiền lệ. Cơ chế schema evolution mà bài báo đề xuất hoá ra chính là thứ cho
+phép artifact tự sửa mã hoá chuẩn tắc của chính nó mà không cần migration. Một thiết kế có
+thể sửa an toàn tầng nằm dưới chính nó là bằng chứng thuyết phục nhất rằng thiết kế đó mang
+tải trọng chứ không phải trang trí.
+
 ### 3.5 Redact trước khi hash
 
 Redaction chạy trước khi tính `payload_hash`, nên bí mật không bao giờ chạm đĩa. Nêu hệ quả

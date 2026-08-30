@@ -3,7 +3,7 @@
 Attestations live OUTSIDE the entry envelope, in `<trail>.attest` (one JSON
 object per line), so no backend schema changes and mixed old/new logs stay
 readable. The evolving seal key lives in `<trail>.sealkey` (0600), atomically
-replaced on every append so only the CURRENT epoch key exists on disk —
+replaced on every append so only the CURRENT epoch key exists on disk,
 forward security rests on old keys being gone.
 
 Under the aggregate scheme the running FssAgg accumulator lives in
@@ -16,7 +16,7 @@ the same threat model. Nothing here trusts their contents: a stale epoch is
 refused rather than re-aligned, and the verify side turns malformed bytes into
 a verdict instead of a crash.
 
-Signature frame: signers sign SEAL_FRAME_PREFIX + entry_hash bytes — the same
+Signature frame: signers sign SEAL_FRAME_PREFIX + entry_hash bytes, the same
 domain-separated frame the HMAC seals use.
 """
 
@@ -109,7 +109,7 @@ class FileAttestor:
                     # epoch here would silently skip folding whatever
                     # happened since, so the persisted aggregate would LOOK
                     # complete without being complete. Same refusal as the
-                    # keyfile epoch != seq check above — an operator decision,
+                    # keyfile epoch != seq check above: an operator decision,
                     # not a silent rebase onto a state that no longer matches
                     # the row about to be attested.
                     raise RuntimeError(
@@ -122,7 +122,7 @@ class FileAttestor:
                 running = aggregate_step(key, prev_agg, att.value)
                 # Order matters (each write is its own crash window, never
                 # self-"fixed"): keyfile replace, THEN .sealagg replace,
-                # THEN the .attest line below — a crash between any two
+                # THEN the .attest line below. A crash between any two
                 # leaves a state verify_attestations reports, not repairs.
                 self._write_key(epoch + 1, evolved)
                 self._write_aggregate(agg_start, epoch + 1, running)
@@ -137,7 +137,7 @@ class FileAttestor:
         if att.key_id is not None:
             obj["key_id"] = att.key_id
         line = json.dumps(obj, sort_keys=True, separators=(",", ":"))
-        # 0600 like the trail and the sealkey — a default umask would expose
+        # 0600 like the trail and the sealkey, since a default umask would expose
         # the sidecar to every local user.
         fd = os.open(self._attest_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8", newline="") as f:
@@ -163,7 +163,7 @@ class FileAttestor:
     def check_continuity(self, initial_key: bytes, attestation_count: int) -> str | None:
         """Truncation detection (Ma-Tsudik attack): the keyfile epoch is
         one-way, so an attacker who truncates trail+sidecar cannot roll the
-        keyfile back — A_{t'} is not computable from A_t. Returns a reason
+        keyfile back: A_{t'} is not computable from A_t. Returns a reason
         string on mismatch, None when continuous."""
         if self._signer is not None:
             return None  # signer mode has no evolving keyfile
@@ -182,7 +182,7 @@ class FileAttestor:
     def read_aggregate(self) -> tuple[int, int, str] | None:
         """(agg_start, epoch, agg) from ``.sealagg``, or None if it does not
         exist yet (fs-hmac mode, or the agg scheme has never attested a
-        row). Only the LATEST value is ever stored — see module docstring."""
+        row). Only the LATEST value is ever stored; see module docstring."""
         return _read_aggregate(self._agg_path)
 
     def _write_aggregate(self, agg_start: int, epoch: int, agg: str) -> None:
@@ -204,7 +204,7 @@ class FileAttestor:
         # Atomic replace so a crash never leaves a half-written key, and the
         # old epoch key does not linger in the visible file. (Python cannot
         # zeroize memory or guarantee the old file's blocks are unrecoverable
-        # at the storage layer — documented limit, DESIGN.md §6.)
+        # at the storage layer: documented limit, DESIGN.md §6.)
         atomic_write_bytes(
             self._key_path, json.dumps({"epoch": epoch, "key": key.hex()}).encode("ascii")
         )

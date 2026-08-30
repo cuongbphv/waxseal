@@ -8,8 +8,8 @@ fingerprint is UNVERIFIABLE, never TAMPERED, and never a crash.
 import hashlib
 from dataclasses import replace
 
-from waxseal.domain.fingerprint import fingerprint_v1
-from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash
+from waxseal.domain.fingerprint import fingerprint
+from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash, header_frame
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
 from waxseal.domain.registry import VersionRegistry
 from waxseal.domain.verify import VerifyResult, verify_chain
@@ -23,7 +23,7 @@ def build_chain(n: int) -> list[Entry]:
         header = EntryHeader(
             seq=i,
             ts=f"2026-08-21T06:00:{i:02d}+00:00",
-            hash_version=fingerprint_v1(),
+            hash_version=fingerprint(),
             payload_type="application/vnd.test.event+json",
             payload_hash=compute_payload_hash(payload),
             prev_hash=prev,
@@ -34,8 +34,43 @@ def build_chain(n: int) -> list[Entry]:
     return entries
 
 
+def build_chain_v2(n: int) -> list[Entry]:
+    """Same shape as build_chain, but every row is stamped and hashed under
+    fingerprint()/header_frame/lp (waxseal-7tk.7.3)."""
+    entries: list[Entry] = []
+    prev = GENESIS_PREV_HASH
+    for i in range(n):
+        payload = f'{{"i":{i}}}'.encode()
+        header = EntryHeader(
+            seq=i,
+            ts=f"2026-08-21T06:00:{i:02d}+00:00",
+            hash_version=fingerprint(),
+            payload_type="application/vnd.test.event+json",
+            payload_hash=compute_payload_hash(payload),
+            prev_hash=prev,
+        )
+        entry_hash = compute_entry_hash(header, frame=header_frame)
+        entries.append(Entry(header=header, entry_hash=entry_hash, payload=payload))
+        prev = entry_hash
+    return entries
+
+
 def registry() -> VersionRegistry:
     return VersionRegistry()
+
+
+class _V1OnlyRegistry(VersionRegistry):
+    """A registry frozen to "knows only v1" -- simulates an older build
+    encountering rows written under an encoding it predates (waxseal-7tk.7.3).
+    Subclassing VersionRegistry (rather than a bespoke stand-in) keeps this
+    exercising the real recomputable()/encoder_for() logic, just seeded
+    with one fewer built-in fingerprint."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        v2 = fingerprint()
+        del self._schemas[v2]
+        del self._encoding[v2]
 
 
 class TestIntactChain:
@@ -106,6 +141,28 @@ class TestTamperDetection:
         assert not result.ok
         assert result.broken_seq == 1
         assert result.reason == "payload_hash_mismatch"
+
+    def test_unencodable_header_field_reports_entry_hash_mismatch_not_a_crash(
+        self,
+    ) -> None:
+        # waxseal-lmv (never-raise fuzzing sweep): a lone UTF-16 surrogate in
+        # a header field is valid `str` -- `json.loads('"\\ud800"')` produces
+        # one, so an attacker-writable JSONL trail can carry it -- but has no
+        # UTF-8 form, so `lp()` raises `LpEncodingError` (gap G4,
+        # test_properties.py). That error was labelled at `lp()` but never
+        # caught here, so it still escaped `verify_chain` uncaught: the exact
+        # "NEVER a crash" promise CLAUDE.md's Locked Design section makes for
+        # a recomputable row. A header this build cannot even encode can
+        # never reproduce the stored hash, so this is the existing
+        # `entry_hash_mismatch` finding, not a new incident class or a crash
+        # (CLAUDE.md rules 4/5/6).
+        chain = build_chain(3)
+        tampered = replace(chain[1].header, ts="\ud800")
+        chain[1] = replace(chain[1], header=tampered)
+        result = verify_chain(chain, registry())
+        assert not result.ok
+        assert result.broken_seq == 1
+        assert result.reason == "entry_hash_mismatch"
 
     def test_first_break_wins_checked_counts_rows_before_it(self) -> None:
         chain = build_chain(6)
@@ -198,7 +255,7 @@ class TestRegisteredButNotRecomputable:
         assert result.checked == 3
 
     def test_v1_fingerprint_is_recomputable(self) -> None:
-        assert registry().recomputable(fingerprint_v1())
+        assert registry().recomputable(fingerprint())
 
     def test_registered_non_v1_fingerprint_is_not_recomputable(self) -> None:
         reg = registry()
@@ -208,6 +265,55 @@ class TestRegisteredButNotRecomputable:
 
     def test_unknown_fingerprint_is_not_recomputable(self) -> None:
         assert not registry().recomputable("e" * 64)
+
+
+class TestLp64V2Verification:
+    """The real second encoding, not a hypothetical widened-field-tuple
+    stand-in (waxseal-7tk.7.3): a row stamped with fingerprint() must
+    verify `ok` through registry.encoder_for() dispatch to header_frame,
+    and must degrade to `unverifiable` -- never `broken` -- for a registry
+    that does not know fingerprint() at all. This is the concrete
+    instance, for lp64v2 specifically, of the migration-060 / beads-v1.2.2
+    failure class the whole project exists to make unrepresentable."""
+
+    def test_v2_stamped_chain_verifies_ok_against_a_registry_that_knows_v2(self) -> None:
+        result = verify_chain(build_chain_v2(4), registry())
+        assert result.ok is True
+        assert result.checked == 4
+        assert result.unverifiable == ()
+        assert result.broken_seq is None
+
+    def test_v2_stamped_row_unverifiable_not_broken_when_registry_predates_v2(self) -> None:
+        # The exact scenario CLAUDE.md names: an older build (here, a
+        # registry that only ever learned fingerprint()) meeting a row
+        # written under a newer encoding it does not recognize.
+        chain = build_chain_v2(4)
+        result = verify_chain(chain, _V1OnlyRegistry())
+        assert result.ok is True
+        assert result.broken_seq is None
+        assert result.reason is None
+        assert result.unverifiable == (0, 1, 2, 3)
+        assert result.checked == 0
+
+    def test_tampered_v2_stamped_row_is_still_caught_as_broken(self) -> None:
+        # The v2 path must not weaken tamper detection: mirrors
+        # TestTamperDetection.test_edited_header_reports_entry_hash_mismatch
+        # but on a v2-stamped chain.
+        chain = build_chain_v2(5)
+        tampered = replace(chain[2].header, ts="2027-01-01T00:00:00+00:00")
+        chain[2] = replace(chain[2], header=tampered)
+        result = verify_chain(chain, registry())
+        assert not result.ok
+        assert result.broken_seq == 2
+        assert result.reason == "entry_hash_mismatch"
+
+    def test_tampered_v2_stamped_payload_is_still_caught_as_broken(self) -> None:
+        chain = build_chain_v2(3)
+        chain[1] = replace(chain[1], payload=b'{"i":999}')
+        result = verify_chain(chain, registry())
+        assert not result.ok
+        assert result.broken_seq == 1
+        assert result.reason == "payload_hash_mismatch"
 
 
 class TestPayloadAbsent:

@@ -153,11 +153,38 @@ API distinction that collapses at the process boundary is not deployed.
 
 ### 3.4 Canonical encoding
 
-lp64v1: 8-byte big-endian length prefix per field, UTF-8 values, an explicit NULL sentinel
+The original encoding, lp64v1: 8-byte big-endian length prefix per field, UTF-8 values,
+an explicit NULL sentinel
 distinct from the empty string, PAE-style framing with a domain-separating prefix and field
 count. Argue length-prefixing over delimiters (no in-band ambiguity), and the NULL sentinel
 as an instance of the paper's recurring theme: *absent* and *empty* are different claims,
 and a canonical encoding that conflates them lets two different records hash identically.
+
+**Then turn the example on itself — this is the strongest passage available.** That
+sentinel is `b"\x00NULL\x00"`, which is *itself valid UTF-8*: it decodes to a six-character
+string. So the one field value equal to that string encoded identically to *absent*. The
+encoding chosen to keep "absent" and "empty" apart conflated "absent" and one specific
+*present* value — the very failure the section argues against, in the illustration of the
+argument. It was latent (no shipped call site could reach it) and it was still wrong, for
+the reason the paper cares about: the encoding is offered as portable, and an independent
+implementation written from the prose would have reproduced the ambiguity faithfully.
+
+lp64 fixes it structurally: a type tag *inside* the length-prefixed region (`0x00` for
+absent, `0x01` before a string's UTF-8 bytes), so the two differ in their first byte for
+every possible input. Injectivity becomes unconditional — no side condition, no invariant
+to maintain, no input to reject.
+
+The upgrade is the section's real payload, and it belongs here rather than in §3.3: because
+the encoding name is a component of the version descriptor, switching the default *changed
+the fingerprint automatically*. There was no migration to write and no released identity to
+redefine in place; a binary that predates the change reports the newer rows *unverifiable*,
+not *tampered*. Say plainly what it did cost: lp64v1 was removed rather than carried, so
+trails written under it are unverifiable by any current build — a price payable only
+because none existed outside development, and recorded as a one-off rather than left to
+be mistaken for precedent. The schema-evolution mechanism the paper proposes turned
+out to be what let the artifact repair its own canonical encoding without a migration. A
+design that can safely fix the layer beneath itself is the most convincing evidence that
+the design is load-bearing rather than decorative.
 
 ### 3.5 Redact-before-hash
 

@@ -1,4 +1,4 @@
-"""In-memory backend — for embedding, tests, and ephemeral sessions.
+"""In-memory backend, for embedding, tests, and ephemeral sessions.
 
 Same critical-section contract as every backend (CLAUDE.md rule 7): the lock
 covers read-tail + append, so concurrent writers cannot fork the chain.

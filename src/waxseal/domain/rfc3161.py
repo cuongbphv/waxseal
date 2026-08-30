@@ -1,7 +1,7 @@
 """RFC 3161 timestamping: request encoding and STRUCTURAL token checking.
 
 A checkpoint's ``ts`` is asserted by whoever wrote it. A Time-Stamp Authority's
-token is asserted by somebody else — which is the whole value: it moves the
+token is asserted by somebody else, which is the whole value: it moves the
 time claim into a different administrative authority, the same move anchoring
 makes for the chain root.
 
@@ -14,7 +14,7 @@ recomputed SHA-256, its status, and its nonce.
 
 It does **not** verify the CMS signature or the TSA's certificate chain. That
 needs X.509 path validation and RSA/ECDSA verification, which a zero-dependency
-library has no business reimplementing — a homegrown signature check that is
+library has no business reimplementing: a homegrown signature check that is
 subtly wrong is worse than no check, because it reports authenticity nobody
 established. Delegate it::
 
@@ -27,7 +27,7 @@ reports it must say so.
 Failure vocabulary
 ------------------
 ``check_timestamp_resp`` returns a reason string or None, and NEVER raises, on
-any RESPONSE bytes whatsoever — the response arrives over the network from a
+any RESPONSE bytes whatsoever, since the response arrives over the network from a
 party outside our trust boundary, and a parser that crashes on it denies the
 audit. The hardening covers ``der`` only: ``expected_message`` is supplied by
 the caller, not the network, and passing a non-bytes value for it is an
@@ -35,7 +35,7 @@ ordinary programming error that surfaces as TypeError.
 No reason contains the word "tamper": bytes this build cannot read are
 unverifiable by name (RFC 6962 section 4.6), which is a different verdict from
 bytes that were checked and found false. The two reasons that ARE
-checked-and-false — ``receipt_imprint_mismatch`` and ``nonce_mismatch`` — say
+checked-and-false (``receipt_imprint_mismatch`` and ``nonce_mismatch``) say
 the token attests something other than what sits next to it.
 """
 
@@ -50,7 +50,7 @@ from typing import Final
 
 # How a token is carried in an `.anchors` record's `receipt` field. The prefix
 # is what lets a reader dispatch on receipt type without guessing from the
-# bytes — an unknown prefix stays unverifiable-by-name instead of being
+# bytes: an unknown prefix stays unverifiable-by-name instead of being
 # force-fed to whichever parser happens to be first.
 RECEIPT_PREFIX: Final = "rfc3161:"
 
@@ -128,7 +128,7 @@ def encode_timestamp_req(
     """DER TimeStampReq committing to ``sha256(message)``.
 
     ``nonce`` is injected rather than generated here: the domain layer owns no
-    entropy (CLAUDE.md rule 8's sibling — a test must be able to freeze it, and
+    entropy (the sibling of CLAUDE.md rule 8: a test must be able to freeze it, and
     the byte layout must be reproducible). Callers that want replay protection
     pass one and check it back on the response. ``nonce=None`` omits the field.
 
@@ -256,7 +256,7 @@ def _generalized_time_to_iso(raw: str) -> str:
 @dataclass(frozen=True, slots=True)
 class TimestampToken:
     """The fields of a TSTInfo this library reads. Certificates and
-    signerInfos are skipped over as opaque — see the module docstring."""
+    signerInfos are skipped over as opaque; see the module docstring."""
 
     digest_algorithm: str
     imprint: str
@@ -363,7 +363,7 @@ def read_timestamp_resp(
     der: bytes, expected_message: bytes, *, expected_nonce: int | None = None
 ) -> tuple[TimestampToken | None, str | None]:
     """``(token, reason)``: the token when it structurally attests
-    ``expected_message``, otherwise None and a reason. Never raises — see the
+    ``expected_message``, otherwise None and a reason. Never raises; see the
     module docstring.
 
     Callers that want to PRINT the attested time need the token as well as the
@@ -394,7 +394,7 @@ def check_timestamp_resp(
     der: bytes, expected_message: bytes, *, expected_nonce: int | None = None
 ) -> str | None:
     """None when the token structurally attests ``expected_message``, else a
-    reason. Never raises — see the module docstring."""
+    reason. Never raises; see the module docstring."""
     return read_timestamp_resp(der, expected_message, expected_nonce=expected_nonce)[1]
 
 
@@ -405,7 +405,7 @@ def encode_receipt(der: bytes) -> str:
 
 def decode_receipt(receipt: str) -> bytes | None:
     """The DER inside an ``rfc3161:`` receipt, or None when the string is not
-    one — wrong prefix, or base64 this build cannot decode. None is "not
+    one: wrong prefix, or base64 this build cannot decode. None is "not
     readable here", never "the token is false"; the caller reports it as
     unverifiable and leaves the record alone."""
     if not receipt.startswith(RECEIPT_PREFIX):

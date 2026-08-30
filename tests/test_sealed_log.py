@@ -671,6 +671,123 @@ class TestFssAggregate:
         assert result.ok
 
 
+class TestFaultInjectionBetweenDependentSidecarWrites:
+    """FileAttestor.attest() under FS_HMAC_AGG_SCHEME is three sequential,
+    dependent writes for one call: .sealkey, then .sealagg, then the
+    .attest line (attest.py's own comment: "Order matters ... a crash
+    between any two leaves a state verify_attestations reports, not
+    repairs"). These tests make that comment's claim true by measurement
+    instead of assumption: each one crashes a REAL call at a different one
+    of the three write boundaries and checks what is actually left on disk,
+    not a hand-forged stand-in for it.
+
+    Every one of the three injection points converges on the SAME verdict,
+    "attestation_gap" — because the .attest line is always the last of the
+    three writes, so no exception raised anywhere in the sequence can ever
+    let it land. That convergence is itself the property under test: rule
+    5's ternary evidence (unverifiable != tampered) and rule 6 (fail-open
+    must be labelled) hold no matter WHERE inside the sequence the crash
+    lands, not just for the "nothing at all happened" case the wholesale
+    FailingAttestor stub above already covers.
+    """
+
+    def test_crash_between_sealkey_and_sealagg_write_is_a_labelled_gap(
+        self, tmp_path: Path
+    ) -> None:
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        log.append(payload={"i": 0}, payload_type=PT)  # seals cleanly first
+
+        def explode(*a: object, **kw: object) -> None:
+            raise OSError("simulated crash writing .sealagg")
+
+        log._attestor._write_aggregate = explode  # type: ignore[method-assign]
+        with pytest.raises(AttestationFailure):
+            log.append(payload={"i": 1}, payload_type=PT)
+
+        # The entry IS durably on the chain (rule 5: not a dropped write).
+        assert len(list(log._backend.entries())) == 2
+        # .sealkey completed (the first of the three writes); .sealagg did
+        # not (the second, patched to explode); .attest never even reached
+        # the third write below it in the source.
+        assert json.loads((tmp_path / "trail.jsonl.sealkey").read_text())["epoch"] == 2
+        assert json.loads((tmp_path / "trail.jsonl.sealagg").read_text())["epoch"] == 1
+        assert len((tmp_path / "trail.jsonl.attest").read_text().splitlines()) == 1
+
+        result = log.verify_attestations(initial_key=k0)
+        assert not result.ok
+        assert result.reason == "attestation_gap"
+        assert result.broken_seq == 1
+        # The CHAIN itself was never touched by a sidecar-only crash — rule
+        # 5's unverifiable/incomplete != tampered, checked directly rather
+        # than inferred from the attestation verdict alone.
+        assert log.verify().ok
+
+    def test_crash_between_sealagg_and_attest_line_write_is_a_labelled_gap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        log.append(payload={"i": 0}, payload_type=PT)
+
+        attest_path = str(tmp_path / "trail.jsonl.attest")
+        real_open = os.open
+
+        def faulty_open(path: object, *a: object, **kw: object) -> int:
+            if str(path) == attest_path:
+                raise OSError("simulated crash writing the .attest line")
+            return real_open(path, *a, **kw)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(os, "open", faulty_open)
+        with pytest.raises(AttestationFailure):
+            log.append(payload={"i": 1}, payload_type=PT)
+        monkeypatch.undo()
+
+        # Both dependent writes ahead of the .attest line completed; only
+        # the line itself (the third write) never landed.
+        assert json.loads((tmp_path / "trail.jsonl.sealkey").read_text())["epoch"] == 2
+        assert json.loads((tmp_path / "trail.jsonl.sealagg").read_text())["epoch"] == 2
+        assert len((tmp_path / "trail.jsonl.attest").read_text().splitlines()) == 1
+
+        result = log.verify_attestations(initial_key=k0)
+        assert not result.ok
+        assert result.reason == "attestation_gap"
+        assert result.broken_seq == 1
+        assert log.verify().ok
+
+    def test_first_write_failure_prevents_the_two_dependent_writes_after_it(
+        self, tmp_path: Path
+    ) -> None:
+        # The reverse direction: the FIRST write of the three refuses, so
+        # the two writes that depend on it having succeeded (.sealagg, the
+        # .attest line) must never even be attempted.
+        k0 = generate_key()
+        log = open_agg_sealed(tmp_path, k0)
+        log.append(payload={"i": 0}, payload_type=PT)
+
+        def explode(*a: object, **kw: object) -> None:
+            raise OSError("simulated crash writing .sealkey")
+
+        log._attestor._write_key = explode  # type: ignore[method-assign]
+        with pytest.raises(AttestationFailure):
+            log.append(payload={"i": 1}, payload_type=PT)
+
+        # Nothing downstream of the refused first write moved at all — the
+        # sidecars are left exactly as consistent with EACH OTHER as before
+        # the second append was attempted.
+        assert json.loads((tmp_path / "trail.jsonl.sealkey").read_text())["epoch"] == 1
+        assert json.loads((tmp_path / "trail.jsonl.sealagg").read_text())["epoch"] == 1
+        assert len((tmp_path / "trail.jsonl.attest").read_text().splitlines()) == 1
+
+        result = log.verify_attestations(initial_key=k0)
+        assert not result.ok
+        assert result.reason == "attestation_gap"
+        assert result.broken_seq == 1
+        assert log.verify().ok
+
+
 class TestSidecarPermissions:
     def test_attest_sidecar_is_created_owner_only(self, tmp_path: Path) -> None:
         # The sidecar mirrors every entry_hash; like the trail it must not

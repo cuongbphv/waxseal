@@ -15,14 +15,14 @@ Contract verified against openai.github.io/openai-agents-python
   on_tool_end(context, agent, tool, result: object).
 - Tool INPUT is not a parameter. Function tools receive a ToolContext
   exposing tool_name / tool_call_id / tool_arguments; other tool families
-  pass a plain RunContextWrapper — read those attributes with getattr.
+  pass a plain RunContextWrapper, so read those attributes with getattr.
 - The SDK awaits hooks inline and does not promise to swallow exceptions:
   a raise here can abort the user's run. Every failure path below degrades
   to a labelled, counted dropped write instead (chain integrity ≠ trail
   completeness).
 
 Ships in the wheel: `pip install waxseal openai-agents`, then import from
-waxseal.integrations.openai_agents — no file copying.
+waxseal.integrations.openai_agents, with no file copying.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ _REDACTOR = RegexRedactor()
 PAYLOAD_TYPE = "application/vnd.openai-agents.run-event+json"
 
 # Tool results can be megabytes (file reads, API dumps). Clip stored fields,
-# visibly — silent truncation would read as "the full result".
+# visibly, because silent truncation would read as "the full result".
 MAX_FIELD_CHARS = 4096
 
 
@@ -79,7 +79,7 @@ class WaxsealRunHooks(RunHooks):
                 )
         except Exception as e:  # broken environment: never abort the run
             print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
-            # No AuditLog to route this through — record it directly,
+            # No AuditLog to route this through, so record it directly,
             # best-effort (FileDropRecorder.record() never raises).
             from waxseal.adapters.drops import FileDropRecorder
 
@@ -89,7 +89,7 @@ class WaxsealRunHooks(RunHooks):
             return
         if not self._log.try_append(payload=payload, payload_type=PAYLOAD_TYPE):
             # Labelled fail-open: the SDK gives no second chance to report
-            # this — the loss must be visible here and counted on the writer.
+            # this: the loss must be visible here and counted on the writer.
             print(
                 f"[waxseal-audit] dropped write for {payload.get('phase')!r} "
                 f"(total dropped: {self._log.dropped_writes})",

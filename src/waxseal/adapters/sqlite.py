@@ -4,7 +4,7 @@ Fork prevention is layered: BEGIN IMMEDIATE serializes read-tail + insert,
 and the PRIMARY KEY on seq makes the database itself reject a second entry
 with the same seq even if locking were somehow bypassed. Entries are read
 back ORDER BY rowid; seq is an INTEGER PRIMARY KEY, which SQLite aliases to
-rowid, so this coincides with seq order — a renumbered/reordered row is
+rowid, so this coincides with seq order, and a renumbered/reordered row is
 caught by the hash checks (seq is inside the hashed header), not by read-back
 order (contrast postgres.py, whose separate rowpos really is insertion order).
 """
@@ -42,7 +42,7 @@ class SQLiteBackend:
         # Pre-create the database 0600 (payload-bearing, like the JSONL trail);
         # SQLite gives its -wal/-shm companions the database file's perms.
         os.close(os.open(self._path, os.O_CREAT | os.O_RDWR, 0o600))
-        # sqlite3's context manager commits but never closes — close explicitly.
+        # sqlite3's context manager commits but never closes, so close explicitly.
         conn = self._connect()
         try:
             self._enable_wal(conn)
@@ -55,7 +55,7 @@ class SQLiteBackend:
         # One connection per operation: sqlite3 connections are not
         # thread-safe to share, and appends may come from many threads.
         # Journal mode is a property of the database FILE, set once in
-        # __init__ — re-issuing the pragma per connection would reopen the
+        # __init__, since re-issuing the pragma per connection would reopen the
         # busy race _enable_wal exists to close.
         return sqlite3.connect(self._path, timeout=30.0)
 
@@ -65,8 +65,8 @@ class SQLiteBackend:
         # SQLITE_BUSY for it WITHOUT consulting the busy handler (measured:
         # instant "database is locked" despite timeout=30). Concurrent opens
         # of a fresh trail hit exactly that window, so retry briefly. If the
-        # switch still loses, keep the default rollback journal — equally
-        # fork-safe (BEGIN IMMEDIATE + PRIMARY KEY), only slower — and say
+        # switch still loses, keep the default rollback journal. It is equally
+        # fork-safe (BEGIN IMMEDIATE + PRIMARY KEY), only slower, and we say
         # so: fail-open must be labelled (CLAUDE.md rule 6).
         deadline = time.monotonic() + deadline_s
         while True:

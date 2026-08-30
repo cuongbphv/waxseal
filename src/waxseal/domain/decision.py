@@ -3,7 +3,7 @@
 An agent's tool calls say what the machine *did*. A regulated institution is
 asked a different question: on what basis was this particular decision about
 this particular customer made, by which model, under whose oversight. That is
-the evidence unit this module defines — a payload schema carried by the
+the evidence unit this module defines: a payload schema carried by the
 existing envelope, so the chain, the fingerprint registry, and every backend
 stay untouched (CLAUDE.md: changing payload schema never touches the chain).
 
@@ -15,18 +15,18 @@ Two rules shape the serialization:
   this" is exactly the fact an auditor needs to be able to read (rule 5).
 - **Unknown is not an error.** ``decision_type`` and ``human_oversight.mode``
   are free strings recorded verbatim. A vocabulary this build has not seen is
-  a newer writer, not a bad row — rejecting it here would recreate the
+  a newer writer, not a bad row, and rejecting it here would recreate the
   beads-v1.2.2 failure class one layer down.
 
 What is validated is only what makes a record *evidence at all*: the
 identifiers are non-empty and ``input_commitment`` is a real digest. A record
-that commits to nothing is worse than no record — it looks like proof and is
+that commits to nothing is worse than no record: it looks like proof and is
 not.
 
 ``input_commitment`` is a hash of the (already redacted) model input, not the
 input itself, so the trail carries no customer data. Note the standard limit
 of any hash commitment: over a low-entropy input (an account number, a small
-enum) it is a *confirmable* commitment — someone who can guess the input can
+enum) it is a *confirmable* commitment, since someone who can guess the input can
 check the guess. Commit to a redacted or salted form when that matters.
 """
 
@@ -85,7 +85,7 @@ class HumanOversight:
 
     ``mode`` is deliberately an open string: institutions name their controls
     differently and a closed enum would force a lossy mapping. The whole
-    object being ``None`` on a record means oversight was never recorded —
+    object being ``None`` on a record means oversight was never recorded,
     which is not the same claim as ``mode="automated"`` (oversight was
     recorded, and there was none).
 
@@ -140,7 +140,7 @@ class DecisionRecord:
             # NaN/inf are rejected rather than stored: json.dumps writes them
             # as bare NaN/Infinity, which is not JSON, so the payload would
             # hash perfectly well and be unreadable to any conforming auditor
-            # tool — a silently useless record.
+            # tool, which is a silently useless record.
             if isinstance(self.confidence, bool) or not isinstance(
                 self.confidence, (int, float)
             ):
@@ -188,7 +188,7 @@ def to_payload(record: DecisionRecord) -> dict[str, Any]:
 def from_payload(payload: Any) -> DecisionRecord:
     """Parse a decision payload read back off the trail.
 
-    Raises ``ValueError`` — and only ``ValueError`` — on anything malformed,
+    Raises ``ValueError``, and only ``ValueError``, on anything malformed,
     so a caller auditing a whole trail can label one row unparseable and keep
     going. Unparseable is a third verdict, distinct from intact and from
     tampered: the chain check has its own answer about those bytes and this

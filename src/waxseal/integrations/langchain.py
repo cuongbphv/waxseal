@@ -14,12 +14,12 @@ Contract verified against langchain-core 1.6.0 (installed source, 2026-08-21):
   *, run_id, ...); on_tool_error(error: BaseException, *, run_id, ...).
   run_id/parent_run_id are uuid.UUID. output is Any (str in old versions).
 - handle_event swallows handler exceptions unless raise_error is True.
-  raise_error stays False here — a broken audit disk must never abort the
-  user's run — but LangChain's swallow is SILENT, so every failure path
+  raise_error stays False here, because a broken audit disk must never abort
+  the user's run, but LangChain's swallow is SILENT, so every failure path
   below labels and counts its own dropped write (fail-open must be visible).
 
 Ships in the wheel: `pip install waxseal langchain-core`, then import from
-waxseal.integrations.langchain — no file copying.
+waxseal.integrations.langchain, with no file copying.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ _REDACTOR = RegexRedactor()
 PAYLOAD_TYPE = "application/vnd.langchain.tool-event+json"
 
 # Tool outputs can be megabytes (retrieved documents, SQL dumps). Clip stored
-# fields, visibly — silent truncation would read as "the full output".
+# fields, visibly, because silent truncation would read as "the full output".
 MAX_FIELD_CHARS = 4096
 
 
@@ -81,7 +81,7 @@ class WaxsealCallbackHandler(BaseCallbackHandler):
                 )
         except Exception as e:  # broken environment: never block the run
             print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
-            # No AuditLog to route this through — record it directly,
+            # No AuditLog to route this through, so record it directly,
             # best-effort (FileDropRecorder.record() never raises).
             from waxseal.adapters.drops import FileDropRecorder
 

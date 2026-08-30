@@ -86,6 +86,18 @@ class TestSingleOwner:
         assert offenders == []
 
 
+class TestVerdictComposition:
+    # W2/C1: verdict composition in cli.py must go through
+    # Verdict.join (domain/verdict.py), never max() over exit codes — 2
+    # (unverifiable) is the larger exit code but the weaker finding, so
+    # max() there would let an unrelated unverifiable row override a real
+    # break. This is a preventative regression guard: no existing bug to
+    # fix, just a shape the source must never regain.
+    def test_max_does_not_appear_in_cli(self) -> None:
+        text = (SRC / "cli.py").read_text()
+        assert "max(" not in text
+
+
 class TestPublicApiFrozen:
     def test_public_api_is_exactly_the_frozen_set(self) -> None:
         # Additions require updating this test in the same commit, with
@@ -99,8 +111,14 @@ class TestPublicApiFrozen:
             "EntryHeader",
             "VerifyResult",
             "VersionRegistry",
+            # 0.1.4 collapsed waxseal to a single canonical encoding and
+            # retired lp64v1 before any trail written under it existed outside
+            # development. `fingerprint_v1` went with it: a name that pins an
+            # ordinal is only worth keeping while more than one ordinal exists.
+            # `fingerprint()` is the identity of the schema this build writes,
+            # derived from the descriptor, never typed by hand.
+            "fingerprint",
             "fingerprint_for",
-            "fingerprint_v1",
             # External anchoring (RFC 6962 batch root + membership proofs)
             # added so an anchored root bounds the whole-chain-rewrite
             # threat the hash chain alone cannot resist.
@@ -148,6 +166,17 @@ class TestPublicApiFrozen:
             "ProofBundle",
             "build_proof_bundle",
             "verify_proof_bundle",
+            # waxseal-mfi, owner decision: opened so a caller composing its own
+            # verify checks reaches for Verdict.join() instead of reinventing
+            # max()-on-exit-code — the exact structural-vs-procedural gap
+            # Verdict exists to close, not left importable only from a
+            # non-public module path. SeparationTopology/separation_degree
+            # join it as the type+function pair a caller needs to build one
+            # and read it back, now that `report`/`verify --pin` print τ
+            # (conformance.md gap G1, closed this same commit).
+            "SeparationTopology",
+            "Verdict",
+            "separation_degree",
         }
 
 

@@ -2,7 +2,7 @@
 
 An auditor asking about a single decision has two bad options with a plain
 hash chain: take the institution's word for one row, or receive the entire
-trail — every other customer's decisions included — to check the links. A
+trail (every other customer's decisions included) to check the links. A
 bundle is the third option. It carries one entry plus the RFC 6962 sibling
 hashes tying it to a batch root, so the row checks out offline against a root
 that was anchored somewhere the institution cannot reach (``domain.anchoring``,
@@ -10,7 +10,7 @@ that was anchored somewhere the institution cannot reach (``domain.anchoring``,
 all of them, and the recipient still verifies rather than trusts.
 
 What the root adds over recomputing the entry hash: an entry rebuilt
-consistently — header edited, ``entry_hash`` recomputed to match — passes
+consistently, with the header edited and ``entry_hash`` recomputed to match, passes
 every local check. It cannot pass membership against a root published before
 the edit. That is the whole-trail-rewrite gap the chain alone cannot close,
 narrowed to a single exported row.
@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from waxseal.domain.anchoring import batch_root, membership_proof, verify_membership
-from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash
+from waxseal.domain.hashing import LpEncodingError, compute_entry_hash, compute_payload_hash
 from waxseal.domain.header import Entry, EntryHeader, header_from_obj, header_to_obj
 from waxseal.domain.registry import VersionRegistry
 
@@ -71,7 +71,7 @@ def build_proof_bundle(entries: Sequence[Entry], seq: int) -> ProofBundle:
     """Bundle the entry at ``seq`` against a root over the whole batch.
 
     ``seq`` outside the batch raises IndexError rather than proving some
-    other entry — the same contract ``membership_proof`` keeps for
+    other entry, the same contract ``membership_proof`` keeps for
     operator-supplied indices.
     """
     if not 0 <= seq < len(entries):
@@ -101,7 +101,28 @@ def verify_proof_bundle(bundle: ProofBundle, registry: VersionRegistry) -> Bundl
         # Only recompute under a schema the row was actually written with.
         # Doing otherwise would report a row tampered for having a fingerprint
         # this build does not implement (the migration-060 failure class).
-        if compute_entry_hash(bundle.header) != bundle.entry_hash:
+        # Dispatch by fingerprint (registry.encoder_for), exactly like
+        # verify_chain (domain/verify.py): recompute the row only under the
+        # encoding its own hash_version names.
+        encoder = registry.encoder_for(bundle.header.hash_version)
+        assert encoder is not None  # type-narrowing; recomputable() already proved this
+        try:
+            recomputed = compute_entry_hash(bundle.header, frame=encoder)
+        except LpEncodingError:
+            # waxseal-lmv (never-raise fuzzing sweep): mirrors
+            # domain/verify.py's identical fix. A header field can be a
+            # `str` with no UTF-8 form (a lone UTF-16 surrogate --
+            # json.loads('"\ud800"') produces one, and a bundle is exactly
+            # the "operator- and attacker-supplied JSON" this module's own
+            # docstring names). `lp()` labels that LpEncodingError instead
+            # of a bare UnicodeEncodeError (gap G4), but it was left uncaught
+            # here, so this function's own "never raises" promise (see its
+            # docstring) broke on exactly the input it exists to survive. A
+            # header this build cannot even encode can never reproduce the
+            # stored hash, so this is the existing entry_hash_mismatch
+            # finding, not a new incident class (CLAUDE.md rules 4/5/6).
+            return BundleResult(ok=False, reason="entry_hash_mismatch", unverifiable=False)
+        if recomputed != bundle.entry_hash:
             return BundleResult(ok=False, reason="entry_hash_mismatch", unverifiable=False)
         if (
             bundle.payload is not None
@@ -148,7 +169,7 @@ def bundle_to_json(bundle: ProofBundle) -> str:
 def bundle_from_json(text: str) -> ProofBundle:
     """Parse a serialized bundle.
 
-    Raises ``ValueError`` — and only ``ValueError`` — on anything malformed,
+    Raises ``ValueError``, and only ``ValueError``, on anything malformed,
     including a format version this build does not know. That last one is a
     parse refusal, not a tampering verdict: an unrecognized format is
     something this reader cannot check, and saying so is the honest answer

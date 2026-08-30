@@ -34,10 +34,15 @@ error**. waxseal makes that class unrepresentable. Everything below serves that 
   (RFC 6962 §4.6 principle: unrecognized types are opaque, not errors). A verifier MUST NOT
   recompute a row under a tuple it was not signed with — reporting a row intact on a hash
   it cannot reproduce is the one lie a tamper-evidence mechanism must never tell.
-- **Canonical encoding = lp64v1**: 8-byte big-endian length prefix per field, UTF-8 values,
-  NULL sentinel `b"\x00NULL\x00"` distinct from empty string, PAE-style frame
-  (`waxseal-v1` prefix + field count). Defined byte-for-byte in SPEC.md. Never hash a
-  serialization you do not control (no protobuf, no repr(), no un-canonicalized JSON).
+- **Canonical encoding = lp64, and there is exactly one**: 8-byte big-endian length prefix
+  per field over a tagged payload (`0x00` absent, `0x01` + UTF-8 for a string), PAE-style
+  frame (`waxseal-lp64` prefix + field count). The tag makes injectivity unconditional —
+  absent and every possible string differ in their first encoded byte, so there is no side
+  condition to maintain and no input to reject. Defined byte-for-byte in SPEC.md. Never
+  hash a serialization you do not control (no protobuf, no repr(), no un-canonicalized
+  JSON). A superseded encoding is not a variant to choose between: `domain/hashing.py`
+  implements the current one and nothing else, and a row whose fingerprint no current
+  encoder can reproduce is unverifiable by name, never recomputed under a substitute.
 - **Redact-before-hash.** Redaction runs BEFORE `payload_hash` is computed. Cleartext
   secrets never touch disk. A redaction miss is unrecoverable by design — that is why the
   Redactor runs first, not why it may be skipped.
@@ -47,6 +52,37 @@ error**. waxseal makes that class unrepresentable. Everything below serves that 
 - **Chain integrity ≠ trail completeness.** A dropped write leaves no seq gap, so
   `verify` can still return ok. `dropped_writes: int | None` reports completeness
   separately; `None` means "not measured" and is NEVER the same as `0`.
+
+## Named principle: the Ternary Evidence Principle
+
+**Collapse theorem.** Let `f: {true, false, not-measured} → {0, 1}` be any reporting
+function over a three-valued evidential state. By the pigeonhole principle, either
+`f(not-measured) = f(false)` (a false alarm) or `f(not-measured) = f(true)` (false
+confidence) — collapsing to two values leaves no third option. "Migration 060" and
+"beads v1.2.2" (see the two incidents above) are the same collapse in different
+clothing: an unknown/unmeasured state got forced into a binary and came out on the wrong
+side.
+
+This codebase already applies the principle, by name or not, in (at least) six places:
+
+1. **Verdict chain**: `ok` / `broken` / `unverifiable` (`domain/verify.py`), now also
+   formalized as the `Verdict` type (`src/waxseal/domain/verdict.py`) — a new instance
+   that arrived in this same release, not merely a restatement of the old convention.
+2. **`dropped_writes: int | None`** — `None` ("not measured") never renders as `0`
+   ("measured, zero loss").
+3. **`human_oversight.mode`** (`src/waxseal/domain/decision.py`) — `"unrecorded"` is a
+   value distinct from `"automated"`, not the absence of one.
+4. **`ModelRef.digest = None`** (`src/waxseal/domain/decision.py`) means "unpinned", a
+   weaker claim recorded as such rather than guessed at.
+5. **Witness verdicts** (`src/waxseal/domain/witnessing.py`) — `unreachable` is distinct
+   from both `consistent` and `inconsistent`.
+6. **RFC 3161 nonce absence** (`src/waxseal/adapters/rfc3161.py`,
+   `src/waxseal/adapters/anchors.py`) — no stored nonce means "nothing to compare",
+   skipped, never failed.
+
+Rule 5 below is the SPECIFIC instance of this general principle that the chain-integrity
+metric needed. An implementer who has internalized the general principle, not just rule
+5's wording, should be able to find a seventh place it applies without being told.
 
 ## Architecture (layer DAG, enforced by tests/architecture/)
 
@@ -79,10 +115,17 @@ cli.py         thin shell over adapters. Nothing imports cli.
 3. **Golden test vectors are write-once.** `tests/vectors/` and the vectors in SPEC.md may
    gain new vectors; existing vectors may never be edited or deleted. CI/tests fail if a
    frozen hash changes — that failure means STOP, not "update the vector".
+   *Re-frozen once, in 0.1.4, when lp64 replaced lp64v1.* That was an explicit decision by
+   the repository owner, taken while waxseal had published releases but no trail written
+   under the old encoding existed outside development, so nothing verifiable was orphaned.
+   It is recorded here because it is exactly the move this rule forbids by default, and
+   recording it is cheaper than someone later inferring the rule is soft. It is not a
+   precedent. An agent hitting a frozen-hash failure still STOPS.
 4. **Verify reports, never repairs.** No code path may rewrite, reorder, or "fix" chain
    entries. Which row is the tamper is a decision only an operator can make.
 5. **`None` ≠ `0`, unverifiable ≠ tampered, unmeasured ≠ absent.** Applies to
-   `dropped_writes`, unknown fingerprints, and any future metric.
+   `dropped_writes`, unknown fingerprints, and any future metric. (This is one instance
+   of the general Ternary Evidence Principle — see "Named principle" above.)
 6. **Fail-open must be labelled.** If a guard/redactor degrades, the degradation is
    recorded in the output (notice field / warning), never swallowed silently.
 7. **Concurrency: read-tail + append is one critical section.** JSONL: file lock around
@@ -124,8 +167,27 @@ cli.py         thin shell over adapters. Nothing imports cli.
 reason); exit 2 = intact-but-unverifiable (unknown fingerprints, unverifiable anchor
 bindings, or an unreachable witness — unverifiable, never tampered); exit 3 = trail path
 does not exist (nothing read, nothing created). `tail`, `inspect`, `head`, `report`,
-`checkpoint`, `export-proof`, `verify-proof`, `consistency` are read-only against the
-trail. `receipt` is read-only against the trail and its sidecar; it writes extracted
+`checkpoint`, `export-proof`, `verify-proof`, `consistency`, `reconcile-tickets`,
+`verify-handoff` are read-only against the trail (and, for `verify-handoff`, against the
+named origin trail too — no URL/remote support, local path only). `verify-handoff
+<delegate-trail> --origin <origin-trail>` (D3: cross-trail handoff binding) checks every
+handoff-binding entry recorded on the delegate trail against the origin trail's current
+history; exit 0 = nothing to check or every binding holds, exit 1 = at least one binding
+no longer holds (a genuinely detected mismatch, never unverifiable — the comparison is
+deterministic given the origin's own hashes), exit 3 = the named origin trail does not
+exist. `reconcile-tickets` (D2: exogenous admission tickets)
+reconciles an operator-supplied `--issued` ticket range against tickets present on the
+trail — a missing ticket is a *positively detected* drop, distinct from `dropped_writes`'s
+measured minimum; its exit code reuses `Verdict`: 0 = no positively-detected drop, 1 = a
+drop WAS positively detected, 2 = unmeasured (issuer data unavailable this run — never
+rendered as "0 drops", rule 5). `waxseal cadence` opens no trail at all — only
+operator-supplied parameters (`--lam`/`--c`/`--w`/`--rho`/`--delta`/`--t-max` required,
+`--M` default 1) — and prints the cost-optimal anchoring cadence from `domain/cadence.py`:
+`N*`, the clamped `N_opt`, the clamp bounds, the balance terms, and a recommended band
+(never a bare point) around `N_opt`; exit 0 = feasible, exit 1 = infeasible (the anchor
+technology, not the cadence, is wrong — `delta > t_max`), exit 2 = an invalid measurement
+or a missing required flag. `receipt` is read-only against the trail and its sidecar; it
+writes extracted
 receipt/frame files only into the operator-named `--out` directory. Two spec'd
 verifier-state carve-outs, neither of which touches the log: `--pin` writes the pin state
 file (SPEC §13 — exit 2 advances the pin because unverifiable ≠ tampered; exit 1 freezes

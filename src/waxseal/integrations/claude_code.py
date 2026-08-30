@@ -13,14 +13,14 @@ Contract verified against https://code.claude.com/docs/en/hooks.md (2026-08):
   UserPromptSubmit carries prompt.
 - Exit code 2 BLOCKS the tool call (PreToolUse) or the prompt
   (UserPromptSubmit). An audit observer therefore exits 0 on EVERY path,
-  including its own failures — a broken audit disk must never veto work.
+  including its own failures, because a broken audit disk must never veto work.
 - On UserPromptSubmit, exit-0 stdout is INJECTED INTO MODEL CONTEXT, and on
   other events stdout is parsed for decision JSON. This script never writes
   to stdout; diagnostics go to stderr (shown as a non-blocking notice).
 
 Secrets are redacted BEFORE hashing/storage (RegexRedactor), so a key that
 Claude leaked into a command or that the user pasted into a prompt reaches
-this trail only as ***REDACTED*** — unlike the session transcript, which
+this trail only as ***REDACTED***, unlike the session transcript, which
 this hook cannot and does not rewrite.
 """
 
@@ -42,7 +42,7 @@ _REDACTOR = RegexRedactor()
 PAYLOAD_TYPE = "application/vnd.claude-code.hook-event+json"
 
 # Tool outputs can be megabytes (file reads, terminal dumps). Clip stored
-# fields, visibly — silent truncation would read as "the full output".
+# fields, visibly, because silent truncation would read as "the full output".
 MAX_FIELD_CHARS = 4096
 
 # Common fields recorded for every event; per-event fields added below.
@@ -89,7 +89,7 @@ def build_payload(event: dict[str, Any]) -> dict[str, Any]:
         if name in event:
             payload[name] = _sanitize(event[name])
     # tool_output is the documented field; tool_response is what older
-    # releases sent — store either under one key so trails stay uniform.
+# releases sent, so store either under one key so trails stay uniform.
     if "tool_output" in event or "tool_response" in event:
         payload["tool_output"] = _sanitize(event.get("tool_output", event.get("tool_response")))
     return payload
@@ -109,7 +109,7 @@ def main() -> int:
         log = AuditLog.open(_trail_path(), redactor=RegexRedactor(), record_drops=True)
     except Exception as e:
         print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
-        # No AuditLog to route this through — record it directly. Best-effort
+        # No AuditLog to route this through, so record it directly. Best-effort
         # (FileDropRecorder.record() never raises): a trail we cannot even
         # open must not become a second failure on top of the first.
         from waxseal.adapters.drops import FileDropRecorder

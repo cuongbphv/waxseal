@@ -138,6 +138,37 @@ and what is provably impossible?
 | serve a trail inconsistent with an anchor | `--anchors` | `anchor_root_mismatch` |
 | truncate a sealed trail | keyfile epoch (SPEC 11) | `keyfile_epoch_mismatch` |
 | replay an old aggregate over a truncated trail | anchored binding (SPEC 15) | `anchored_aggregate_epoch_mismatch` |
+| strip the aggregate binding from the sidecar | pin `expect_anchor_binding` (SPEC 13.1) | `anchor_policy_downgrade` |
+| stop anchoring and wait | pin `max_anchor_age_s` (SPEC 13.1) | `anchor_stale` |
+| present fewer independent authorities than claimed | pin `declared_topology` (SPEC 13.1) | `separation_shortfall` |
+
+The last three are **exit 2, not exit 1**, and the distinction is load-bearing rather
+than pedantic. Each says *the corroboration this deployment's policy expects was not
+observed* — which is a fact about coverage, not about the trail. The chain verdict is
+reported separately and is unaffected. An assessor who reads any of them as "tampering
+detected" is overclaiming; one who reads them as "fine" is underclaiming. They mean:
+check the anchoring pipeline, then re-run.
+
+Two are worth naming as attacks the previous release could not see at all:
+
+- **Anchoring-policy downgrade.** A checkpoint frame carrying no aggregate fields is
+  byte-identical to one written before those fields existed. An adversary holding the
+  `.anchors` sidecar could therefore present only unbound records and silently remove
+  SPEC 15's replay-plus-truncate protection: every remaining check passed, and nothing
+  in the verifier's own trust domain recorded that a binding was ever expected. What was
+  missing was exogenous *policy*, not an exogenous *value* — and unlike the aggregate
+  commitment itself (which cannot be recomputed without the seal key), a boolean
+  expectation is something a verifier can check. Sidecar records this build cannot parse
+  report `anchor_binding_unreadable` instead: absence among the readable records is not
+  evidence of absence.
+- **Silence.** Passive anchoring is answer-only. A timestamp authority responds when
+  asked; it cannot notice that nobody asked. An adversary with write access needs only
+  to *stop anchoring* and then rewrite at leisure — and the resulting storage state is
+  indistinguishable from a system that was simply idle. `max_anchor_age_s` closes this
+  for a verifier that holds the deadline in its own trust domain: silence past the
+  deadline becomes a reported finding rather than an absence of findings. This does not
+  make silence publicly adjudicable — that needs a third party holding the deadline, and
+  the on-chain liveness contract sketched in `docs/paper/` remains designed, not built.
 
 ### Provably impossible without an external channel
 

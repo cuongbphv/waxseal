@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from tests.adapters.test_jsonl import build_entry
+from tests.adapters.test_jsonl import build_entry, build_entry_v2
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 from waxseal.domain.registry import VersionRegistry
 from waxseal.domain.verify import verify_chain
@@ -63,6 +63,15 @@ class BackendContractTests:
 
     def test_entry_hash_round_trips(self, backend: Any) -> None:
         written = backend.append(lambda seq, prev: build_entry(seq, prev, b'{"k":"v"}'))
+        [read_back] = list(backend.entries())
+        assert read_back == written
+
+    def test_v2_entry_round_trips_byte_for_byte(self, backend: Any) -> None:
+        # Same claim as test_entry_hash_round_trips, for an lp64v2-signed row
+        # -- every backend that mixes this contract in (JSONL, memory, S3,
+        # SQLite, Postgres, remote) must store and hand back a v2 entry
+        # identically to a v1 one (waxseal-7tk.7.5's parity net).
+        written = backend.append(lambda seq, prev: build_entry_v2(seq, prev, b'{"k":"v"}'))
         [read_back] = list(backend.entries())
         assert read_back == written
 

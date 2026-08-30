@@ -25,6 +25,8 @@ from pathlib import Path
 import pytest
 
 from waxseal import AuditLog
+from waxseal.adapters.anchors import read_anchor_records
+from waxseal.adapters.remote import RemoteRequest, RemoteResponse
 from waxseal.cli import main
 from waxseal.domain.checkpoint import Checkpoint, checkpoint_for, checkpoint_frame
 from waxseal.domain.rfc3161 import _der_int, _der_oid, _tlv
@@ -332,11 +334,76 @@ class TestAnchorSubcommandSinks:
         assert type(sink).__name__ == "RecordingAnchorSink"
         assert sink.name == "ots"  # type: ignore[attr-defined]
 
-    def test_the_two_targets_are_mutually_exclusive(self, tmp_path: Path) -> None:
+    def test_both_targets_together_write_two_records_over_the_same_checkpoint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # waxseal-4yk: the two used to be mutually exclusive at the argparse
+        # level. One `anchor` run now reaches both independent domains — the
+        # same checkpoint (computed once), one sidecar record per sink.
         path = tmp_path / "trail.jsonl"
         AuditLog.open(path).append(payload={"i": 0}, payload_type=PT)
-        with pytest.raises(SystemExit):
-            main(["anchor", str(path), "--tsa-url", "http://a", "--ots-calendar", "http://b"])
+        frame = frame_of(path)
+
+        monkeypatch.setattr("waxseal.adapters.rfc3161._default_nonce", lambda: 4242)
+
+        def tsa_transport(request: RemoteRequest) -> RemoteResponse:
+            return RemoteResponse(status=200, body=granted_response(frame, nonce=4242))
+
+        def ots_transport(request: RemoteRequest) -> RemoteResponse:
+            return RemoteResponse(status=200, body=b"\x00pending-proof")
+
+        monkeypatch.setattr(
+            "waxseal.adapters.rfc3161.urllib_transport", lambda timeout=10.0: tsa_transport
+        )
+        monkeypatch.setattr(
+            "waxseal.adapters.ots.urllib_transport", lambda timeout=10.0: ots_transport
+        )
+
+        rc = main(
+            ["anchor", str(path), "--tsa-url", "http://tsa", "--ots-calendar", "http://cal"]
+        )
+        assert rc == 0
+
+        records = read_anchor_records(path).records
+        assert len(records) == 2
+        assert {r.sink for r in records} == {"rfc3161", "ots"}
+        assert {r.checkpoint.entry_hash for r in records} == {records[0].checkpoint.entry_hash}
+        assert {r.checkpoint.root for r in records} == {records[0].checkpoint.root}
+        assert {r.checkpoint.seq for r in records} == {records[0].checkpoint.seq}
+
+    def test_tsa_unreachable_still_records_the_ots_result_and_labels_the_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        AuditLog.open(path).append(payload={"i": 0}, payload_type=PT)
+
+        def ots_transport(request: RemoteRequest) -> RemoteResponse:
+            return RemoteResponse(status=200, body=b"\x00pending-proof")
+
+        monkeypatch.setattr(
+            "waxseal.adapters.ots.urllib_transport", lambda timeout=10.0: ots_transport
+        )
+
+        # Port 0 is unroutable, so this fails without touching the network.
+        rc = main(
+            [
+                "anchor",
+                str(path),
+                "--tsa-url",
+                "http://127.0.0.1:0/tsr",
+                "--ots-calendar",
+                "http://cal",
+            ]
+        )
+        assert rc == 1
+
+        records = read_anchor_records(path).records
+        assert len(records) == 1
+        assert records[0].sink == "ots"
+
+        err = capsys.readouterr().err
+        assert "rfc3161" in err
+        assert "nothing recorded" in err
 
     def test_an_unreachable_tsa_records_nothing_and_exits_1(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

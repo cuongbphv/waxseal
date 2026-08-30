@@ -35,7 +35,7 @@ def record_file(log: AuditLog, path: Path | str, *, doc_id: str) -> Entry:
 
 def current_matches_last(log: AuditLog, path: Path | str, *, doc_id: str) -> bool | None:
     """True/False = measured against the last recorded version.
-    None = this doc_id was never recorded — distinct from a mismatch
+    None = this doc_id was never recorded, which is distinct from a mismatch
     (unmeasured is not a verdict, CLAUDE.md rule 5)."""
     last_hash: str | None = None
     for entry in log.entries():

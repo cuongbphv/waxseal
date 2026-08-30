@@ -1,4 +1,4 @@
-"""RemoteBackend — an HTTP peer to JSONL/SQLite/S3 (DESIGN.md's remote
+"""RemoteBackend, an HTTP peer to JSONL/SQLite/S3 (DESIGN.md's remote
 upgrade path). Wire contract v1 is documented normatively in REMOTE.md; this
 is the reference client.
 
@@ -6,7 +6,7 @@ Trust model (REMOTE.md, DESIGN.md section 10): the server is a TRUSTED
 WRITER, not bound against a malicious one. verify_chain still runs entirely
 client-side over whatever entries() yields, so a corrupted or lying server
 is caught the same way a corrupted local file is (tamper-evident, not
-tamper-proof) — but a server that consistently forges a full rewrite (every
+tamper-proof), but a server that consistently forges a full rewrite (every
 header, every hash, self-consistent) is the same honest limit a local
 attacker-writable disk already has. REMOTE.md's recommendation is the same
 one anchoring already gives local backends: anchor the head independently
@@ -16,7 +16,7 @@ trusting the server's own history as the last word.
 
 CAS retry mirrors s3.py's conditional-write precedent: the server checks
 (seq, prev_hash) atomically server-side; a 409 means another writer won the
-race, so the client re-reads /head and rebuilds — never forges ahead on a
+race, so the client re-reads /head and rebuilds. It never forges ahead on a
 stale tail (CLAUDE.md rule 7).
 """
 
@@ -33,10 +33,10 @@ from typing import Any, Final
 from waxseal.adapters._envelope import from_obj, to_obj
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 
-_MAX_RACE_RETRIES = 32  # s3.py's own ceiling — same rationale, not a new number
+_MAX_RACE_RETRIES = 32  # s3.py's own ceiling: same rationale, not a new number
 # Pagination has no natural retry ceiling like a CAS race does, but an
 # unbounded `while True` is still a hang waiting to happen against a broken
-# or hostile server — same "fail loudly instead of spinning forever"
+# or hostile server, the same "fail loudly instead of spinning forever"
 # rationale as _MAX_RACE_RETRIES, just a far more generous bound since a
 # legitimate large chain may need many pages.
 _MAX_PAGES = 1_000_000
@@ -63,7 +63,7 @@ Transport = Callable[[RemoteRequest], RemoteResponse]
 class RemoteError(RuntimeError):
     """Any HTTP response RemoteBackend cannot interpret as a protocol-defined
     state (404 = empty, 409 = lost race). A caller's try_append sees this
-    like any other backend exception — it becomes a drop, never a fork."""
+    like any other backend exception, so it becomes a drop, never a fork."""
 
 
 _ALLOWED_SCHEMES: Final = frozenset({"http", "https"})
@@ -71,8 +71,8 @@ _ALLOWED_SCHEMES: Final = frozenset({"http", "https"})
 
 class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
     """Redirects are not part of REMOTE.md's wire contract, and stdlib's
-    redirect handler re-sends EVERY header on the hop — the Authorization
-    bearer token (WAXSEAL_API_KEY) included — to whatever host Location
+    redirect handler re-sends EVERY header on the hop, the Authorization
+    bearer token (WAXSEAL_API_KEY) included, to whatever host Location
     names, even across an https→http downgrade (the CVE-2018-1000007 /
     CVE-2018-18074 credential-leak class in requests/urllib3). So a 3xx is
     never followed: it re-raises as HTTPError and surfaces through the
@@ -91,7 +91,7 @@ _OPENER: Final = urllib.request.build_opener(_RefuseRedirects)
 def urllib_transport(*, timeout: float = 10.0) -> Transport:
     """The stdlib transport (CLAUDE.md rule 1: zero runtime dependencies).
 
-    HTTPError is captured as a RemoteResponse — its status code is
+    HTTPError is captured as a RemoteResponse, since its status code is
     protocol-meaningful (404/409 are expected outcomes, not failures).
     URLError/socket timeout propagate uncaught: there is no protocol-defined
     status to carry "the server never answered" as, and inventing one would
@@ -99,7 +99,7 @@ def urllib_transport(*, timeout: float = 10.0) -> Transport:
 
     Only http and https are opened. Every network adapter in the package
     funnels through here, and urllib's default opener also speaks ``file:``
-    and ``ftp:`` — without this, a URL arriving from a config file or a CI
+    and ``ftp:``. Without this, a URL arriving from a config file or a CI
     variable makes ``--tsa-url file:///…`` a local file read wearing a
     timestamp reply's clothes. Raises ``ValueError`` before any request.
     """
@@ -141,7 +141,7 @@ class RemoteBackend:
         self._chain_id = chain_id
 
     def _url(self, path: str) -> str:
-        # chain_id is caller-supplied (AuditLog.open(chain_id=...)) — quote it
+        # chain_id is caller-supplied (AuditLog.open(chain_id=...)), so quote it
         # so it cannot inject extra path segments or a query string into the
         # request the server sees.
         return f"{self._base}/v1/chains/{urllib.parse.quote(self._chain_id, safe='')}{path}"
@@ -152,7 +152,7 @@ class RemoteBackend:
             headers["Content-Type"] = "application/json"
         if self._api_key is not None:
             # Never argv, never a URL query param (both leak into process
-            # lists / access logs) — only ever this header.
+            # lists / access logs): only ever this header.
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
 
@@ -198,7 +198,7 @@ class RemoteBackend:
                 )
             )
             if resp.status == 404:
-                return  # no chain at this chain_id yet — same as "empty"
+                return  # no chain at this chain_id yet, same as "empty"
             if resp.status != 200:
                 raise RemoteError(f"GET /entries failed: HTTP {resp.status}: {resp.body!r}")
             page = self._parse_entries_page(resp.body)
@@ -209,7 +209,7 @@ class RemoteBackend:
                 return
             if next_cursor == cursor:
                 # A cursor that never advances cannot terminate this loop on
-                # its own — a broken or hostile server handing back the same
+                # its own: a broken or hostile server handing back the same
                 # token forever must fail loudly, not spin forever.
                 raise RemoteError(
                     f"GET /entries returned the same cursor twice ({cursor!r}) "
@@ -225,7 +225,7 @@ class RemoteBackend:
     def _parse_entries_page(body: bytes) -> dict[str, Any]:
         # A 200 with an unparsable or unexpectedly-shaped body (a captive
         # portal, a proxy error page, a truncated response) is not a
-        # protocol-defined outcome any more than a bad status code is — it
+        # protocol-defined outcome any more than a bad status code is. It
         # must become the same RemoteError a 5xx would, never an uncaught
         # JSONDecodeError/KeyError escaping through the CLI (cli.py's own
         # try/except only catches OSError/RemoteError).

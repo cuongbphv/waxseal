@@ -23,11 +23,7 @@ from typing import Any
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
-from waxseal.sources.openclaw import (
-    OPENCLAW_AUDIT_PAYLOAD_TYPE,
-    OPENCLAW_GAP_PAYLOAD_TYPE,
-    ingest,
-)
+from waxseal.sources.openclaw import OPENCLAW_AUDIT_PAYLOAD_TYPE, OPENCLAW_GAP_PAYLOAD_TYPE, ingest
 
 
 def record(seq: int, tool: str) -> dict[str, Any]:
@@ -114,7 +110,14 @@ def main() -> int:
 
     verdict = AuditLog.open(trail).verify()
     print(f"   verify: ok={verdict.ok} broken_seq={verdict.broken_seq} reason={verdict.reason}")
+
+    from waxseal.domain.fingerprint import fingerprint
+
     print(f"\ntrail: {trail}")
+    print(f"   every row is stamped hash_version={fingerprint()[:12]}... — derived")
+    print("   from the schema descriptor, never typed by hand. A verifier that does")
+    print("   not recognise it reads those rows as unverifiable-by-name, never as")
+    print("   tampered.")
     return 0
 
 

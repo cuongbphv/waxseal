@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,7 +32,7 @@ from waxseal.domain.checkpoint import Checkpoint, SinkReceipt
 
 # Record versions this build knows how to read. A record stamped with anything
 # else is reported unreadable-by-name rather than skipped or treated as a
-# failure — the beads-v1.2.2 class applied to the sidecar's own format.
+# failure: the beads-v1.2.2 class applied to the sidecar's own format.
 _KNOWN_RECORD_VERSIONS = frozenset({1, 2})
 
 # Records written before the version stamp existed. They predate every
@@ -50,12 +50,12 @@ def _default_now() -> str:
 class AnchorRecord:
     """One line of the `.anchors` sidecar.
 
-    ``receipt`` is whatever the external sink handed back — opaque here by
+    ``receipt`` is whatever the external sink handed back, opaque here by
     design: a timestamp token or a calendar proof is the sink's format, not
     this module's, and inventing a parse for it would manufacture verdicts.
     ``nonce`` is the RFC 3161 request nonce when the sink supplied one;
     ``None`` means "not recorded" (every record written before the field
-    existed), never "zero" — with no stored nonce the comparison is skipped,
+    existed), never "zero": with no stored nonce the comparison is skipped,
     not failed (CLAUDE.md rule 5).
     """
 
@@ -83,9 +83,9 @@ class AnchorSidecar:
 def read_anchor_records(trail_path: Path | str) -> AnchorSidecar:
     """Read the `.anchors` sidecar for ``trail_path``.
 
-    The single reader for this file — the sink's own ``records()`` goes
+    The single reader for this file. The sink's own ``records()`` goes
     through it too, because two parsers for one format are two chances to
-    disagree about it. Raises on bytes that are not records at all —
+    disagree about it. Raises on bytes that are not records at all,
     ValueError (including json.JSONDecodeError) for unparseable JSON or an
     unconvertible field, KeyError for a record missing ``seq``/``entry_hash``/
     ``root``, TypeError for a field of the wrong shape. Rendering any of those
@@ -157,7 +157,7 @@ class FileAnchorSink:
         self._now = now_fn or _default_now
 
     def anchor(self, checkpoint: Checkpoint) -> str | None:
-        # No receipt of its own to give — a local file is not an external
+        # No receipt of its own to give: a local file is not an external
         # witness (see module docstring); a real sink (HTTPAnchorSink and
         # friends) returns whatever its service hands back.
         _append_record(self._path, _record_obj(checkpoint, sink=self.name, receipt=None,
@@ -179,9 +179,9 @@ def _append_record(path: Path, record: dict[str, Any]) -> None:
     line = json.dumps(record, sort_keys=True, separators=(",", ":"))
     # The append is a critical section (CLAUDE.md rule 7, same lock the JSONL
     # backend uses, lock file next to the sidecar). Racing anchor triggers are
-    # a supported race — but only for WHOLE records: bare O_APPEND interleaves
+    # a supported race, but only for WHOLE records: bare O_APPEND interleaves
     # a multi-chunk write (and on Windows, whose O_APPEND is a non-atomic
-    # seek-to-end + write, even overwrites the rival's chunk — measured losing
+    # seek-to-end + write, even overwrites the rival's chunk (measured losing
     # 5-10 of 32 records in tests/test_anchored_log.py's receipt), and a torn
     # line makes the strict reader above report ANCHOR BROKEN with no attacker
     # present: an accident masquerading as tampering.
@@ -200,7 +200,7 @@ class RecordingAnchorSink:
     The external sink is the evidence; this is only the filing cabinet. The
     order is deliberate: publish first, record second, and if the publish
     raises, write nothing. A record whose receipt never existed would claim an
-    anchor that no third party holds — the one direction in which a
+    anchor that no third party holds: the one direction in which a
     bookkeeping bug becomes a false assurance.
     """
 
@@ -233,6 +233,58 @@ class RecordingAnchorSink:
         return receipt
 
 
+class MultiAnchorSink:
+    """Fan the SAME checkpoint out to more than one independently-recording
+    sink in one ``AuditLog.anchor()`` call (waxseal-4yk, closing conformance.md
+    gap G3).
+
+    The paper's anchor-selection corollary recommends publishing one
+    checkpoint to both an RFC 3161 authority (a minutes-scale detection
+    window) and an OpenTimestamps calendar (long-horizon non-repudiation): tau
+    rises by one per independent domain reached. Before this, ``--tsa-url``
+    and ``--ots-calendar`` sat in a mutually exclusive argparse group, so
+    reaching both took two `anchor` runs back to back.
+
+    Each entry in ``sinks`` is expected to already be its own
+    ``RecordingAnchorSink`` wrapping one external target, so a sink that
+    publishes still writes its own sidecar record exactly as it always has,
+    this class only decides which sinks get called and how a partial failure
+    is reported, never how one success is recorded.
+
+    A sink raising must not cost the others their record (CLAUDE.md rule 6:
+    fail-open must be labelled, never silent), caught per sink and collected
+    in ``.failures`` as ``(name, reason)`` for the caller to print, exactly
+    the way `cli.py`'s single-sink path already labels a raised exception
+    rather than swallowing it. Only when EVERY sink fails does this itself
+    raise, because at that point nothing published at all and the existing
+    "nothing recorded" handling on the caller's side already covers it.
+    """
+
+    def __init__(self, sinks: Sequence[Any]) -> None:
+        if len(sinks) < 2:
+            raise ValueError("MultiAnchorSink needs at least two sinks")
+        self._sinks = tuple(sinks)
+        self.name = "+".join(getattr(sink, "name", "external") for sink in self._sinks)
+        self.failures: list[tuple[str, str]] = []
+
+    def anchor(self, checkpoint: Checkpoint) -> None:
+        self.failures = []
+        published = 0
+        for sink in self._sinks:
+            name = getattr(sink, "name", "external")
+            try:
+                sink.anchor(checkpoint)
+            except (OSError, RuntimeError) as e:
+                self.failures.append((name, str(e)))
+                continue
+            published += 1
+        if published == 0:
+            # Nobody published: same all-or-nothing shape a single external
+            # sink failing has always had, so the caller's existing
+            # "nothing recorded" except clause applies unchanged.
+            raise RuntimeError("; ".join(f"{name}: {reason}" for name, reason in self.failures))
+
+
 def _record_obj(
     checkpoint: Checkpoint,
     *,
@@ -244,7 +296,7 @@ def _record_obj(
     """The sidecar record for a checkpoint, at the lowest version that can
     carry it. A checkpoint with no aggregate binding still produces exactly
     the v1 record shape, so nothing about existing sidecars changes. The
-    nonce is optional and ADDITIVE — no version bump: a reader that predates
+    nonce is optional and ADDITIVE, with no version bump: a reader that predates
     the field must keep reading these records (the beads-v1.2.2 class), and a
     reader that knows it treats absence as "skip the comparison", never as a
     mismatch. Stored as a decimal string because a 64-bit value as a bare
@@ -268,7 +320,7 @@ def _record_obj(
 
 
 class HTTPAnchorSink:
-    """Publishes a checkpoint to an HTTP endpoint — a real external witness,
+    """Publishes a checkpoint to an HTTP endpoint: a real external witness,
     unlike FileAnchorSink's local sidecar (see AnchorSink's own docstring for
     why that distinction matters). Shares RemoteBackend's Transport
     abstraction so both use the same stdlib-only urllib plumbing and the same

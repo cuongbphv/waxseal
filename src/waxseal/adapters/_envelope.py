@@ -1,7 +1,7 @@
 """Shared entry-envelope serialization (SPEC.md section 7).
 
 jsonl.py and s3.py both store one JSON object per entry with the identical
-shape ({header, entry_hash, payload_b64}) — this was independently
+shape ({header, entry_hash, payload_b64}), and this was independently
 copy-pasted in both, so a schema fix applied to one and not the other would
 silently desync the two backends' stored bytes. This module is the single
 source of truth for that shape; sqlite.py and postgres.py reuse
@@ -45,6 +45,17 @@ def from_obj(obj: dict[str, Any]) -> Entry:
         entry_hash=str(obj["entry_hash"]),
         payload=base64.b64decode(str(obj["payload_b64"])),
     )
+
+
+def tail_fields(obj: dict[str, Any]) -> tuple[int, str]:
+    """Extract ``(seq, entry_hash)`` from a raw parsed envelope dict.
+
+    Finding the tail only needs identity, not the payload, so base64-decoding
+    it on every single append was the wasted work inside the O(n^2) bug
+    (waxseal-7tk.1): ``_tail_locked()`` used to call ``from_obj`` (via
+    ``entries()``) on every stored line just to discard the payload again.
+    """
+    return int(obj["header"]["seq"]), str(obj["entry_hash"])
 
 
 def entry_from_fields(

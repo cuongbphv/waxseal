@@ -89,9 +89,12 @@ class TestTailAndInspect:
         make_trail(path, 3)
         assert main(["inspect", str(path)]) == 0
         out = capsys.readouterr().out
-        from waxseal import fingerprint_v1
+        # lp64v2 is the wired default for every new trail (waxseal-7tk.7.4,
+        # no opt-in) -- make_trail() writes real entries through
+        # AuditLog.append(), so they carry fingerprint(), not v1.
+        from waxseal.domain.fingerprint import fingerprint
 
-        assert fingerprint_v1()[:12] in out
+        assert fingerprint()[:12] in out
         assert "3" in out
 
 
@@ -256,10 +259,18 @@ def _consistent_forge_at(path: Path, position: int) -> None:
     """Rewrite the header at `position`, then recompute entry_hash and every
     downstream prev_hash/entry_hash so verify_chain() still reports ok — the
     "whole trail rewrite" a plain hash chain cannot resist by itself, which
-    external anchoring exists to catch (DESIGN.md)."""
+    external anchoring exists to catch (DESIGN.md).
+
+    Dispatches on each row's own hash_version via VersionRegistry.encoder_for
+    (rather than assuming header_frame/v1) — make_trail() writes lp64v2 rows
+    since lp64v2 became the wired default (waxseal-7tk.7.4), and a real
+    attacker forging a trail recomputes it under whatever encoding that
+    trail was actually signed with, same as verify_chain does."""
     from waxseal.domain.hashing import compute_entry_hash
     from waxseal.domain.header import EntryHeader
+    from waxseal.domain.registry import VersionRegistry
 
+    registry = VersionRegistry()
     lines = path.read_text().splitlines()
     objs = [json.loads(line) for line in lines]
     objs[position]["header"]["ts"] = "2099-01-01T00:00:00+00:00"
@@ -267,7 +278,8 @@ def _consistent_forge_at(path: Path, position: int) -> None:
     for i in range(position, len(objs)):
         objs[i]["header"]["prev_hash"] = prev
         header = EntryHeader(**objs[i]["header"])
-        objs[i]["entry_hash"] = compute_entry_hash(header)
+        encoder = registry.encoder_for(header.hash_version)
+        objs[i]["entry_hash"] = compute_entry_hash(header, frame=encoder)
         prev = objs[i]["entry_hash"]
     path.write_text("\n".join(json.dumps(o) for o in objs) + "\n")
 
@@ -525,3 +537,139 @@ class TestRemoteURLTarget:
         monkeypatch.setattr(AuditLog, "open", staticmethod(raise_oserror))
         with pytest.raises(OSError, match="simulated local I/O failure"):
             main(["verify", str(path)])
+
+
+class TestMixedVersionTrailThroughRealCli:
+    """waxseal-7tk.7.5: prove the registry's per-row dispatch runs for real
+    through the FULL CLI stack (main(argv) -> AuditLog.open -> log.verify()/
+    log.entries()), not just the domain layer directly the way
+    waxseal-7tk.7.4's own test (tests/test_auditlog.py) already did."""
+
+    def _build_mixed_trail(self, path: Path) -> None:
+        # seq 0: a hand-built v1 row, bypassing AuditLog.append() entirely --
+        # the shape a pre-7tk.7.4 build would have written. seq 1..3: real
+        # v2 rows via the public AuditLog.append() API. Same construction
+        # pattern as test_auditlog.py's
+        # test_hand_built_v1_row_mixed_with_real_v2_appends_verifies_both.
+        from waxseal.domain.fingerprint import fingerprint
+        from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash, header_frame
+        from waxseal.domain.header import Entry, EntryHeader
+
+        log = AuditLog.open(path, now_fn=lambda: "2026-08-21T06:00:00+00:00")
+        payload0 = b'{"i":0}'
+
+        def build_v1(seq: int, prev_hash: str) -> Entry:
+            header = EntryHeader(
+                seq=seq,
+                ts="2026-08-21T06:00:00+00:00",
+                hash_version=fingerprint(),
+                payload_type=PT,
+                payload_hash=compute_payload_hash(payload0),
+                prev_hash=prev_hash,
+            )
+            return Entry(
+                header=header,
+                entry_hash=compute_entry_hash(header, frame=header_frame),
+                payload=payload0,
+            )
+
+        v1_entry = log._backend.append(build_v1)
+        assert v1_entry.header.hash_version == fingerprint()
+        for i in range(1, 4):
+            log.append(payload={"i": i}, payload_type=PT)
+
+    def test_verify_on_mixed_trail_exits_0(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        self._build_mixed_trail(path)
+
+        assert main(["verify", str(path)]) == 0
+        assert "ok (checked=4)" in capsys.readouterr().out
+
+    def test_report_json_on_mixed_trail_counts_both_the_v1_and_v2_rows(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        # `checked` counting all 4 rows (not just the 3 real v2 appends) is
+        # the proof that the registry dispatch actually ran for the v1 row
+        # through the whole CLI stack, rather than the row being silently
+        # skipped or the command failing before it got there.
+        path = tmp_path / "trail.jsonl"
+        self._build_mixed_trail(path)
+
+        assert main(["report", str(path), "--json"]) == 0
+        report = json.loads(capsys.readouterr().out)
+        assert report["chain"]["ok"] is True
+        assert report["chain"]["checked"] == 4
+
+
+class TestReportCommandThroughRealCli:
+    def test_report_json_on_an_intact_v2_trail_exits_0(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        make_trail(path, 3)  # real AuditLog.append() calls -- lp64v2 by default
+
+        assert main(["report", str(path), "--json"]) == 0
+        report = json.loads(capsys.readouterr().out)
+        assert report["chain"]["ok"] is True
+        assert report["chain"]["checked"] == 3
+
+
+class TestExportProofAndVerifyProofThroughRealCli:
+    def test_export_then_verify_proof_round_trips_a_v2_row(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        # This is the CLI-level proof that domain/export.py's
+        # registry.encoder_for() dispatch fix (landed in waxseal-7tk.7.4,
+        # which that bead tested only at the domain-function level) also
+        # works when reached through `export-proof`/`verify-proof` as real
+        # subcommands, on a row actually stamped lp64v2 by the wired default.
+        path = tmp_path / "trail.jsonl"
+        make_trail(path, 3)  # seq 0..2, real v2 appends
+
+        assert main(["export-proof", str(path), "1"]) == 0
+        bundle_json = capsys.readouterr().out
+        bundle_path = tmp_path / "bundle.json"
+        bundle_path.write_text(bundle_json)
+
+        assert main(["verify-proof", str(bundle_path)]) == 0
+        out = capsys.readouterr().out
+        assert "verified against root" in out
+
+    def test_export_proof_for_a_missing_seq_exits_1(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        make_trail(path, 2)  # seq 0, 1 only
+
+        assert main(["export-proof", str(path), "5"]) == 1
+        assert capsys.readouterr().err
+
+
+class TestConsistencyCommandThroughRealCli:
+    def test_current_head_extends_an_earlier_checkpoint_on_a_v2_trail(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        make_trail(path, 2)  # seq 0, 1 -- real v2 appends
+
+        assert main(["checkpoint", str(path)]) == 0
+        old = json.loads(capsys.readouterr().out.strip())
+
+        AuditLog.open(path).append(payload={"i": 99}, payload_type=PT)  # extend to seq 2
+
+        assert (
+            main(
+                [
+                    "consistency",
+                    str(path),
+                    "--old-seq",
+                    str(old["seq"]),
+                    "--old-root",
+                    old["root"],
+                ]
+            )
+            == 0
+        )
+        assert "consistent" in capsys.readouterr().out

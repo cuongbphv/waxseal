@@ -1,4 +1,4 @@
-# waxseal SPEC v1
+# waxseal SPEC
 
 Status: REVIEW — content through section 12 is complete and cross-checked (golden
 vectors at tests/vectors/vectors.json, already write-once per CLAUDE.md rule 3);
@@ -35,20 +35,23 @@ EntryHeader (fields, in canonical order):
 The chain hashes ONLY the header. Payload schema evolution never touches the chain.
 Redaction (section 6) runs BEFORE `payload_hash` is computed.
 
-## 2. lp64v1 canonical encoding
+## 2. lp64 canonical encoding
 
-All hashing inputs are built with **lp64v1**:
+All hashing inputs are built with **lp64**. There is exactly one canonical encoding.
 
 - A *field value* is either a Unicode string or NULL (absent).
 - `enc(value)`:
-  - NULL          → the 6 bytes `0x00 0x4E 0x55 0x4C 0x4C 0x00` (`b"\x00NULL\x00"`)
-  - string        → its UTF-8 bytes
+  - NULL          → the single byte `0x00`
+  - string        → `0x01` followed by its UTF-8 bytes
 - `lp(value)` = `u64be(len(enc(value))) || enc(value)` where `u64be` is an 8-byte
   big-endian unsigned integer.
 
 The length prefix makes concatenation unambiguous across different field tuples: two
-different field lists can never produce the same byte stream. The NULL sentinel is
-distinct from the empty string (`lp("")` = 8 zero bytes; `lp(NULL)` = length 6 + sentinel).
+different field lists can never produce the same byte stream. The leading type tag makes
+that unambiguity **unconditional** — an absent field and any string whatsoever differ in
+their first encoded byte, so there is no side condition to state, no invariant for an
+implementation to maintain, and no input `lp` must reject. `lp("")` is the tag alone
+(length 1, `0x01`); `lp(NULL)` is length 1, `0x00`; the two can never coincide.
 
 Integers (`seq`) are encoded as their base-10 string with no leading zeros
 (`0` for zero) before `lp()`.
@@ -57,18 +60,27 @@ Rationale: byte-level control, trivially portable to any language, no dependency
 ECMAScript number serialization (RFC 8785 JCS) and no non-canonical serializers
 (protobuf explicitly documents its serialization as non-canonical — never hash it).
 
+> **Historical note.** waxseal 0.1.0-0.1.3 used a different encoding, `lp64v1`, which
+> spelled *absent* as the six bytes `b"\x00NULL\x00"`. Those bytes are themselves valid
+> UTF-8, so exactly one string — the one that decodes from them — encoded identically to
+> *absent*: the encoding chosen to keep "absent" and "empty" apart conflated "absent"
+> with one specific *present* value. Injectivity therefore held only under an unstated
+> side condition. lp64 replaced it in 0.1.4, before any trail written under lp64v1
+> existed outside development, and lp64v1 is not implemented by any current build. An
+> implementation of this specification implements lp64 and nothing else.
+
 ## 3. Entry hash
 
 ```
-frame = b"waxseal-v1\n"
-     || u64be(6)                                  # number of header fields in v1
+frame = b"waxseal-lp64\n"
+     || u64be(6)                                  # number of header fields
      || lp(str(seq)) || lp(ts) || lp(hash_version)
      || lp(payload_type) || lp(payload_hash) || lp(prev_hash)
 
 entry_hash = lowercase_hex(sha256(frame))
 ```
 
-The `waxseal-v1` prefix + field count is PAE-style framing (borrowed from DSSE/PASETO)
+The `waxseal-lp64` prefix + field count is PAE-style framing (borrowed from DSSE/PASETO)
 against format-confusion attacks.
 
 ## 4. Schema fingerprint (`hash_version`)
@@ -79,7 +91,7 @@ version descriptor**:
 ```
 descriptor components (ordered):
   algorithm     "sha256"
-  encoding      "lp64v1"
+  encoding      "lp64"
   field name 1  "seq"
   field name 2  "ts"
   field name 3  "hash_version"
@@ -89,7 +101,7 @@ descriptor components (ordered):
 
 descriptor_bytes = b"waxseal-descriptor-v1\n"
                 || u64be(8)                       # component count
-                || lp("sha256") || lp("lp64v1")
+                || lp("sha256") || lp("lp64")
                 || lp("seq") || lp("ts") || lp("hash_version")
                 || lp("payload_type") || lp("payload_hash") || lp("prev_hash")
 
@@ -153,6 +165,11 @@ tamper alarm for the spec itself.
 
 Vector fields: `descriptor_fingerprint`, per-entry `header` inputs and expected
 `entry_hash`, tamper cases with expected `reason`.
+
+The vectors were re-frozen for 0.1.4 when lp64 replaced lp64v1 (section 2). That was an
+explicit owner decision taken while no trail written under the old encoding existed
+outside development — it is what this rule exists to prevent by default, and it is not a
+precedent. From 0.1.4 the rule reads exactly as written above.
 
 ## 9. Checkpoints and external anchoring
 
@@ -453,6 +470,66 @@ Normative rules:
 - A pin stored on the same disk as the trail SHOULD be treated as no pin at
   all against an attacker who holds that disk. The security argument is
   entirely the separation of authority.
+
+### 13.1 Declared expectations (added in 0.1.4)
+
+The state file gained three optional fields. A pin written before they existed omits
+all three and parses unchanged — absence is the "not declared" signal, and is never
+read as a declaration of the smallest possible value (rule 5).
+
+```
+{"chain_id": "<str or null>", "entry_hash": "<hex64>", "pinned_ts": "<str>",
+ "root": "<hex64>", "seq": <int>, "target": "<str>", "v": 1,
+ "expect_anchor_binding": <bool>,
+ "max_anchor_age_s": <int>,
+ "declared_topology": {"seal_escrow": <bool>, "anchor_sinks": <int>,
+                       "witness": <bool>, "pin_separate": <bool>}}
+```
+
+`expect_anchor_binding` is always written (a plain flag with a real default of
+`false`); `max_anchor_age_s` and `declared_topology` are omitted entirely when absent.
+`declared_topology`, when present, MUST carry all four subfields — a partial object is
+`malformed_pin`, never silently defaulted, because a defaulted field here would be
+indistinguishable from one the operator actually declared.
+
+This does not contradict the rule above that the section 15 aggregate fields are
+deliberately not part of a pin. That rule is about **values**: `agg_commit` cannot be
+recomputed without the seal key, so storing one would store a field the check skips.
+`expect_anchor_binding` is a **policy** — a boolean the verifier CAN check, by asking
+whether any record at or after the pinned seq carries a binding at all. Nothing in the
+verifier's own trust domain previously recorded that a trail was supposed to anchor
+with one, so an adversary holding the `.anchors` sidecar could present only
+version-1-shaped records and strip section 15's replay-plus-truncate protection with
+no finding produced. The distinction between an exogenous *value* (uncheckable here)
+and an exogenous *policy* (checkable) is what makes the flag sound.
+
+Each check runs only when it was BOTH declared and measured on this run: a run that
+did not pass `--anchors` has not observed the sidecar, and "not measured" must never
+be reported as "observed nothing" (rule 5). When more than one condition is true at
+once, exactly one `reason` surfaces; the order is fixed and is a tiebreak only, since
+every outcome below is exit 2:
+
+| Pin reason | Meaning |
+|---|---|
+| `anchor_policy_downgrade` | `expect_anchor_binding` is set, every readable record at or after the pinned seq lacks an aggregate binding |
+| `anchor_binding_unreadable` | same, except some records are in a format this build cannot read — absence among the readable ones is not evidence of absence |
+| `anchor_stale` | the newest `.anchors` record is older than `max_anchor_age_s`, or there are no records at all |
+| `anchor_timestamp_unparseable` | the newest record exists but its `ts` is not a readable ISO-8601 instant — neither fresh nor stale, unverifiable by name |
+| `separation_shortfall` | `declared_topology` claims more independent authorities than this run observed |
+
+All five are **exit 2**, never exit 1. Each reports that corroboration expected by
+policy was not observed; none is evidence that the trail itself was altered, and the
+chain verdict is reported separately and unchanged. A verifier MUST NOT escalate any
+of them to a break.
+
+Only two of `declared_topology`'s four components can be checked against anything:
+`anchor_sinks` (distinct external sinks actually recorded in the sidecar, excluding the
+local `file` baseline, which is not an independent authority) and `witness` (a witness
+this run actually reached that returned `consistent`). `seal_escrow` and `pin_separate`
+describe where a key and a file physically live; no artifact in the trail or its
+sidecars can corroborate or contradict them, so they never enter the comparison. This
+is a permanent limitation of what a verifier can observe, stated rather than papered
+over.
 
 ## 14. Witness cross-check
 

@@ -8,7 +8,7 @@ caller chooses the path for exactly that reason, and this class never derives
 one from the trail's own location.
 
 Written through `atomic_write_bytes` at 0600: a torn pin would read as
-malformed on the next run, and malformed is a break — a crash during a save
+malformed on the next run, and malformed is a break, so a crash during a save
 must not be able to manufacture one.
 """
 
@@ -27,7 +27,7 @@ class FilePinStore:
     def load(self) -> PinState | None:
         """The stored pin, or ``None`` when there is none yet.
 
-        ``None`` means only "nothing pinned" — the genuine first-use case. A
+        ``None`` means only "nothing pinned", the genuine first-use case. A
         file that exists but cannot be read raises (``PinMalformed`` /
         ``PinVersionUnknown`` from the domain), because returning ``None``
         for it would let a caller re-pin whatever it was just served and call

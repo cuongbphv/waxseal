@@ -38,3 +38,5 @@ coverage.xml
 # banking PoC demo output (recreated on every run)
 examples/poc-out/
 poc-out/
+
+.docs

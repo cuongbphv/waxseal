@@ -1,10 +1,10 @@
-"""Postgres backend — advisory-lock-serialized appends.
+"""Postgres backend: advisory-lock-serialized appends.
 
 The connection factory is INJECTED (psycopg-compatible, %s paramstyle):
 waxseal keeps zero runtime dependencies and never imports a driver.
 
 `pg_advisory_xact_lock` is taken BEFORE the tail read, inside the same
-transaction as the insert, and releases on commit/rollback — the same
+transaction as the insert, and releases on commit/rollback, the same
 one-critical-section rule as every backend (CLAUDE.md rule 7). PRIMARY KEY on
 seq is the storage-level backstop against forks. `rowpos` preserves insertion
 order for the verifier (ordering by seq would hide reordering).

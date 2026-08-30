@@ -10,16 +10,22 @@ import hashlib
 import json
 from pathlib import Path
 
-from waxseal.domain.fingerprint import fingerprint_v1
-from waxseal.domain.hashing import NULL, compute_entry_hash, lp
+from waxseal.domain.fingerprint import fingerprint
+from waxseal.domain.hashing import ENCODING, NULL, compute_entry_hash, lp
 from waxseal.domain.header import EntryHeader
 
 VECTORS_PATH = Path(__file__).parent / "vectors" / "vectors.json"
 
-# Write-once guard: the sha256 of vectors.json at freeze time (2026-08-21).
-# A mismatch means someone edited frozen vectors — that is the alarm firing,
-# not a value to update casually. New vectors belong in a NEW file.
-FROZEN_VECTORS_SHA256 = "938c90a1648f7d269bcbcd09c30c150157f4212e9af87fc8c339529fff3f7c40"
+# Write-once guard: the sha256 of vectors.json at freeze time. A mismatch
+# means someone edited frozen vectors — that is the alarm firing, not a value
+# to update casually. New vectors belong in a NEW file.
+#
+# Re-frozen for 0.1.4, which collapsed waxseal to a single canonical encoding
+# (lp64) and retired lp64v1 before any trail written under it existed outside
+# development. That re-freeze was an explicit owner decision, taken with the
+# knowledge that it is exactly the move rule 3 exists to prevent by default;
+# it is not a precedent. From here the rule reads as written.
+FROZEN_VECTORS_SHA256 = "45506728e1aae7e3c30dbd419078305c522985a32b478c130c3a6ca5d30429c6"
 
 
 def load() -> dict:
@@ -37,14 +43,17 @@ class TestVectorFileIsFrozen:
 
 class TestLibraryReproducesVectors:
     def test_descriptor_fingerprint(self) -> None:
-        assert fingerprint_v1() == load()["descriptor_fingerprint"]
+        assert fingerprint() == load()["descriptor_fingerprint"]
+
+    def test_encoding_name(self) -> None:
+        assert load()["encoding"] == ENCODING
 
     def test_lp_examples(self) -> None:
         for example in load()["lp_examples"]:
             assert lp(example["input"]).hex() == example["hex"]
 
-    def test_null_sentinel(self) -> None:
-        assert lp(NULL).hex() == load()["null_sentinel_lp_hex"]
+    def test_absent_field(self) -> None:
+        assert lp(NULL).hex() == load()["null_lp_hex"]
 
     def test_every_entry_hash(self) -> None:
         for vector in load()["entries"]:

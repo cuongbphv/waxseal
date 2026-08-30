@@ -25,7 +25,7 @@ class WriterBackend(Protocol):
         ``(next_seq, prev_hash)`` after losing a race, instead of holding a
         lock across the round trip (S3's conditional-write retry is the
         precedent). Callers MUST pass a builder that is side-effect-free and
-        deterministic given ``(seq, prev_hash)`` — ``AuditLog.append``
+        deterministic given ``(seq, prev_hash)``, and ``AuditLog.append``
         satisfies this by computing ``ts`` before the closure runs.
         """
         ...

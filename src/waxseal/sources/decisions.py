@@ -2,7 +2,7 @@
 
 The schema lives in ``domain.decision``; this module is the thin layer that
 touches an ``AuditLog``, mirroring ``sources.files``. Nothing here reimplements
-canonicalization or hashing — the payload goes through ``AuditLog.append``, so
+canonicalization or hashing: the payload goes through ``AuditLog.append``, so
 a decision is hashed by exactly the same path as every other entry and the
 log's redactor runs before anything is committed.
 """
@@ -29,7 +29,7 @@ from waxseal.ports.redact import Redactor
 def commit_input(
     payload: dict[str, Any] | bytes, *, redactor: Redactor | None = None
 ) -> str:
-    """SHA-256 over the canonical bytes of a model input — what a decision
+    """SHA-256 over the canonical bytes of a model input, which is what a decision
     record commits to instead of the input itself, so the trail carries no
     customer data.
 
@@ -40,11 +40,11 @@ def commit_input(
 
     A ``bytes`` input with a redactor is refused rather than passed through:
     the ``Redactor`` port only sees dicts, so "redacted" would be a claim
-    nothing checked — a fail-open guard must be labelled, never silent
+    nothing checked, and a fail-open guard must be labelled, never silent
     (CLAUDE.md rule 6), and here it can simply be prevented.
 
     Standard limit of any hash commitment: over a low-entropy input it is
-    *confirmable* — someone who can guess the input can verify the guess.
+    *confirmable*: someone who can guess the input can verify the guess.
     Commit to a redacted or salted form where that matters.
     """
     if isinstance(payload, bytes):
@@ -72,7 +72,7 @@ def iter_decisions(
     """Walk the trail's decision entries in chain order.
 
     Yields ``(entry, record)``; ``record`` is ``None`` when those bytes do not
-    parse as a decision record — the row is still surfaced with its seq rather
+    parse as a decision record. The row is still surfaced with its seq rather
     than dropped, because a reader silently skipping rows it dislikes is how
     an audit misses the interesting one (rule 6). Unparseable is not a
     tampering verdict either: ``verify`` owns that question and answers it

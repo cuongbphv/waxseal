@@ -2,7 +2,7 @@
 
 Same sidecar shape as adapters/attest.py and adapters/anchors.py (one JSON
 object per line, O_APPEND, 0600), but the number it produces is read as "at
-least N drops measured", never "exactly N" — the sidecar can itself be
+least N drops measured", never "exactly N", because the sidecar can itself be
 deleted, rotated, or (on an unwritable disk) never written to in the first
 place. That last case is exactly why ``record()`` swallows every exception:
 a disk too broken to hold a drop record cannot bear witness to its own
@@ -39,7 +39,7 @@ class FileDropRecorder:
     def record(
         self, *, reason: str, payload_type: str | None = None, source: str | None = None
     ) -> None:
-        # Metadata only — no payload field exists to accidentally populate.
+        # Metadata only: no payload field exists to accidentally populate.
         # See ports/drops.py's docstring: the payload has not been through
         # redact-before-hash yet, so it must never reach any sidecar.
         fd = None
@@ -58,7 +58,7 @@ class FileDropRecorder:
                 f.write(line + "\n")
                 f.flush()
         except Exception:
-            # ports/drops.py's contract is "never raises", full stop — this
+            # ports/drops.py's contract is "never raises", full stop, so this
             # is invoked from try_append's own except-block (log.py), and a
             # failure surfacing here would turn an already-handled drop into
             # an unhandled one. Deliberately broader than OSError: a broken
@@ -83,7 +83,7 @@ class FileDropRecorder:
 
 
 def read_drop_count(trail_path: Path | str) -> int | None:
-    """The sidecar's count, or None if it does not exist — "never measured",
+    """The sidecar's count, or None if it does not exist, meaning "never measured",
     distinct from FileDropRecorder.count()'s 0 ("measured this sidecar,
     found nothing"). Mirrors CLAUDE.md's None-vs-0 rule for dropped_writes
     itself, one layer down."""

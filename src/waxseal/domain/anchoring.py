@@ -1,7 +1,7 @@
 """External anchoring: batch roots and membership proofs (RFC 6962 §2.1).
 
 A hash chain by itself cannot resist an adversary who can rewrite the whole
-trail file — every ``prev_hash`` downstream of the edit is recomputable
+trail file, because every ``prev_hash`` downstream of the edit is recomputable
 (DESIGN.md threat model). The counter is to publish a single *batch root*
 somewhere the log writer cannot reach (a ticket, a signed release, another
 host). Once a root is anchored, any entry's presence in that batch is
@@ -14,7 +14,7 @@ built by gluing two child hashes together (the CVE-2012-2459 collision
 class).
 
 Proof checking implements RFC 9162 §2.1.3.2 and fails closed: input that is
-malformed or out of range yields "not proven", never an exception — crashing
+malformed or out of range yields "not proven", never an exception, since crashing
 a verifier on attacker-supplied bytes would deny the audit itself, and
 "cannot check" must stay distinct from "checked and false" (CLAUDE.md rule 5).
 
@@ -107,7 +107,7 @@ def consistency_proof(entry_hashes: Sequence[str], old_size: int) -> tuple[str, 
 
     ``old_size`` must be in ``[1, len(entry_hashes)]``: a size-0 "tree" has no
     root to prove consistency with, and a size beyond the current batch does
-    not exist yet — out of range raises IndexError rather than proving some
+    not exist yet: out of range raises IndexError rather than proving some
     other size by surprise, matching ``membership_proof``'s contract for
     operator-supplied indices.
     """
@@ -127,7 +127,7 @@ def verify_consistency(
 ) -> bool:
     """Check a consistency proof between two tree sizes (RFC 9162 §2.1.4.2).
 
-    Returns False on anything that does not check out — bad hex, a shrinking
+    Returns False on anything that does not check out: bad hex, a shrinking
     or non-positive size, a missing/extra/reordered proof hash, or a root
     that does not match. Never raises: see module docstring.
     """
@@ -181,7 +181,7 @@ def verify_membership(
 ) -> bool:
     """Check a membership proof against an anchored root (RFC 9162 §2.1.3.2).
 
-    Returns False on anything that does not check out — bad hex, impossible
+    Returns False on anything that does not check out: bad hex, impossible
     index, wrong length, wrong root. Never raises: see module docstring.
     """
     if index < 0 or batch_size < 1 or index >= batch_size:

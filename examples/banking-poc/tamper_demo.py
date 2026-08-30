@@ -101,10 +101,21 @@ def edit_payload(trail: Path, seq: int, old: bytes, new: bytes) -> None:
 
 def rebuild_chain(rows: list[dict]) -> list[dict]:
     """Relink and re-hash every row so the chain is internally consistent —
-    the rewrite an attacker with write access can always perform."""
+    the rewrite an attacker with write access can always perform.
+
+    The frame is dispatched per row by its own `hash_version`, exactly as
+    `verify_chain` does: a real attacker re-signs each row under the encoding
+    that row declares. Assuming one frame for the whole trail would produce a
+    chain whose rows disagree with their own fingerprints — caught instantly
+    as `entry_hash_mismatch`, which would make this scenario prove the
+    opposite of its point (that a full-write attacker DOES defeat the chain,
+    and only the external anchor catches them).
+    """
     from waxseal.domain.hashing import compute_entry_hash
     from waxseal.domain.header import GENESIS_PREV_HASH, EntryHeader
+    from waxseal.domain.registry import VersionRegistry
 
+    registry = VersionRegistry()
     prev = GENESIS_PREV_HASH
     for seq, row in enumerate(rows):
         row["header"]["seq"] = seq
@@ -112,7 +123,9 @@ def rebuild_chain(rows: list[dict]) -> list[dict]:
         row["header"]["payload_hash"] = __import__("hashlib").sha256(
             base64.b64decode(row["payload_b64"])
         ).hexdigest()
-        row["entry_hash"] = compute_entry_hash(EntryHeader(**row["header"]))
+        header = EntryHeader(**row["header"])
+        frame = registry.encoder_for(header.hash_version)
+        row["entry_hash"] = compute_entry_hash(header, frame=frame)
         prev = row["entry_hash"]
     return rows
 

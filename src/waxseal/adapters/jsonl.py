@@ -2,7 +2,7 @@
 
 One JSON object per line: {"header": {...}, "entry_hash": "...", "payload_b64": "..."}.
 Payload bytes are stored base64 so the stored bytes are exactly the hashed
-bytes — text round-trips (newline translation, encoding guesses) are how
+bytes. Text round-trips (newline translation, encoding guesses) are how
 byte-exactness quietly dies.
 """
 
@@ -13,14 +13,85 @@ import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from waxseal.adapters._envelope import from_obj, to_obj
+from waxseal.adapters._envelope import from_obj, tail_fields, to_obj
 from waxseal.adapters.filelock import file_lock
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 
+# Read backward from EOF this many bytes at a time when hunting for the last
+# line. Any stored line under this size resolves in one seek+read (the O(1)
+# tail read waxseal-7tk.1 exists to restore); a longer line just loops.
+_TAIL_SEEK_CHUNK = 4096
+
+
+class JSONLCorruptionError(Exception):
+    """A stored line failed to parse as JSON during the periodic integrity scan.
+
+    This is NOT a verify_chain verdict (CLAUDE.md rule 4: verify reports,
+    never repairs): it carries no hash comparison and must never be read as
+    "broken" or "unverifiable" in the tamper-evidence sense. It reports a
+    storage-layer fact one level below the chain: a line that cannot even be
+    parsed back as the JSON envelope it was written as (e.g. a torn write
+    from a crash mid-flush, or an out-of-band edit).
+    """
+
+    def __init__(self, line_no: int, byte_offset: int, cause: Exception) -> None:
+        self.line_no = line_no
+        self.byte_offset = byte_offset
+        self.cause = cause
+        super().__init__(
+            f"trail corrupted at line {line_no} (byte offset {byte_offset}): {cause!r}"
+        )
+
+    def __str__(self) -> str:
+        return (
+            f"trail corrupted at line {self.line_no} "
+            f"(byte offset {self.byte_offset}): {self.cause!r}"
+        )
+
+
+def _read_last_line(path: Path) -> bytes | None:
+    """Return the raw bytes of the trail's last non-blank line, or None if
+    there is no complete entry yet (missing file, empty file, or a file
+    holding only whitespace/newlines).
+
+    Seeks backward from EOF in fixed-size chunks instead of parsing forward
+    from the start, the fix for the O(n^2) append bug (waxseal-7tk.1),
+    where ``_tail_locked()`` used to replay and payload-decode the entire
+    trail, inside the write lock, on every single append.
+    """
+    if not path.exists():
+        return None
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        remaining = f.tell()
+        if remaining == 0:
+            return None
+        chunk = b""
+        while True:
+            read_size = min(_TAIL_SEEK_CHUNK, remaining)
+            remaining -= read_size
+            f.seek(remaining)
+            chunk = f.read(read_size) + chunk
+            # Trailing blank lines (a lone "\n", or several) are not an
+            # entry, so strip them before looking for the newline that ends
+            # the last real line.
+            trimmed = chunk.rstrip(b"\r\n")
+            newline_at = trimmed.rfind(b"\n")
+            if newline_at != -1:
+                return trimmed[newline_at + 1 :]
+            if remaining == 0:
+                # Reached the start of the file with no interior newline
+                # found: the whole (trimmed) file is the one and only line.
+                return trimmed or None
+
 
 class JSONLBackend:
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, *, integrity_scan_every: int | None = 1000) -> None:
         self._path = Path(path).expanduser()
+        # Default is 1000, not None: a storage-corruption safety net should
+        # not be something an operator has to remember to opt into (same
+        # "wired for real" stance as this release's other defaults).
+        self._integrity_scan_every = integrity_scan_every
 
     def append(self, build: Callable[[int, str], Entry]) -> Entry:
         # Lock covers read-tail AND write: two writers must never both build
@@ -31,12 +102,17 @@ class JSONLBackend:
             line = json.dumps(to_obj(entry, backend="JSONL"), sort_keys=True, separators=(",", ":"))
             self._path.parent.mkdir(parents=True, exist_ok=True)
             # 0600 like the sealkey: the trail holds prompts and tool output at
-            # a predictable path — a default umask would hand it to every
+            # a predictable path, and a default umask would hand it to every
             # local user. Only applies at creation; existing perms are kept.
             fd = os.open(self._path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8", newline="") as f:
                 f.write(line + "\n")
                 f.flush()
+            if (
+                self._integrity_scan_every is not None
+                and (entry.header.seq + 1) % self._integrity_scan_every == 0
+            ):
+                self._integrity_scan()
             return entry
 
     def entries(self) -> Iterator[Entry]:
@@ -48,9 +124,30 @@ class JSONLBackend:
                     yield from_obj(json.loads(line))
 
     def _tail_locked(self) -> tuple[int, str]:
-        last: Entry | None = None
-        for last in self.entries():  # noqa: B007 - we want the final element
-            pass
-        if last is None:
+        last_line = _read_last_line(self._path)
+        if last_line is None:
             return 0, GENESIS_PREV_HASH
-        return last.header.seq + 1, last.entry_hash
+        seq, entry_hash = tail_fields(json.loads(last_line))
+        return seq + 1, entry_hash
+
+    def _integrity_scan(self) -> None:
+        """Parse every stored line as JSON, amortized every
+        ``integrity_scan_every`` appends (not every append, since that full
+        replay on every call was the O(n^2) bug this module was fixed for).
+
+        This is a storage sanity check, one layer below tamper-evidence: it
+        answers "can every stored line still be parsed at all", nothing
+        about hashes or chain verdicts. Do not read a clean scan as
+        `verify_chain`-style "ok" (CLAUDE.md rule 4): it checks a strictly
+        weaker, unrelated property.
+        """
+        byte_offset = 0
+        with open(self._path, "rb") as f:
+            for line_no, raw in enumerate(f, start=1):
+                stripped = raw.strip()
+                if stripped:
+                    try:
+                        json.loads(stripped)
+                    except json.JSONDecodeError as exc:
+                        raise JSONLCorruptionError(line_no, byte_offset, exc) from exc
+                byte_offset += len(raw)

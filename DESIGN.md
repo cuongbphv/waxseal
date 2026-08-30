@@ -112,9 +112,9 @@ between real external events); `HTTPAnchorSink` (§10 below) is a real external
 witness. Neither replaces rung 1's own advice: the sink itself should point at
 infrastructure the log's own writer does not control.
 
-## 4. Canonicalization: sign the bytes (lp64v1), not the interpretation
+## 4. Canonicalization: sign the bytes (lp64), not the interpretation
 
-**Choice: waxseal hashes a length-prefixed binary framing (lp64v1 + PAE-style
+**Choice: waxseal hashes a length-prefixed binary framing (lp64 + PAE-style
 prefix) of the header — never a re-serialization of parsed data.**
 
 - The failure class is real: XML Signature wrapping broke 11 of 14 major SAML
@@ -125,14 +125,39 @@ prefix) of the header — never a re-serialization of parsed data.**
 - RFC 8785 JCS is workable but constrained: it requires the I-JSON subset, IEEE-754
   representable numbers ("JSON number data MUST be expressible as IEEE 754
   double-precision values"), performs no Unicode normalization, and its own security
-  considerations require parse + validate + verify in strict order. lp64v1 avoids that
+  considerations require parse + validate + verify in strict order. lp64 avoids that
   entire surface and ports to any language with 8 bytes of big-endian length.
 - Protobuf is disqualified by its own documentation, titled "Proto Serialization Is
   Not Canonical": "protobuf serialization is not (and cannot be) canonical".
 - Certificate Transparency (RFC 6962) hashes TLS-presentation-language structs —
-  fixed-order, length-prefixed — which is the same shape as lp64v1; waxseal's PAE
+  fixed-order, length-prefixed — which is the same shape as lp64; waxseal's PAE
   prefix (`waxseal-v1` + field count) adds DSSE/PASETO-style domain separation
   against format confusion.
+
+**Revision (0.1.4): lp64 replaced lp64v1 outright.** The original encoding spelled an
+absent field as a six-byte sentinel, `b"\x00NULL\x00"`. That sentinel is itself valid
+UTF-8, so the one string equal to it encoded identically to "absent": injectivity held
+only under an unstated side condition ("no field carries exactly this string"). No
+shipped call site could reach it — every header field is a non-null, non-adversarial
+string — so the defect was latent, not exploitable. It mattered anyway, because the
+encoding is offered as portable and invites independent implementations, which would have
+reproduced the same ambiguity. lp64 puts a type tag *inside* the length-prefixed region
+(`0x00` for absent, `0x01` before a string's UTF-8), so the two differ in their first byte
+for every possible input and injectivity is unconditional — no invariant to maintain, no
+input to reject.
+
+The interesting part is what the replacement cost, which is nothing structural. Because
+the encoding name is a component of the version descriptor (§3 above), swapping it moved
+every fingerprint automatically: there was no migration to write and no released identity
+to redefine in place. What it did cost is compatibility — a trail written by 0.1.3 is
+*unverifiable* under 0.1.4, reported by name and never as tampering. That was an
+acceptable price only because it was paid before any such trail existed outside
+development, and the decision is recorded as a one-off in both `CLAUDE.md` and the
+CHANGELOG rather than left for someone to rediscover as precedent. Carrying two encodings
+forever was the alternative, and it was rejected: a second code path that no writer uses
+is a second thing to keep correct, and the doctrine already covers the case it would have
+served — a fingerprint no current encoder implements is unverifiable by name, which is a
+better answer than a legacy branch nobody exercises.
 
 ## 5. Positioning in the AI-agent accountability literature
 

@@ -1,4 +1,4 @@
-"""Redaction protocol. Runs BEFORE payload_hash (SPEC.md section 6) —
+"""Redaction protocol. Runs BEFORE payload_hash (SPEC.md section 6),
 the hash commits to the redacted payload, so cleartext never reaches storage
 and verification stays consistent."""
 

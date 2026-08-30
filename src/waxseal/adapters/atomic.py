@@ -1,4 +1,4 @@
-"""Atomic file replacement — the single owner of os.replace in this codebase
+"""Atomic file replacement: the single owner of os.replace in this codebase
 (enforced by tests/architecture/test_invariants.py). A crash mid-write must
 never leave a half-written file where a whole one is load-bearing (the seal
 keyfile: a torn key would brick every future seal)."""

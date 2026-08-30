@@ -1,9 +1,9 @@
-"""S3 backend — object per entry, forks prevented by conditional writes.
+"""S3 backend: object per entry, forks prevented by conditional writes.
 
 The client is INJECTED (any boto3-compatible object): waxseal keeps zero
 runtime dependencies (CLAUDE.md rule 1) and never imports boto3.
 
-Serialization point: `PUT entries/{seq}.json` with `IfNoneMatch="*"` — S3
+Serialization point: `PUT entries/{seq}.json` with `IfNoneMatch="*"`, which S3
 conditional writes (GA since 2024) reject the second writer of the same seq
 with 412 PreconditionFailed, so a lost race is retried on a fresh tail
 instead of forking the chain (CLAUDE.md rule 7). `head.json` is only a
@@ -54,7 +54,7 @@ class S3Backend:
                 if _is_precondition_failed(exc):
                     continue  # lost the race: re-read the tail and rebuild
                 raise
-            # Best-effort hint only — a stale head is corrected by probing.
+            # Best-effort hint only: a stale head is corrected by probing.
             with contextlib.suppress(Exception):
                 self._client.put_object(
                     Bucket=self._bucket,

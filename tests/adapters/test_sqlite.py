@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 
 from tests.adapters.backend_contract import BackendContractTests
-from tests.adapters.test_jsonl import build_entry
+from tests.adapters.test_jsonl import build_entry, build_entry_v2
 from waxseal import AuditLog
+from waxseal.adapters.jsonl import JSONLBackend
 from waxseal.adapters.sqlite import SQLiteBackend
 from waxseal.domain.header import GENESIS_PREV_HASH
 
@@ -83,6 +84,44 @@ class TestParity:
             log = AuditLog.open(tmp_path / f"t{suffix}", now_fn=lambda: TS)
             log.append(payload={"x": 1}, payload_type=PT)
             assert log.verify().ok
+
+
+class TestV2CrossBackendParity:
+    """The literal "same payload, same entry_hash across backends" claim
+    (waxseal-7tk.7.5's bd description), for lp64v2 specifically, side by
+    side across all five backends rather than distributed across
+    BackendContractTests' shared mixin (which proves each backend
+    round-trips a v2 row on its own, not that they agree with EACH OTHER).
+    S3 and Postgres use the same high-fidelity fakes their own test files
+    use (FakeS3Client, FakeConn/FakeStore) — no real AWS/Postgres needed."""
+
+    def test_identical_v2_entry_yields_identical_hash_across_five_backends(
+        self, tmp_path: Path
+    ) -> None:
+        from tests.adapters.test_postgres import FakeConn, FakeStore
+        from tests.adapters.test_s3 import FakeS3Client
+        from waxseal.adapters.memory import MemoryBackend
+        from waxseal.adapters.postgres import PostgresBackend
+        from waxseal.adapters.s3 import S3Backend
+
+        payload = b'{"event": "v2-parity"}'
+        store = FakeStore()
+
+        def connect() -> FakeConn:
+            return FakeConn(store)
+
+        backends = {
+            "jsonl": JSONLBackend(tmp_path / "a.jsonl"),
+            "sqlite": SQLiteBackend(tmp_path / "a.db"),
+            "memory": MemoryBackend(),
+            "s3": S3Backend(FakeS3Client(), bucket="audit", prefix="trail"),
+            "postgres": PostgresBackend(connect),
+        }
+        hashes = {
+            name: backend.append(lambda seq, prev: build_entry_v2(seq, prev, payload)).entry_hash
+            for name, backend in backends.items()
+        }
+        assert len(set(hashes.values())) == 1, hashes
 
 
 class TestOpenUnderContention:

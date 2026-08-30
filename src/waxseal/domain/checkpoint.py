@@ -3,7 +3,7 @@
 A checkpoint pins ``(seq, entry_hash, root)`` at one moment. ``seq``/``entry_hash``
 are the ordinary chain tip; ``root`` is the RFC 6962 batch root over every entry
 hash the trail has produced so far (``domain.anchoring.batch_root``). The tip
-alone is already tamper-evident against edits BEHIND it via ``prev_hash`` — the
+alone is already tamper-evident against edits BEHIND it via ``prev_hash``, but the
 root is what lets a THIRD PARTY (a file sidecar, a signed release, another
 host) witness the whole trail without holding a copy of it, closing the
 whole-trail-rewrite gap a hash chain cannot resist on its own (DESIGN.md's
@@ -11,14 +11,14 @@ anchoring rationale).
 
 The frame carries no timestamp: it must be exactly reproducible from the
 trail's own entry hashes alone, and the "when" comes from whatever anchors it
-(a block time, an RFC 3161 token, a commit) — baking a clock reading in here
+(a block time, an RFC 3161 token, a commit), and baking a clock reading in here
 would make the frame depend on something the trail itself can't reproduce.
 
 A checkpoint may also carry a forward-secure aggregate binding (frame v2). The
 reason it belongs in the FRAME and not merely alongside it in the sidecar
 record: a signing or timestamping sink attests ``sha256(checkpoint_frame(cp))``
 and nothing else, so a binding that lived only in the surrounding JSON would
-be witnessed by no one — which is precisely the class of sink the binding
+be witnessed by no one, which is precisely the class of sink the binding
 exists to reach.
 """
 
@@ -36,7 +36,7 @@ CHECKPOINT_FRAME_PREFIX: Final = b"waxseal-checkpoint-v1\n"
 
 # v2 adds the forward-secure aggregate binding. A separate prefix AND a
 # different field count, so PAE framing makes v1/v2 confusion unrepresentable
-# rather than merely unlikely — no v2 frame can be parsed as a v1 frame over
+# rather than merely unlikely: no v2 frame can be parsed as a v1 frame over
 # different content.
 CHECKPOINT_FRAME_PREFIX_V2: Final = b"waxseal-checkpoint-v2\n"
 
@@ -46,7 +46,7 @@ class SinkReceipt:
     """A receipt plus the request material the record must keep beside it.
 
     An RFC 3161 nonce is checked against the response at anchor time, and
-    without storing it a later verify has nothing to compare — a token swapped
+    without storing it a later verify has nothing to compare: a token swapped
     in from a DIFFERENT request over the same imprint passed re-verify (the
     gap SPEC.md section 17 used to state). An external sink that needs a
     request value re-checked later returns one of these instead of a bare
@@ -54,7 +54,7 @@ class SinkReceipt:
     caller (AuditLog discards the return) is unaffected.
 
     Lives in domain because it is the ``AnchorSink`` Protocol's return
-    envelope and ports import domain at most (the layer DAG) — in adapters it
+    envelope and ports import domain at most (the layer DAG); in adapters it
     left the Protocol annotating a return type its own implementations no
     longer matched.
     """
@@ -72,7 +72,7 @@ class Checkpoint:
     Both present or both absent, enforced here so a half binding cannot be
     constructed at all: the guard used to live in ``checkpoint_frame``, but
     the anchor sinks serialize a checkpoint straight to JSON without framing
-    it, so half a binding reached the wire as ``"agg_epoch": null`` — a claim
+    it, so half a binding reached the wire as ``"agg_epoch": null``, a claim
     committing to nothing, which is the shape of thing this library exists
     not to publish. The commitment, never the accumulator itself: publishing
     intermediate accumulator values is exactly what the aggregate scheme
@@ -102,7 +102,7 @@ def checkpoint_frame(checkpoint: Checkpoint) -> bytes:
     """Canonical bytes for a checkpoint: PAE-style prefix + field count + fields.
 
     Emits the v1 frame when there is no aggregate binding and the v2 frame
-    when there is. Half a binding cannot arrive here — ``Checkpoint`` refuses
+    when there is. Half a binding cannot arrive here, since ``Checkpoint`` refuses
     to hold one, so an epoch committing to nothing can never become a frame a
     witness attests and nobody can check.
     """
@@ -171,6 +171,21 @@ def verify_checkpoint(entry_hashes: Sequence[str], checkpoint: Checkpoint) -> st
         return "anchor_beyond_head"
     if entry_hashes[checkpoint.seq] != checkpoint.entry_hash:
         return "anchor_entry_hash_mismatch"
-    if batch_root(entry_hashes[: checkpoint.seq + 1]) != checkpoint.root:
+    try:
+        root = batch_root(entry_hashes[: checkpoint.seq + 1])
+    except ValueError:
+        # waxseal-lmv (never-raise fuzzing sweep): `batch_root` decodes every
+        # hash as hex with no guard, and the local trail is attacker-writable
+        # by the same threat model as the sidecar (CLAUDE.md) -- a corrupted
+        # `entry_hash` field earlier in the prefix (not necessarily at the
+        # checkpointed tip, which already passed the check above) let
+        # ValueError escape uncaught, breaking this function's own
+        # documented "fails closed and never raises" promise. The root
+        # cannot be recomputed, so it cannot be confirmed to match: the
+        # existing anchor_root_mismatch reason already covers "does not
+        # check out" (same as domain.anchoring's bad-hex-returns-False
+        # convention), not a new incident class (CLAUDE.md rules 4/5/6).
+        return "anchor_root_mismatch"
+    if root != checkpoint.root:
         return "anchor_root_mismatch"
     return None
