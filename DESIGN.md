@@ -376,6 +376,41 @@ multiple independent writers attesting against the same remote chain is
 undocumented territory this version does not attempt (an `AttestationFailure`
 would surface the disagreement loudly rather than silently pick a winner).
 
+## 11. Tamper-evident vs tamper-proof: proof is only ever scoped
+
+Sections 3 and 6 already say the load-bearing part: a hash chain is
+tamper-*evident*, and a write-capable attacker can rewrite everything since the
+last external reference point. The 0.1.5 contract
+(docs/plans/waxseal-0.1.5-contract.md, Workstream J) adds mechanisms that
+upgrade specific, named scopes from evidence to something an operator may
+reasonably call proof — and fixes the vocabulary so the claim is never made
+without its scope.
+
+Two limits survive every mechanism, by construction rather than by budget:
+
+1. **Write-time honesty.** The writer is trusted at the moment of writing; no
+   hash prevents recording a lie or omitting an event — the scope statement
+   (SPEC §16) exists to say this on every output. Tamper-proof ≠ truth-proof.
+2. **The live tail.** Whatever has not yet been externalized — anchored,
+   acknowledged, archived — is rewritable by a write-capable attacker.
+   Mechanisms shrink this window; none closes it.
+
+What buys scoped proof, and the scope each buys:
+
+| Mechanism | Scope of the "proof" claim |
+|---|---|
+| finalized-ledger anchoring + bonded checkpoints (contract layer, Workstream F) | the anchored prefix: acknowledged history cannot be re-told without producing a slashable equivocation proof |
+| WORM object storage for sealed segments (S3 Object Lock) | archived segments: the storage refuses the overwrite — prevention, not detection. [Unverified — lock-mode semantics to be confirmed against AWS documentation when that work starts] |
+| per-append receipts (SPEC §19, REMOTE.md §10) | acknowledged entries: the rewrite window shrinks from anchor cadence N to one entry |
+| segment archival at rotation | availability: destruction becomes recoverable, not merely detectable — a hash proves a thing existed; only a copy brings it back |
+
+The doctrine tying them together: **no waxseal output prints "tamper-proof"
+without naming its scope**, and the library's headline claim remains
+tamper-evident. Every row above ends on the condition sections 3, 6, and 10
+already state — the mechanism's other half must sit under a different
+administrative authority than the writer, which software can state and cannot
+check.
+
 ## References
 
 - Crosby & Wallach, "Efficient Data Structures for Tamper-Evident Logging", USENIX Security 2009.

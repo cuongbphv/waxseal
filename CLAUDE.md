@@ -52,6 +52,10 @@ error**. waxseal makes that class unrepresentable. Everything below serves that 
 - **Chain integrity ≠ trail completeness.** A dropped write leaves no seq gap, so
   `verify` can still return ok. `dropped_writes: int | None` reports completeness
   separately; `None` means "not measured" and is NEVER the same as `0`.
+- **Tamper-evident is the headline claim; "tamper-proof" is only ever SCOPED**
+  (DESIGN.md §11, owner-approved 31/08/2026): the anchored prefix on a finalized
+  external ledger, WORM-archived segments — never the live tail, never write-time
+  honesty. No output and no doc prints "tamper-proof" without naming its scope.
 
 ## Named principle: the Ternary Evidence Principle
 
@@ -79,10 +83,14 @@ This codebase already applies the principle, by name or not, in (at least) six p
 6. **RFC 3161 nonce absence** (`src/waxseal/adapters/rfc3161.py`,
    `src/waxseal/adapters/anchors.py`) — no stored nonce means "nothing to compare",
    skipped, never failed.
+7. **Exogenous ticket reconciliation** (`src/waxseal/domain/tickets.py`,
+   `reconcile-tickets` in the CLI contract) — exit 2 means "unmeasured: issuer data
+   unavailable this run", never rendered as "0 drops detected". Found without being
+   told, exactly as the paragraph below used to challenge; recorded here 31/08/2026.
 
 Rule 5 below is the SPECIFIC instance of this general principle that the chain-integrity
 metric needed. An implementer who has internalized the general principle, not just rule
-5's wording, should be able to find a seventh place it applies without being told.
+5's wording, should be able to find an eighth place it applies without being told.
 
 ## Architecture (layer DAG, enforced by tests/architecture/)
 

@@ -207,3 +207,49 @@ binds a forward-secure aggregate (SPEC.md section 15):
 
 Both appear together or neither appears. A receiver that predates them ignores
 them under section 8's unknown-key rule, so no version negotiation is needed.
+
+## 10. Per-append receipts (server receipt chain) — added in 0.1.5
+
+A server MAY maintain a **receipt chain** per `chain_id`: a running hash over
+the entries it has acknowledged, in acknowledgment order, computed with the
+frame SPEC.md section 19 defines (`prev_receipt_head` = 64 zeros for the first
+receipt). The chain exists so the server is bound by its own acknowledgments —
+it cannot later re-tell the history of what it accepted without the retelling
+being visible. A server that implements it:
+
+- MUST include both `receipt_seq` and `receipt_head` in every `201` body for
+  that chain — both or neither, section 9's rule:
+
+  ```
+  201 {"receipt_seq": <int>, "receipt_head": "<hex64>"}
+  ```
+
+- MUST treat the receipt chain as append-only: once a
+  `(receipt_seq, receipt_head)` pair has been issued, the server MUST NOT ever
+  answer a different `receipt_head` for that `receipt_seq`.
+- SHOULD expose the current head read-only:
+
+  ```
+  GET /v1/chains/{chain_id}/receipts/head
+  200 {"receipt_seq": <int>, "receipt_head": "<hex64>"}
+  404                     # no receipts yet — NOT an error
+  ```
+
+  This endpoint SHOULD be readable without write credentials (a mirror-style
+  read point): its value to a third party auditing the server's
+  acknowledgment history is the reason it exists, and section 5's write
+  credential grants nothing here.
+
+A client receiving receipt fields on a `201` stores them in the `.receipts`
+sidecar (SPEC.md section 19), best-effort — a failed sidecar write never fails
+or retries the append. A `201` without them is a server that does not
+implement this section: the client records nothing and MUST NOT treat it as an
+error (absence is "not recorded", never "checked"). A receiver MUST ignore
+keys it does not recognize (section 8's rule), which is how these fields reach
+existing deployments without a version bump.
+
+Trust model consequence (section 1 unchanged): a receipt narrows the window in
+which a write-capable attacker on the writer's side can rewrite locally — from
+the anchor cadence down to one entry. It does not make the server less trusted
+or more honest, and a server and writer under one administrative authority
+collapse the guarantee — the same sentence every other section ends on.

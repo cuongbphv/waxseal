@@ -767,3 +767,69 @@ the recipe for assembling a detached `.ots` file from a raw calendar response,
 have not been confirmed against python-opentimestamps and are not specified
 here. [Unverified] Which public calendars are currently live also changes over
 time; the sink therefore requires an explicit URL and ships no default.
+
+## 19. Per-append receipt sidecar (`.receipts`) — added in 0.1.5
+
+Anchoring (section 9) bounds a rewrite to the window since the last published
+checkpoint; a pin (section 13) is the verifier's own memory. Neither is a
+per-append acknowledgment: a record, made at write time by a second authority,
+that entry `seq` carried `entry_hash` the moment it was accepted. The receipt
+sidecar is that record on the writer's side, paired with the server-side
+receipt chain REMOTE.md section 10 defines. Together they shrink the rewrite
+window from the anchor cadence to a single entry: an edit to any acknowledged
+entry contradicts a stored receipt from the very next append onward, not from
+the next checkpoint.
+
+The receipt head chain is computed server-side (REMOTE.md section 10); its
+frame is defined here because these are canonical bytes:
+
+```
+RECEIPT_FRAME_PREFIX = b"waxseal-receipt-v1\n"
+RECEIPT_GENESIS      = "0" * 64          # prev for the first receipt
+
+receipt_head = lowercase_hex(SHA-256(
+    RECEIPT_FRAME_PREFIX || u64be(3)
+ || lp(str(receipt_seq)) || lp(prev_receipt_head) || lp(entry_hash)))
+```
+
+Sidecar `<trail>.receipts`: one JSON object per line, O_APPEND, mode 0600
+(same discipline as `.attest`/`.anchors`/`.drops`):
+
+```
+{"entry_hash": "<hex64>", "receipt_head": "<hex64>", "receipt_seq": <int>, "seq": <int>, "source": "<str>", "ts": "<str>", "v": 1}
+```
+
+`source` labels which server issued the receipt (a base URL or operator
+label) — metadata only. A record MUST NEVER contain payload content
+(section 12's rule, for section 12's reason).
+
+Writer behavior: a `201` append response carrying receipt fields appends one
+record, best-effort — a failed sidecar write MUST NOT fail or retry the append
+(the entry is already durable; the miss is labelled, rule 6). A response
+without receipt fields appends nothing and is not an error.
+
+Verification, when a verifier is given the sidecar: for every readable record,
+the trail's own entry hash at `seq` is compared with the record's
+`entry_hash`. The comparison is deterministic — the same footing as a pin
+(section 13) — so its failures are breaks, never unverifiable:
+
+| Reason | Class | Exit |
+|---|---|---|
+| `receipt_mismatch` | the trail's hash at that seq differs from the acknowledged one | 1 |
+| `receipt_beyond_head` | the trail is shorter than an acknowledged append — rollback/truncation | 1 |
+| `malformed_receipt_record` | a record in a known version this build cannot read (this project's own format — section 17's asymmetry) | 1 |
+| `unreadable_record_version` | a `v` from a newer build — unverifiable by name | 2 |
+
+No sidecar at all → reported as `receipts: not recorded`, never a failure and
+never conflated with "checked, found nothing" (rule 5; section 12's own
+absent-vs-empty rule, one sidecar over).
+
+Honest limits, stated plainly (section 9's sidecar caveat applies verbatim):
+the sidecar is as attacker-writable as the trail beside it. An attacker who
+rewrites BOTH consistently is caught only against the server's own receipt
+chain — read back over REMOTE.md section 10, or compared by a third party —
+never by the sidecar alone. What the sidecar alone defeats is the cheaper
+attack: a trail edit that does not also curate the sidecar. The one-entry
+window claim holds exactly when the server sits under a different
+administrative authority than the writer — the same condition every other
+mechanism in this specification states and cannot check.
