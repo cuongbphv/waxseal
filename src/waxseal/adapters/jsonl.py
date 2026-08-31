@@ -92,6 +92,12 @@ class JSONLBackend:
         # not be something an operator has to remember to opt into (same
         # "wired for real" stance as this release's other defaults).
         self._integrity_scan_every = integrity_scan_every
+        # Resume point for _integrity_scan: bytes and lines of this file that
+        # this object has already parsed clean. In-memory and per-instance on
+        # purpose — see _integrity_scan's docstring for what that does and
+        # does not cover.
+        self._scanned_offset = 0
+        self._scanned_lines = 0
 
     def append(self, build: Callable[[int, str], Entry]) -> Entry:
         # Lock covers read-tail AND write: two writers must never both build
@@ -100,7 +106,9 @@ class JSONLBackend:
             next_seq, prev_hash = self._tail_locked()
             entry = build(next_seq, prev_hash)
             line = json.dumps(to_obj(entry, backend="JSONL"), sort_keys=True, separators=(",", ":"))
-            self._path.parent.mkdir(parents=True, exist_ok=True)
+            # No mkdir here: file_lock() creates the parent for the .lock file
+            # before this block is entered (adapters/filelock.py), so a second
+            # one was a syscall per append with nothing left to do.
             # 0600 like the sealkey: the trail holds prompts and tool output at
             # a predictable path, and a default umask would hand it to every
             # local user. Only applies at creation; existing perms are kept.
@@ -131,7 +139,7 @@ class JSONLBackend:
         return seq + 1, entry_hash
 
     def _integrity_scan(self) -> None:
-        """Parse every stored line as JSON, amortized every
+        """Parse every not-yet-cleared stored line as JSON, amortized every
         ``integrity_scan_every`` appends (not every append, since that full
         replay on every call was the O(n^2) bug this module was fixed for).
 
@@ -140,14 +148,42 @@ class JSONLBackend:
         about hashes or chain verdicts. Do not read a clean scan as
         `verify_chain`-style "ok" (CLAUDE.md rule 4): it checks a strictly
         weaker, unrelated property.
+
+        SCOPE, stated because a resumable scan is a narrower claim than a
+        whole-file one: the scan resumes from the last byte offset THIS
+        object parsed clean, so repeated scans cost O(bytes appended), not
+        O(file) each time (the cumulative O(n^2 / N) this method was fixed
+        for). What it therefore does not see is an out-of-band edit to a
+        region this same object already cleared. That is a deliberate trade,
+        not an oversight: the whole-file guarantee never existed anyway
+        (a fresh process clears nothing and rescans everything, and only
+        `verify` speaks about the chain). A file that got SHORTER than the
+        cleared prefix is treated as a different file at this path and
+        rescanned from byte 0, because a remembered offset would otherwise
+        seek past corruption now sitting in front of it.
         """
-        byte_offset = 0
+        byte_offset = self._scanned_offset
+        line_no = self._scanned_lines
+        if self._path.stat().st_size < byte_offset:
+            byte_offset = 0
+            line_no = 0
         with open(self._path, "rb") as f:
-            for line_no, raw in enumerate(f, start=1):
+            f.seek(byte_offset)
+            for raw in f:
+                line_no += 1
                 stripped = raw.strip()
                 if stripped:
                     try:
                         json.loads(stripped)
                     except json.JSONDecodeError as exc:
+                        # Absolute in the file, never relative to the resume
+                        # point: an operator handed line 3 for line 53 opens
+                        # the wrong row.
                         raise JSONLCorruptionError(line_no, byte_offset, exc) from exc
                 byte_offset += len(raw)
+                if raw.endswith(b"\n"):
+                    # Only a newline-terminated line is cleared. A tail
+                    # without one is a partial write whose remaining bytes
+                    # must be re-read, not skipped.
+                    self._scanned_offset = byte_offset
+                    self._scanned_lines = line_no

@@ -241,10 +241,26 @@ class TestCostReceipt:
         n: int,
         integrity_scan_every: int | None,
         monkeypatch: "pytest.MonkeyPatch",
+        *,
+        resumable_scan: bool = True,
     ) -> int:
         # Unlike _bytes_read_by_last_append (which isolates one call to
         # prove the tail-read fix), the amortized-scan claim is about total
         # cost across n appends, so every append here is instrumented.
+        #
+        # resumable_scan=False restores the pre-0.1.5 scan, which re-read the
+        # whole file on every fire, by resetting the resume point before each
+        # call. It is how the falsifiability receipt below still has a "bad"
+        # configuration to fail against (waxseal-aa4 A3).
+        if not resumable_scan:
+            real_scan = JSONLBackend._integrity_scan
+
+            def full_scan(self: JSONLBackend) -> None:
+                self._scanned_offset = 0
+                self._scanned_lines = 0
+                real_scan(self)
+
+            monkeypatch.setattr(JSONLBackend, "_integrity_scan", full_scan)
         backend = JSONLBackend(path, integrity_scan_every=integrity_scan_every)
         sink: list = []
         real_open = open
@@ -286,24 +302,38 @@ class TestCostReceipt:
         )
 
     # Falsifiability receipt (CLAUDE.md rule 9): the identical measurement
-    # and identical 2.5x bound, but with integrity_scan_every=1 so the scan
-    # runs on EVERY append instead of every 1000th. This must NOT satisfy
-    # the bound above — confirming test_periodic_scan_cost_is_amortized_
-    # not_per_append is not vacuously true (a bound that holds no matter
-    # what "amortized" means would prove nothing about this feature).
-    def test_falsifiability_scan_every_append_breaks_the_amortized_bound(
+    # and identical 2.5x bound, over a configuration that must NOT satisfy
+    # it — confirming test_periodic_scan_cost_is_amortized_not_per_append is
+    # not vacuously true (a bound that holds no matter what "amortized"
+    # means would prove nothing about this feature).
+    #
+    # The "bad" configuration changed in 0.1.5 (waxseal-aa4 A3), and that is
+    # a finding worth recording rather than a bound quietly relaxed. It used
+    # to be integrity_scan_every=1 alone: firing a WHOLE-FILE scan on every
+    # append made total cost O(n^2), and this test measured 9_070_045 bytes
+    # at n=2000 against 4_524_045 at n=1000 once the scan became resumable —
+    # ratio 2.00x, comfortably inside the bound, i.e. the receipt had stopped
+    # falsifying anything. The scan now resumes from the last byte offset it
+    # parsed clean, so scan_every=1 costs O(bytes appended) and no longer
+    # breaks amortization by itself. What carries the amortization now is the
+    # resume, so that is what this receipt removes: with the resume point
+    # reset before every scan (resumable_scan=False, the pre-0.1.5 whole-file
+    # scan) the same measurement reads 228_694_650 bytes at n=1000 and
+    # 906_905_650 at n=2000 — ratio 3.97x, the O(n^2) shape the bound is
+    # there to catch.
+    def test_falsifiability_unresumed_scan_breaks_the_amortized_bound(
         self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
     ) -> None:
         bytes_1000 = self._bytes_read_by_all_appends(
-            tmp_path / "falsify-1000.jsonl", 1000, 1, monkeypatch
+            tmp_path / "falsify-1000.jsonl", 1000, 1, monkeypatch, resumable_scan=False
         )
         bytes_2000 = self._bytes_read_by_all_appends(
-            tmp_path / "falsify-2000.jsonl", 2000, 1, monkeypatch
+            tmp_path / "falsify-2000.jsonl", 2000, 1, monkeypatch, resumable_scan=False
         )
         assert bytes_2000 > bytes_1000 * 2.5, (
             f"n=2000 total read {bytes_2000} bytes vs n=1000 total read "
             f"{bytes_1000} bytes (ratio {bytes_2000 / bytes_1000:.2f}x) — "
-            "expected scanning on every append (integrity_scan_every=1) to "
+            "expected a non-resuming whole-file scan on every append to "
             "break the 2.5x bound; if it doesn't, the amortized test above "
             "is not actually falsifiable"
         )

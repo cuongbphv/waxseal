@@ -21,7 +21,7 @@ import argparse
 import contextlib
 import functools
 import sys
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -31,6 +31,7 @@ from typing import Final
 from waxseal.adapters.anchors import AnchorRecord
 from waxseal.adapters.remote import RemoteError
 from waxseal.domain.checkpoint import Checkpoint
+from waxseal.domain.header import Entry
 from waxseal.domain.pinning import PinState
 from waxseal.domain.report import SCOPE_LINE, CheckSummary
 from waxseal.domain.rfc3161 import NONCE_MISMATCH, RECEIPT_IMPRINT_MISMATCH
@@ -1433,10 +1434,12 @@ def _report(
 ) -> int:
     from waxseal.domain.report import build_report
 
-    # measure_drops=False for the same reason verify uses it: a CLI process
-    # observed no writes, so it must report "not measured", never zero.
-    result = log.verify(measure_drops=False)
-    entries = list(log.entries())
+    # One read pass for both halves: the verdict and the summary describe the
+    # same bytes, and reading the trail twice to produce them made a read-only
+    # command cost double on a large trail. dropped_writes stays None for the
+    # same reason verify uses measure_drops=False: a CLI process observed no
+    # writes, so it must report "not measured", never zero.
+    result, entries = log._verify_and_entries()
 
     # Anchors and witnesses are measured before the pin check, same reorder
     # as _verify and for the same reason: _pin_check needs what this run
@@ -2148,8 +2151,14 @@ def _publish_to_witnesses(cp: Checkpoint, urls: list[str]) -> int:
 
 
 def _tail(log: AuditLog, n: int) -> int:
-    entries = list(log.entries())
-    for entry in entries[-n:]:
+    # A bounded deque, not list(log.entries())[-n:]: the slice discarded
+    # everything but the last n rows AFTER holding the whole decoded trail in
+    # memory at once, so a read-only command's peak allocation grew with the
+    # trail it was only printing the end of. Output is byte-identical.
+    window: deque[Entry] = deque(maxlen=n)
+    for entry in log.entries():
+        window.append(entry)
+    for entry in window:
         h = entry.header
         print(f"seq={h.seq} ts={h.ts} type={h.payload_type} hash={entry.entry_hash[:12]}")
     return 0

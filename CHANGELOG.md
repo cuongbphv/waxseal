@@ -114,6 +114,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Read-only commands cost more than the bytes they read** (0.1.5 plan, Workstream A).
+  Four fixes, no behavior change and no hash change; every number below is a counted
+  quantity from `tests/adapters/test_perf_receipts.py`, measured with the fix backed out
+  and again with it in place, never a wall-clock reading.
+
+  - **`tail`** built the whole decoded trail before slicing the last `n` rows off the end.
+    A `deque(maxlen=n)` prints the identical lines while holding the window only: over a
+    2000-entry trail, `tail -n 5` went from **2000 live decoded payloads to 6** (the five
+    it prints plus the one in flight). Bytes read are unchanged, and that is inherent —
+    `entries()` is a forward-only scan, so nothing can print the tail of a JSONL trail
+    without reading it through; what the slice cost was memory, not I/O.
+  - **`JSONLBackend._integrity_scan()` re-read the whole file every time it fired**, so
+    the periodic scan cost O(n) per scan and O(n²/N) over a trail's life. It now resumes
+    from the last byte offset this object parsed clean: over a 50-entry trail grown by 5
+    entries, the second scan went from **24,630 bytes (the whole file) to 2,240** — exactly
+    the bytes appended since the first scan. `JSONLCorruptionError`'s `line_no` and
+    `byte_offset` stay absolute in the file, and a trail that got *shorter* than the
+    cleared prefix is treated as a different file at that path and rescanned from byte 0.
+    The narrower scope is stated in the method's own docstring rather than left to be
+    discovered: a resumed scan cannot see an out-of-band edit to a region the same process
+    already cleared.
+  - **`report` read the trail twice**, once to verify and once to summarize. One pass now
+    feeds both: **185,380 bytes read off a 92,690-byte trail became 92,690**.
+  - **`JSONLBackend.append()` created the trail's parent directory twice per append.**
+    `file_lock()` already makes it before the lock is taken, so the second call could never
+    find anything to do: **2 `mkdir` calls per append became 1.**
+
+  `AuditLog.entry_hashes()` was deliberately left materializing, and its docstring now says
+  why, so the next pass over this code does not "fix" it: `batch_root` and
+  `consistency_proof` need every leaf again after the last one is read, so a streaming
+  variant would have to read the trail twice.
+
+- **A misread benchmark in the 0.1.4 entry above.** The 22.890s measurement was the total
+  for building a 4000-entry trail (5.723ms per append), not the cost of one append at
+  n=4000, which is how the sentence read it. The measured numbers are untouched; only the
+  sentence that misquoted them is corrected.
+
 - **`waxseal install` printed a bare `python3`** (0.1.5 plan, Workstream D1). The
   interpreter on `PATH` is not necessarily the one that has waxseal installed, and when
   it is not, every hook event is dropped with a label nobody reads while the hooks look
@@ -200,8 +237,11 @@ owner's decision and not a precedent.
 - **`JSONLBackend.append()` was O(n) per call, O(n²) over a trail's life.**
   `_tail_locked()` replayed and payload-decoded the *entire* stored trail, inside the
   write lock, on every single append, all to read two values off the last line. The cost
-  measured 4× per doubling of trail size, reaching 22.9s for a single append at n=4000 on
-  this machine. The paper's own re-analysis did not find it, having said it had not read
+  measured 4× per doubling of trail size: building a 4000-entry trail took **22.890s in
+  total** on this machine, i.e. 5.723ms per append. (The sentence originally shipped here
+  read that total as "22.9s for a single append at n=4000", which the measurement never
+  said; the numbers are the measured ones, only the reading of them is corrected.)
+  The paper's own re-analysis did not find it, having said it had not read
   `adapters/`. A tamper-evidence library too slow to use leaves a coverage gap an attacker
   never has to create, because sooner or later an operator turns the slow thing off. The
   fix is a backward seek from EOF that reads only the last stored line, so amortized cost
