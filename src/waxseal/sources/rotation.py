@@ -37,6 +37,12 @@ from typing import Any, Final
 from waxseal.adapters._envelope import tail_fields
 from waxseal.adapters.filelock import file_lock
 from waxseal.adapters.jsonl import _read_last_line
+from waxseal.domain.archive import (
+    ArchiveDestination,
+    ArchiveReport,
+    ArchiveState,
+    render_archive_state,
+)
 from waxseal.domain.handoff import HandoffBinding, to_payload
 from waxseal.domain.segments import (
     ROTATION_PAYLOAD_TYPE,
@@ -76,6 +82,7 @@ def open_segmented(
     *,
     max_segment_bytes: int = DEFAULT_MAX_SEGMENT_BYTES,
     notice: Callable[[str], None] = _stderr_notice,
+    archive: ArchiveDestination | None = None,
     **open_kwargs: Any,
 ) -> AuditLog:
     """An ``AuditLog`` on the active segment of the trail ``base`` names,
@@ -91,6 +98,10 @@ def open_segmented(
     the hooks pass ``DEFAULT_MAX_SEGMENT_BYTES`` and the rotation notice says
     which of the two the number came from (rule 6 -- a threshold carries its
     provenance for the same reason a fail-open does).
+
+    ``archive`` is J3's opt-in destination for the segment being sealed (see
+    ``_archive_sealed``). Absent, nothing is sent anywhere and the notice says
+    so -- "not attempted" is a state, not a silence.
 
     Remaining ``open_kwargs`` go straight to ``AuditLog.open``, so
     ``redactor``/``record_drops``/``anchor_sink`` behave exactly as they do
@@ -153,7 +164,12 @@ def open_segmented(
             f"({_threshold_label(max_segment_bytes)}): {active.name} sealed, "
             f"now appending to {new_path.name}"
         )
-        return log
+
+    # OUTSIDE the critical section, deliberately (see _archive_sealed): the
+    # rotation is durably complete -- new segment created, binding appended,
+    # lock released -- before the archive moves a single byte.
+    _archive_sealed(active, archive, notice=notice)
+    return log
 
 
 def active_segment(base: Path | str) -> Path:
@@ -277,4 +293,63 @@ def _final_checkpoint(active: Path, *, notice: Callable[[str], None], **open_kwa
         notice(
             f"final checkpoint for {active.name} failed ({e}) — sealing it anyway; "
             "that segment's .anchors sidecar has no closing checkpoint"
+        )
+
+
+def _archive_sealed(
+    sealed: Path, destination: ArchiveDestination | None, *, notice: Callable[[str], None]
+) -> None:
+    """Push the segment just sealed off-box, best-effort and labelled (J3).
+
+    Anchoring stores hashes, not content: an attacker with disk write access
+    can delete a sealed segment, and the chain then proves history was
+    destroyed without being able to give it back. This is the step that keeps
+    a second copy, and the one line it prints says which of three things
+    happened -- stored, failed, or never attempted.
+
+    OUTSIDE ``segments.lock``, and that placement is the design decision:
+
+    * A destination is a NETWORK call. Holding a lock across one lets a
+      stalled endpoint block every other writer that needs to rotate, and a
+      rotation that cannot finish is unbounded segment growth plus lost
+      events -- precisely the failure J3 exists to prevent, arriving by J3's
+      own hand. Rule 6 says a fail-open is labelled; it does not license a
+      new way to block.
+    * Nothing races. A sealed segment is never re-sealed: rotation only ever
+      creates the next ordinal, so no later rotation can touch this file or
+      archive it twice. Exactly one process wins the rotation for a given
+      segment, because the losers re-check under the lock and find the active
+      segment changed.
+    * The bytes are read here rather than under the lock, and a writer still
+      holding a handle on the closing segment (opened before the threshold was
+      crossed, so never lock-serialized) can extend it after sealing. That is
+      B3's own pre-existing window, not one this step opens: the worst case is
+      an archived copy that holds MORE entries than the binding names, which
+      still verifies ok and still contains the bound tail.
+
+    A failure is labelled and never propagates: the rotation already
+    happened, and raising here would turn a missing off-box copy into a lost
+    append.
+    """
+    notice(render_archive_state(_archive_report(sealed, destination))[0])
+
+
+def _archive_report(sealed: Path, destination: ArchiveDestination | None) -> ArchiveReport:
+    if destination is None:
+        return ArchiveReport(
+            state=ArchiveState.NOT_ATTEMPTED,
+            destination="(no archive destination configured)",
+            detail=f"{sealed.name} exists only on this box, so deleting the file destroys "
+            "the history it holds; an anchor would prove the loss, not undo it",
+        )
+    try:
+        return destination(sealed.name, sealed.read_bytes())
+    except Exception as e:  # noqa: BLE001 - labelled, never swallowed (rule 6)
+        # Both destinations shipped with waxseal report their own failures, so
+        # reaching here means the read failed or a caller-supplied destination
+        # raised. Either way the rotation stands.
+        return ArchiveReport(
+            state=ArchiveState.FAILED,
+            destination="(the configured archive destination)",
+            detail=f"{type(e).__name__}: {e}",
         )

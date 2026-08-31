@@ -15,13 +15,18 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import sys
 import threading
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from tests.adapters.test_segment_archive import NOW, FakeImportServer, FakeLockS3Client
 from waxseal import AuditLog, Checkpoint
+from waxseal.adapters.segment_archive import s3_destination, server_import_destination
+from waxseal.domain.archive import ArchiveReport, ArchiveState
 from waxseal.domain.header import GENESIS_PREV_HASH
 from waxseal.domain.segments import ROTATION_PAYLOAD_TYPE
 from waxseal.sources.rotation import (
@@ -233,8 +238,10 @@ class TestThresholdLabel:
         # segment looks like from the tail read's point of view.
         base.write_bytes(b"\n" * DEFAULT_MAX_SEGMENT_BYTES + base.read_bytes())
         open_segmented(base, max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES, notice=notice)
-        assert len(lines) == 1
-        assert "rotated at 16777216 bytes (built-in default)" in lines[0]
+        # One rotation line, plus J3's own archive-state line after it.
+        rotated = [line for line in lines if line.startswith("rotated at")]
+        assert len(rotated) == 1
+        assert "rotated at 16777216 bytes (built-in default)" in rotated[0]
 
     def test_a_programmatic_caller_supplied_threshold_is_labelled_as_such(
         self, tmp_path: Path
@@ -534,3 +541,247 @@ class TestConcurrentRotation:
         # ran, so every event belongs to the new segment: 1 binding + N events.
         assert closing.checked == closing_entries
         assert opened.checked == writers + 1
+
+
+class TestSegmentArchiveAtRotation:
+    """J3: the sealed segment is pushed off-box, and the outcome is labelled.
+
+    Anchoring keeps hashes, not content: an attacker with disk write access
+    can delete a sealed segment, which the chain detects and cannot undo.
+    Proof without availability is proof about a corpse. So rotation gets one
+    more best-effort step, in the same shape as the final checkpoint above:
+    labelled, and unable to stop the rotation it follows.
+
+    FALSIFIABILITY RECEIPT — measured 01/09/2026 on this worktree, not argued
+    from theory. Baseline for the three files below (this one plus
+    tests/adapters/test_segment_archive.py and tests/domain/test_archive.py):
+    **70 tests, 0 failures**. Each branch was then removed, one at a time, and
+    the same 70 tests re-run (counts read out of the junit XML, not the
+    summary line):
+
+        1. `_archive_report`'s `destination is None` arm made to return
+           ArchiveState.STORED (the "no destination = success" collapse)
+             -> exit 1, tests=70 failures=2:
+                test_no_destination_configured_is_reported_as_not_attempted
+                test_the_archive_line_goes_to_stderr_never_stdout
+        2. `_archive_report`'s `except` arm removed, so a destination's
+           exception propagates out of `open_segmented` (rule 6 violated)
+             -> exit 1, tests=70 failures=2:
+                test_an_archive_failure_never_blocks_the_rotation
+                test_an_unreadable_sealed_segment_is_a_labelled_archive_failure
+        3. `_archive_sealed(...)` moved back INSIDE `with file_lock(...)`
+             -> exit 1, tests=70 failures=1:
+                test_the_archive_runs_outside_the_segments_lock
+                ("while archiving" probed 'held' instead of 'free')
+
+    Note what does NOT break under 1 and 2: the chain, the binding and the new
+    segment. That is the point — an archive defect is invisible to every
+    chain-integrity test there is, which is exactly why its three states have
+    to be asserted directly.
+    """
+
+    def test_no_destination_configured_is_reported_as_not_attempted(
+        self, tmp_path: Path
+    ) -> None:
+        # Never silence: an operator who believes archiving is configured
+        # learns from this line that it is not, at the moment the segment
+        # becomes deletable-and-unrecoverable rather than months later.
+        base = tmp_path / "trail.00000.jsonl"
+        fill_over(base)
+        lines, notice = notices()
+        open_segmented(base, max_segment_bytes=TINY, notice=notice)
+        archive_lines = [line for line in lines if line.startswith("archive_")]
+        assert len(archive_lines) == 1
+        assert archive_lines[0].startswith("archive_not_attempted:")
+        assert (tmp_path / "trail.00001.jsonl").exists()
+
+    def test_nothing_is_archived_when_no_rotation_happens(self, tmp_path: Path) -> None:
+        calls: list[str] = []
+
+        def destination(name: str, body: bytes) -> ArchiveReport:
+            calls.append(name)  # pragma: no cover - the assertion is that this never runs
+            raise AssertionError("no segment was sealed, so none may be archived")
+
+        base = tmp_path / "trail.00000.jsonl"
+        fill(base, 2)
+        lines, notice = notices()
+        open_segmented(base, max_segment_bytes=TINY * 100, notice=notice, archive=destination)
+        assert calls == []
+        assert lines == []
+
+    def test_the_sealed_segment_reaches_the_destination_byte_for_byte(
+        self, tmp_path: Path
+    ) -> None:
+        base = tmp_path / "trail.00000.jsonl"
+        fill_over(base)
+        sealed = base.read_bytes()
+        received: dict[str, bytes] = {}
+
+        def destination(name: str, body: bytes) -> ArchiveReport:
+            received[name] = body
+            return ArchiveReport(
+                state=ArchiveState.STORED, destination="memory://archive", detail="captured"
+            )
+
+        lines, notice = notices()
+        open_segmented(base, max_segment_bytes=TINY, notice=notice, archive=destination)
+        assert received == {"trail.00000.jsonl": sealed}
+        assert any(line.startswith("archive_stored:") for line in lines)
+
+    def test_an_archive_failure_never_blocks_the_rotation(self, tmp_path: Path) -> None:
+        # CLAUDE.md rule 6. A blocked rotation stops the host's trail from
+        # growing, which is the failure J3 exists to prevent, not to cause.
+        base = tmp_path / "trail.00000.jsonl"
+        closing = fill_over(base)
+        tail_hash = closing.entry_hashes()[-1]
+
+        def destination(name: str, body: bytes) -> ArchiveReport:
+            raise OSError("archive offline")
+
+        lines, notice = notices()
+        log = open_segmented(base, max_segment_bytes=TINY, notice=notice, archive=destination)
+        log.append(payload={"i": "after"}, payload_type=PT)
+
+        new = tmp_path / "trail.00001.jsonl"
+        assert new.exists()
+        assert AuditLog.open(new).verify(measure_drops=False).ok
+        assert payload_of(genesis_of(new))["head_hash"] == tail_hash
+        failures = [line for line in lines if line.startswith("archive_failed:")]
+        assert len(failures) == 1
+        assert "archive offline" in failures[0]
+        assert "OSError" in failures[0]
+
+    def test_an_unreadable_sealed_segment_is_a_labelled_archive_failure(
+        self, tmp_path: Path
+    ) -> None:
+        base = tmp_path / "trail.00000.jsonl"
+        fill_over(base)
+        calls: list[str] = []
+
+        def destination(name: str, body: bytes) -> ArchiveReport:
+            calls.append(name)  # pragma: no cover - the read fails before this
+            raise AssertionError("unreachable")
+
+        def unreadable(self: Path) -> bytes:
+            raise PermissionError("EACCES")
+
+        lines, notice = notices()
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(Path, "read_bytes", unreadable)
+            open_segmented(base, max_segment_bytes=TINY, notice=notice, archive=destination)
+        assert calls == []
+        assert (tmp_path / "trail.00001.jsonl").exists()
+        assert any("archive_failed:" in line and "EACCES" in line for line in lines)
+
+    def test_the_archive_line_goes_to_stderr_never_stdout(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        base = tmp_path / "trail.00000.jsonl"
+        fill_over(base)
+        open_segmented(base, max_segment_bytes=TINY)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "archive_not_attempted" in captured.err
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="flock probe is POSIX-only")
+    def test_the_archive_runs_outside_the_segments_lock(self, tmp_path: Path) -> None:
+        """A network call must not hold ``segments.lock``.
+
+        The probe is falsified by the test itself: it runs twice, once from
+        the rotation notice (emitted INSIDE the critical section) and once
+        from the archive destination. The first must see the lock held, or the
+        probe proves nothing about the second.
+        """
+        import fcntl
+
+        probes: dict[str, str] = {}
+
+        def probe(label: str) -> None:
+            fd = os.open(tmp_path / "segments.lock", os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                probes[label] = "free"
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                probes[label] = "held"
+            finally:
+                os.close(fd)
+
+        def notice(message: str) -> None:
+            if "rotated at" in message:
+                probe("while rotating")
+
+        def destination(name: str, body: bytes) -> ArchiveReport:
+            probe("while archiving")
+            return ArchiveReport(
+                state=ArchiveState.STORED, destination="memory://archive", detail="captured"
+            )
+
+        base = tmp_path / "trail.00000.jsonl"
+        fill_over(base)
+        open_segmented(base, max_segment_bytes=TINY, notice=notice, archive=destination)
+        assert probes == {"while rotating": "held", "while archiving": "free"}
+
+
+class TestRestoreFromTheArchive:
+    """The point of the whole workstream: the archived copy is the history.
+
+    Each test DELETES the local segment and rebuilds it from bytes that came
+    back out of the archive, then verifies the restored chain and the binding
+    the next segment recorded against it. Nothing is asserted about a mock
+    having been called.
+    """
+
+    def test_a_deleted_segment_is_restored_from_s3_and_verifies_ok(
+        self, tmp_path: Path
+    ) -> None:
+        base = tmp_path / "trail.00000.jsonl"
+        closing = fill_over(base)
+        sealed_entries = len(closing.entry_hashes())
+        tail_hash = closing.entry_hashes()[-1]
+        client = FakeLockS3Client()
+
+        open_segmented(
+            base,
+            max_segment_bytes=TINY,
+            notice=lambda _m: None,
+            archive=s3_destination(bucket="audit", client=client, now_fn=lambda: NOW),
+        )
+
+        base.unlink()
+        assert not base.exists()
+        # The ONLY surviving copy is in the object store. Nothing on disk
+        # could supply these bytes.
+        base.write_bytes(client.stored("audit", "trail.00000.jsonl"))
+
+        restored = AuditLog.open(base).verify(measure_drops=False)
+        assert restored.ok
+        assert restored.checked == sealed_entries
+        # ...and the next segment's binding still holds against the restored
+        # file, computed from the restored bytes rather than remembered.
+        assert AuditLog.open(base).entry_hashes()[-1] == tail_hash
+        assert payload_of(genesis_of(tmp_path / "trail.00001.jsonl"))["head_hash"] == tail_hash
+
+    def test_a_deleted_segment_is_restored_from_the_server_import_and_verifies_ok(
+        self, tmp_path: Path
+    ) -> None:
+        base = tmp_path / "trail.00000.jsonl"
+        closing = fill_over(base)
+        sealed_entries = len(closing.entry_hashes())
+        server = FakeImportServer()
+
+        open_segmented(
+            base,
+            max_segment_bytes=TINY,
+            notice=lambda _m: None,
+            archive=server_import_destination("https://audit.example", transport=server),
+        )
+
+        base.unlink()
+        # The server's copy is what it PARSED out of the multipart body, so a
+        # mis-encoded upload would restore to something that does not verify.
+        base.write_bytes(server.files["trail.00000.jsonl"])
+
+        restored = AuditLog.open(base).verify(measure_drops=False)
+        assert restored.ok
+        assert restored.checked == sealed_entries
