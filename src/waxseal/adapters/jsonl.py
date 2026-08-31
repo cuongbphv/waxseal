@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -32,6 +33,12 @@ class JSONLCorruptionError(Exception):
     storage-layer fact one level below the chain: a line that cannot even be
     parsed back as the JSON envelope it was written as (e.g. a torn write
     from a crash mid-flush, or an out-of-band edit).
+
+    NOT one of ``append()``'s failure modes (waxseal-fg4.1): only a direct
+    ``_integrity_scan()`` call raises this. An append that hits it reports the
+    same line and offset as a labelled ``RuntimeWarning`` and still lands,
+    because an append that reached disk must never report failure — see
+    ``JSONLBackend.append``.
     """
 
     def __init__(self, line_no: int, byte_offset: int, cause: Exception) -> None:
@@ -104,6 +111,47 @@ class JSONLBackend:
         # on the same prev_hash (CLAUDE.md rule 7).
         with file_lock(self._path):
             next_seq, prev_hash = self._tail_locked()
+            # BEFORE the write, never after (waxseal-fg4.1). The scan used to
+            # fire once the entry was on disk and flushed, so a
+            # JSONLCorruptionError about some OTHER, pre-existing line came out
+            # of an append that had already durably succeeded: a caller that
+            # retries on exception wrote the same event twice, contiguous seq,
+            # no gap, so verify() still returns ok and the duplicate is
+            # invisible to chain integrity (and try_append counted a drop for
+            # an entry that was on the chain, which is dropped_writes lying —
+            # rule 5). Position, not only the except-clause below, is what
+            # makes that unrepresentable: ANY way the scan can fail — an
+            # OSError off the read, a warning filter escalated to an error —
+            # now lands where there is no durable write to lie about.
+            #
+            # Same predicate on the same entry as before the move (next_seq IS
+            # this entry's seq), so the scan still fires on exactly the appends
+            # it used to, over the same bytes minus the pending line, which the
+            # next fire picks up. next_seq > 0 because nothing stored is
+            # nothing to check, and because scan_every=1 would otherwise
+            # stat() a file this first append has not created yet.
+            if (
+                self._integrity_scan_every is not None
+                and next_seq > 0
+                and (next_seq + 1) % self._integrity_scan_every == 0
+            ):
+                try:
+                    self._integrity_scan()
+                except JSONLCorruptionError as exc:
+                    # Fail-open, LABELLED (rule 6), through the same channel
+                    # the sibling SQLite adapter uses for its own degraded
+                    # path. Damage to bytes written long ago is not grounds to
+                    # veto a new entry: refusing would silence the host's whole
+                    # trail over one old torn line, and rule 4 forbids the only
+                    # other exit (repairing it). The operator is told; nothing
+                    # is fixed, nothing is dropped.
+                    warnings.warn(
+                        "waxseal: periodic trail integrity scan found an "
+                        f"unparseable stored line: {exc} — this append still "
+                        "landed; the scan reports storage, never a chain verdict",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
             entry = build(next_seq, prev_hash)
             line = json.dumps(to_obj(entry, backend="JSONL"), sort_keys=True, separators=(",", ":"))
             # No mkdir here: file_lock() creates the parent for the .lock file
@@ -116,11 +164,6 @@ class JSONLBackend:
             with os.fdopen(fd, "a", encoding="utf-8", newline="") as f:
                 f.write(line + "\n")
                 f.flush()
-            if (
-                self._integrity_scan_every is not None
-                and (entry.header.seq + 1) % self._integrity_scan_every == 0
-            ):
-                self._integrity_scan()
             return entry
 
     def entries(self) -> Iterator[Entry]:
@@ -142,6 +185,12 @@ class JSONLBackend:
         """Parse every not-yet-cleared stored line as JSON, amortized every
         ``integrity_scan_every`` appends (not every append, since that full
         replay on every call was the O(n^2) bug this module was fixed for).
+
+        Raises ``JSONLCorruptionError`` on the first unparseable line. From
+        ``append`` that raise is caught and re-reported as a labelled warning
+        (waxseal-fg4.1): the periodic fire happens before the pending write,
+        so a caller never sees this method's failure attributed to an append
+        that had already landed.
 
         This is a storage sanity check, one layer below tamper-evidence: it
         answers "can every stored line still be parsed at all", nothing
