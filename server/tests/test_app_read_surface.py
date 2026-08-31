@@ -221,6 +221,66 @@ class TestNoWriteSurfaceAnywhere:
             assert "{seq}" not in path, path
 
 
+class TestThePublicReadPointIsGetOnly:
+    """The public read point carries no write route — asserted per route.
+
+    `api/public.py` promises exactly this test in its docstring. The property
+    was already implied by `TestNoWriteSurfaceAnywhere`'s census of mutating
+    routes (all seven live under `/v1/`), but implication is not detection: that
+    census goes red for a POST added ANYWHERE, and would name the wrong
+    property while doing it. Read authority separated from write authority is
+    the mirror-node guarantee (REMOTE.md section 10: the write credential
+    "grants nothing here"), and a guarantee deserves a test that fails for its
+    own reason.
+    """
+
+    #: The only method the public read point may expose. An allowlist, never
+    #: `!= "post"`: a blocklist naming POST is silent about PUT, PATCH, DELETE
+    #: and anything a later route adds. FastAPI's schema lists only the methods
+    #: a handler declares — HEAD and OPTIONS are answered by Starlette outside
+    #: the schema — so no implicit method needs permitting here.
+    ALLOWED_METHODS = {"get"}
+
+    @staticmethod
+    def _by_tag(paths: dict[str, Any]) -> set[tuple[str, str]]:
+        return {
+            (path, method)
+            for path, operations in paths.items()
+            for method, operation in operations.items()
+            if "public" in (operation.get("tags") or [])
+        }
+
+    @staticmethod
+    def _by_prefix(paths: dict[str, Any]) -> set[tuple[str, str]]:
+        return {
+            (path, method)
+            for path, operations in paths.items()
+            for method in operations
+            if path.startswith("/public/v1")
+        }
+
+    def test_every_route_on_the_public_read_point_is_get(
+        self, client: TestClient
+    ) -> None:
+        paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
+        public = self._by_tag(paths) | self._by_prefix(paths)
+        # A selector that silently matched nothing would pass forever. The
+        # count is not asserted — the surface may grow — but its emptiness is.
+        assert public, "no public routes found: the selector is broken, not the surface"
+        offending = {
+            (path, method) for path, method in public if method not in self.ALLOWED_METHODS
+        }
+        assert offending == set(), f"non-GET routes on the public read point: {offending}"
+
+    def test_the_two_selectors_see_the_same_surface(self, client: TestClient) -> None:
+        # Each covers the other's blind spot: a public route moved off the
+        # prefix, and a route under the prefix that forgot the tag. If they ever
+        # disagree, one of them has stopped seeing part of the surface and the
+        # test above is weaker than it reads.
+        paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
+        assert self._by_tag(paths) == self._by_prefix(paths)
+
+
 class TestReadSurfaceRespectsTheCredential:
     @pytest.fixture
     def keyed(self, tmp_path: Path) -> TestClient:

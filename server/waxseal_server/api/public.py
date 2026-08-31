@@ -1,10 +1,13 @@
 """The public read point — no credential, and no write route to need one.
 
 This is not "the same data with authentication turned off". It is a separate
-surface, and a test asserts that every route on it is `GET`. Making the read
-authority architectural rather than a permission bit is the mirror-node lesson
-recorded in the 0.1.5 plan (Workstream G4, adoption 1): a third party auditing
-this server should not have to be granted anything by it.
+surface, and every route on it is checked one route at a time against an
+allowlist of permitted methods — `{"get"}` — by
+`tests/test_app_read_surface.py::TestThePublicReadPointIsGetOnly`, so a `PUT`,
+`PATCH` or `DELETE` added here fails as loudly as a `POST` would. Making the
+read authority architectural rather than a permission bit is the mirror-node
+lesson recorded in the 0.1.5 plan (Workstream G4, adoption 1): a third party
+auditing this server should not have to be granted anything by it.
 
 Everything published here is published because the check it supports would
 otherwise rest on trusting the server's own word for it.
