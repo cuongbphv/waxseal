@@ -114,6 +114,14 @@ files = ["src/waxseal"]
 module = ["agents.*", "langchain_core.*", "crewai.*", "hermes_cli.*"]
 ignore_missing_imports = true
 
+# boto3 lives in the `s3` extra, never in `dependencies` (CLAUDE.md rule 1), so
+# it is legitimately absent on a correct install and ships no stubs. The single
+# import is inside `adapters/s3.py::_resolve_client`, guarded, and its
+# ImportError is a reported WORM state (`worm_unknown`), not a crash.
+[[tool.mypy.overrides]]
+module = ["boto3"]
+ignore_missing_imports = true
+
 # The hook classes MUST subclass the host's (untyped) base classes and use
 # the host's (untyped) decorators — that is the integration contract itself.
 [[tool.mypy.overrides]]
