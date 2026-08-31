@@ -10,11 +10,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from conftest import PAYLOAD_TYPE
 from fastapi.testclient import TestClient
+from waxseal_server.api.deps import Services
 from waxseal_server.app import Settings, create_app
+from waxseal_server.runtime.cli import READ_ONLY_COMMANDS
+
+from waxseal.sources.rotation import open_segmented
 
 
 @pytest.fixture
@@ -33,6 +38,40 @@ def _trail(tmp_path: Path) -> Path:
     return tmp_path / "data" / "chains" / "default" / "trail.jsonl"
 
 
+def _services(client: TestClient) -> Services:
+    return cast(Services, client.app.state.services)  # type: ignore[attr-defined]
+
+
+def _lacking(client: TestClient, monkeypatch: pytest.MonkeyPatch, command: str) -> None:
+    """Make this server's waxseal build lack `command`, whatever it really ships.
+
+    Naming a planned command as the stand-in for "absent" is what expired four
+    tests the day Workstream B shipped `segments` (waxseal-fg4.16). The property
+    under test is not about any one command: it is that a capability this build
+    cannot run is REPORTED, not omitted, and that its screen says so instead of
+    borrowing argparse's exit 2 as a verdict. Controlling the condition rather
+    than picking a name states that property in a form the release calendar
+    cannot invalidate.
+    """
+    cli = _services(client).cli
+    shipped = cli.available()
+    assert command in shipped, f"{command!r} must really ship, or this proves nothing"
+    monkeypatch.setattr(cli, "available", lambda: shipped - {command})
+
+
+def _rotate(trail: Path, times: int = 2) -> None:
+    """Seal `trail` into a real segment group with the library's own rotation.
+
+    Hand-written segment files would let the fixture agree with the test and
+    disagree with `open_segmented`, which is the one thing a rotation fixture
+    exists to rule out.
+    """
+    for i in range(times):
+        open_segmented(trail, max_segment_bytes=1, notice=lambda _m: None).append(
+            payload={"rotated": i}, payload_type=PAYLOAD_TYPE
+        )
+
+
 class TestCapabilities:
     def test_it_reports_which_commands_this_build_has(self, client: TestClient) -> None:
         commands = client.get("/v1/capabilities").json()["commands"]
@@ -43,11 +82,42 @@ class TestCapabilities:
         self, client: TestClient
     ) -> None:
         # Omitting it would leave the UI unable to distinguish "this build lacks
-        # segments" from "the server forgot to answer". Present-and-false is the
+        # preflight" from "the server forgot to answer". Present-and-false is the
         # measured answer; a missing key is not.
+        #
+        # `preflight` (Workstream E), not `segments`: B shipped `segments` in
+        # 0.1.5 and this assertion inverted overnight. The REAL name is kept on
+        # purpose — it is the one the portal renders a workstream notice for —
+        # and the build-independent statement of the same property is below, so
+        # the day E ships this case can be re-pointed without losing coverage.
         commands = client.get("/v1/capabilities").json()["commands"]
-        assert commands["segments"] is False
         assert commands["preflight"] is False
+
+    def test_a_command_this_build_lacks_is_present_and_false_whatever_it_is(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _lacking(client, monkeypatch, "verify")
+        commands = client.get("/v1/capabilities").json()["commands"]
+        assert commands["verify"] is False
+        assert commands["report"] is True
+
+    def test_every_read_only_command_is_reported_one_way_or_the_other(
+        self, client: TestClient
+    ) -> None:
+        # A key for every command, never a filtered list: "not mentioned at all"
+        # is the third state this surface exists to make unrepresentable.
+        commands = client.get("/v1/capabilities").json()["commands"]
+        assert set(commands) == set(READ_ONLY_COMMANDS)
+        assert all(isinstance(value, bool) for value in commands.values())
+
+    def test_a_planned_command_that_has_shipped_is_reported_available(
+        self, client: TestClient
+    ) -> None:
+        # The other half of the gate, untested until B landed: `available()` is
+        # parsed from `--help`, so the flag has to turn true on its own. A stale
+        # false would hand an operator the "not yet" notice for a command their
+        # build can run.
+        assert client.get("/v1/capabilities").json()["commands"]["segments"] is True
 
 
 class TestVerifyEndpoint:
@@ -147,16 +217,69 @@ class TestExportProofEndpoint:
 
 
 class TestPlannedCommandsDegradeHonestly:
-    @pytest.mark.parametrize("command", ["segments", "preflight"])
+    @pytest.mark.parametrize("command", ["preflight"])
     def test_a_planned_screen_says_unavailable_rather_than_faking_a_verdict(
         self, stocked: TestClient, command: str
     ) -> None:
-        # Workstreams B4 and E ship these. Until then the screen must say the
+        # Workstream E ships `preflight`. Until then the screen must say the
         # capability is missing — never draw a verdict from argparse's exit 2.
+        # `segments` was the other parameter here until B shipped it; the list is
+        # the set of names the portal still renders a notice for, and the
+        # build-independent case below is what keeps shrinking it safe.
         body = stocked.get(f"/v1/chains/default/{command}").json()
         assert body["status"] == "unavailable"
         assert body["verdict"] is None
         assert body["exit_code"] is None
+
+    def test_a_screen_for_a_command_the_build_lacks_never_fakes_a_verdict(
+        self, stocked: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _lacking(stocked, monkeypatch, "verify")
+        body = stocked.get("/v1/chains/default/verify").json()
+        assert body["status"] == "unavailable"
+        assert body["verdict"] is None
+        assert body["exit_code"] is None
+        # Never executed, so there is nothing to mistake for output.
+        assert body["stdout"] == ""
+
+
+class TestSegmentsIsShippedNow:
+    """`segments` landed in 0.1.5 Workstream B, and this read had never run.
+
+    It is the one chain read whose subject is a DIRECTORY of sealed segments and
+    the rotation bindings between them (SPEC.md section 20), not a single trail
+    file. Handed the trail file it printed "no such segment directory" and exited
+    3, so a fully rotated, fully intact chain reported `absent` — "nothing was
+    read" — about a directory that does exist. B was forbidden from touching
+    `server/` to keep batch footprints disjoint, so the argument was never fixed
+    on this side (waxseal-fg4.16).
+    """
+
+    def test_the_read_is_handed_the_trail_directory(
+        self, stocked: TestClient, tmp_path: Path
+    ) -> None:
+        body = stocked.get("/v1/chains/default/segments").json()
+        assert body["argv"][-1] == str(_trail(tmp_path).parent)
+
+    def test_a_rotated_chain_gets_a_real_verdict(
+        self, stocked: TestClient, tmp_path: Path
+    ) -> None:
+        _rotate(_trail(tmp_path))
+        body = stocked.get("/v1/chains/default/segments").json()
+        assert body["status"] == "ok"
+        assert body["verdict"] == "ok"
+        assert body["exit_code"] == 0
+        assert "segment(s)" in body["stdout"]
+
+    def test_a_chain_that_has_not_rotated_is_absent_not_intact(
+        self, stocked: TestClient
+    ) -> None:
+        # Exit 3: nothing was checked. Rendering it as "ok" would report every
+        # segment of a trail that has none as found intact (CLAUDE.md rule 5).
+        body = stocked.get("/v1/chains/default/segments").json()
+        assert body["status"] == "absent"
+        assert body["verdict"] is None
+        assert "no sealed segments" in body["stderr"]
 
 
 class TestPublicReceiptRecords:

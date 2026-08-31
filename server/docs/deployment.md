@@ -253,9 +253,12 @@ the conformance ledger uses: written is not shipped.
 - **No 2FA and no session history.** The operator table tracks what it can
   actually observe — role, creation, whether a key has ever been used. Columns
   the server cannot fill are absent rather than rendered as em dashes.
-- **`segments` and `preflight` screens report `unavailable`.** They ship in
-  Workstreams B4 and E. Until then the API says the capability is absent
-  (`GET /v1/capabilities` reports them present-and-false) and the screens say so.
+- **The `preflight` screen reports `unavailable`.** It ships in Workstream E.
+  Until then the API says the capability is absent (`GET /v1/capabilities`
+  reports it present-and-false) and the screen says so. `segments` was in the
+  same position until Workstream B shipped it in 0.1.5; the capability gate is
+  parsed from `waxseal --help`, so that screen started rendering the verifier's
+  own output with no server change beyond the argument it is handed (below).
 - **No `.receipts` sidecar on the client side.** That is Workstream J2. This
   server already publishes the head a client would store, so the sidecar lands
   without a server change.
@@ -269,12 +272,17 @@ them, so an operator can reproduce any verdict on their own machine.
 
 Two consequences worth knowing:
 
-- Commands this build of waxseal does not have (`segments`, `preflight` — 0.1.5
-  Workstreams B4 and E) report `"status": "unavailable"` with a null verdict.
-  They are never run, because argparse also exits 2 and that would arrive
-  looking exactly like "unverifiable" — a verdict nobody computed.
+- Commands this build of waxseal does not have (`preflight` — 0.1.5 Workstream E)
+  report `"status": "unavailable"` with a null verdict. They are never run,
+  because argparse also exits 2 and that would arrive looking exactly like
+  "unverifiable" — a verdict nobody computed.
 - Exit 3 ("nothing was read") is reported as `"absent"`, never as a break. A
   tamper report against a file that does not exist is a false alarm.
+- `segments` is handed the DIRECTORY holding the trail, not the trail file: it
+  walks a segment group and the rotation bindings between its files (SPEC.md
+  section 20). A chain that has not rotated therefore reports `"absent"` with
+  "no sealed segments" on stderr — nothing was checked — rather than an `ok` that
+  would claim every segment of a trail with none was found intact.
 
 ## Receipt chain
 

@@ -12,6 +12,8 @@ module knows how to render an answer; it does not know who is allowed to ask.
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import Final
 
 from fastapi.responses import JSONResponse
 
@@ -21,6 +23,17 @@ from waxseal_server.domain.errors import InvalidIdentifier
 #: `report` is the one read whose stdout the server parses, because the UI needs
 #: the fields rather than the text. Everything else is handed over verbatim.
 JSON_REPORT_FLAG = "--json"
+
+#: Reads whose subject is the DIRECTORY holding the trail, not the trail file.
+#:
+#: `waxseal segments` walks a segment group and the rotation bindings between its
+#: files (SPEC.md section 20). Handed a trail file instead it printed "no such
+#: segment directory" and exited 3, so every chain — rotated or not, intact or
+#: not — reported `absent` about a directory that does exist. That is not a
+#: verdict anyone computed, and it is the state CLAUDE.md rule 5 forbids
+#: collapsing into. Workstream B shipped the command while forbidden from
+#: touching `server/`, so this side was never adjusted (waxseal-fg4.16).
+DIRECTORY_READS: Final[frozenset[str]] = frozenset({"segments"})
 
 
 def head_body(services: Services, chain_id: str) -> JSONResponse:
@@ -77,7 +90,7 @@ def cli_read_body(services: Services, trail: str, command: str, *args: str) -> J
     never from the request: the caller chooses which read to perform, never what
     to run.
     """
-    body = outcome_json(services.cli.run(command, trail, *args))
+    body = outcome_json(services.cli.run(command, read_target(command, trail), *args))
     if command == "report":
         try:
             body["report"] = json.loads(body["stdout"])
@@ -90,3 +103,12 @@ def cli_read_body(services: Services, trail: str, command: str, *args: str) -> J
 
 def report_args(command: str) -> tuple[str, ...]:
     return (JSON_REPORT_FLAG,) if command == "report" else ()
+
+
+def read_target(command: str, trail: str) -> str:
+    """The path this read is actually about.
+
+    Derived from the trail rather than taken from the request, so the caller
+    still chooses only which read to perform — never what to point it at.
+    """
+    return str(Path(trail).parent) if command in DIRECTORY_READS else trail

@@ -37,9 +37,11 @@ from waxseal_server.domain.operators import (
 from waxseal_server.runtime.cli import READ_ONLY_COMMANDS
 
 #: Reads offered over a live chain. Every one of these is in
-#: `READ_ONLY_COMMANDS`, and `segments`/`preflight` are here deliberately: they
-#: are not in this build, and the honest answer is "unavailable" from the CLI
-#: runner rather than a route that does not exist.
+#: `READ_ONLY_COMMANDS`. `preflight` is here deliberately although this build has
+#: no such command: the honest answer is "unavailable" from the CLI runner rather
+#: than a route that does not exist. `segments` was in that position until 0.1.5
+#: Workstream B shipped it, and the route needed no change — which is the point
+#: of gating on `available()` instead of on a hard-coded "not yet".
 CHAIN_READS: Final[tuple[str, ...]] = ("verify", "report", "inspect", "segments", "preflight")
 
 

@@ -197,11 +197,44 @@ class TestImportEndpoints:
         body = client.get(f"/v1/imports/{import_id}/entries").json()
         assert [e["header"]["seq"] for e in body["entries"]] == [0, 1, 2, 3]
 
-    def test_segments_on_an_import_degrades_honestly(
+    def test_a_planned_read_on_an_import_degrades_honestly(
         self, client: TestClient, tmp_path: Path
     ) -> None:
+        # Was `test_segments_on_an_import_degrades_honestly` until Workstream B
+        # shipped `segments` (waxseal-fg4.16). KEPT, re-pointed at `preflight`
+        # (Workstream E): the property belongs to the import surface, not to one
+        # command — a read this build cannot run says so, and never borrows
+        # argparse's exit 2 as a verdict. The shipped half of the same surface is
+        # the case below, so both directions are now covered here.
         import_id = self._upload(client, tmp_path).json()["import_id"]
-        assert client.get(f"/v1/imports/{import_id}/segments").json()["status"] == "unavailable"
+        body = client.get(f"/v1/imports/{import_id}/preflight").json()
+        assert body["status"] == "unavailable"
+        assert body["verdict"] is None
+        assert body["exit_code"] is None
+
+    def test_segments_on_an_imported_sealed_segment_gets_a_real_verdict(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        # `segments` reads the DIRECTORY holding the trail, not the trail file,
+        # so on the import surface that is the import's own directory. An import
+        # named as a numbered segment is a segment group of one, and it gets a
+        # verdict rather than the "not shipped" placeholder.
+        import_id = self._upload(client, tmp_path, name="trail.00000.jsonl").json()["import_id"]
+        body = client.get(f"/v1/imports/{import_id}/segments").json()
+        assert body["status"] == "ok"
+        assert body["verdict"] == "ok"
+        assert body["exit_code"] == 0
+
+    def test_segments_on_an_unrotated_import_is_absent_not_intact(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        # An ordinary uploaded trail is not a segment group. Exit 3 — nothing was
+        # checked — must not arrive as "every segment intact" (CLAUDE.md rule 5).
+        import_id = self._upload(client, tmp_path).json()["import_id"]
+        body = client.get(f"/v1/imports/{import_id}/segments").json()
+        assert body["status"] == "absent"
+        assert body["verdict"] is None
+        assert "no sealed segments" in body["stderr"]
 
     def test_a_well_formed_but_unknown_import_is_404(self, client: TestClient) -> None:
         assert client.get(f"/v1/imports/{'ab' * 16}/verify").status_code == 404

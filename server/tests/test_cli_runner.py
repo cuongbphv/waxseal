@@ -38,16 +38,38 @@ class TestAvailability:
         assert {"verify", "report", "inspect", "tail", "head"} <= cli.available()
 
     def test_a_command_this_build_does_not_have_is_reported_unavailable(
-        self, cli: WaxsealCli, trail: Path
+        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # `segments` and `preflight` are planned (Workstreams B4 and E) and not
-        # in this build. Running them anyway would make argparse's exit 2 look
-        # like the verifier's exit 2 — "unverifiable" — which is a verdict
-        # nobody computed. Absent capability is its own state.
-        outcome = cli.run("segments", str(trail))
+        # Running it anyway would make argparse's exit 2 look like the verifier's
+        # exit 2 — "unverifiable" — which is a verdict nobody computed. Absent
+        # capability is its own state.
+        #
+        # The fixture withholds a command that DOES ship rather than naming one
+        # that does not, because this test used to name `segments` and inverted
+        # the day Workstream B shipped it (waxseal-fg4.16). What is being tested
+        # is the condition — a name absent from `available()` — and a server
+        # pointed at an older or newer waxseal is exactly how that arises in
+        # production.
+        shipped = cli.available()
+        assert "verify" in shipped
+        monkeypatch.setattr(cli, "available", lambda: shipped - {"verify"})
+        outcome = cli.run("verify", str(trail))
         assert outcome.status == "unavailable"
         assert outcome.verdict is None
         assert outcome.exit_code is None
+
+    def test_a_real_planned_command_is_absent_from_this_build(self, cli: WaxsealCli) -> None:
+        # The name the portal renders a workstream notice for. When Workstream E
+        # ships `preflight` this assertion inverts, and the fix is to re-point it
+        # at the next planned command — never to drop the case.
+        assert "preflight" not in cli.available()
+
+    def test_a_planned_command_that_has_shipped_is_reported_available(
+        self, cli: WaxsealCli
+    ) -> None:
+        # `segments` shipped in 0.1.5 Workstream B. `available()` parses `--help`
+        # precisely so the flag flips with the build and not with a frozen list.
+        assert "segments" in cli.available()
 
     def test_an_unavailable_command_is_never_executed(
         self, cli: WaxsealCli, trail: Path
