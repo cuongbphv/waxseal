@@ -128,6 +128,50 @@ pip install waxseal
 Released on [PyPI](https://pypi.org/project/waxseal/). From source:
 `pip install git+https://github.com/cuongbphv/waxseal`
 
+> **Looking for WaxSeal SDK?** `waxseal` on PyPI is this library, an audit hash
+> chain. The **WaxSeal SDK** on npm (`@waxseal/verify`, `@waxseal/mcp`, and the
+> service at waxseal.id) is an unrelated Ed25519 identity product by a different
+> author: different language, different problem, no connection to this project.
+> If you came here wanting to sign and verify agent identities, that is the one
+> you want. [docs/research/landscape.md](docs/research/landscape.md) § 3 sets the
+> two apart in full.
+
+## Capability extras
+
+Zero dependencies describes the core, not a ceiling on what waxseal can do. The
+core keeps `dependencies = []`, which is an invariant rather than a preference,
+and capability that needs a third-party client arrives through an optional extra
+plus injection: you install the client, you construct it, you pass it in, and
+waxseal never imports it itself. `S3Backend` and `PostgresBackend` under
+[Storage backends](#storage-backends) are the pattern, and the extras exist so
+`pip` can fetch a compatible client for you rather than because waxseal needs
+one.
+
+Shipped today:
+
+| Extra | Install | Client it fetches | What you can then inject |
+|---|---|---|---|
+| `s3` | `pip install waxseal[s3]` | `boto3` | an S3 client for `S3Backend` (conditional-PUT appends) |
+| `postgres` | `pip install waxseal[postgres]` | `psycopg[binary]>=3.1` | a connection factory for `PostgresBackend` |
+
+(`dev` also exists, for running the test suite. It is not a capability extra.)
+
+Planned, and **not yet shipped** — do not write code against these:
+
+| Extra | Intended capability |
+|---|---|
+| `rfc3161` | verifying a timestamp token's CMS signature and certificate chain. Today `Rfc3161AnchorSink` checks structure only, so a filed receipt means "a well-formed token committing to these bytes came back from this URL", never "a genuine TSA issued it" — `openssl ts -verify` is the current answer |
+| `evm` | the on-chain ledger layer |
+
+Both are named in the 0.1.5 contract, and neither appears in `pyproject.toml` as
+of 0.1.4, so asking for one installs nothing extra. This repository does not
+describe an unshipped extra as available: written-but-unwired is not shipped, and
+[docs/paper/conformance.md](docs/paper/conformance.md) keeps that ledger row by
+row.
+
+Adding a *hard* dependency is a different question, and the answer is no. Extras
+are the sanctioned route.
+
 ## Usage
 
 ```python
@@ -595,6 +639,10 @@ separation of authority is what the whole security argument rests on.
   shape, authentication, and the trusted-writer trust model.
 - [DESIGN.md](DESIGN.md) covers the algorithm choices and the academic literature
   behind them.
+- [docs/research/](docs/research/) holds the positioning notes: how waxseal
+  differs from adjacent projects ([landscape.md](docs/research/landscape.md)) and
+  which ideas were read off a public distributed-ledger design without adopting
+  the service ([hedera-lessons.md](docs/research/hedera-lessons.md)).
 
 ## License
 
