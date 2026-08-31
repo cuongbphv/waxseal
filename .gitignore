@@ -40,3 +40,20 @@ examples/poc-out/
 poc-out/
 
 .docs
+
+# server/web — the portal's dependencies and its build output. The built assets
+# land inside the Python package so the Docker image carries them without a
+# second copy step; they are a build artefact, not a source file, and CI rebuilds
+# them on every run.
+node_modules/
+server/waxseal_server/static/
+
+# Tool caches produced by the server's own suite, which runs from server/ and
+# so writes its own copies rather than the repo-root ones already ignored above.
+server/.coverage
+server/.mypy_cache/
+server/.pytest_cache/
+server/.ruff_cache/
+
+# Playwright MCP scratch output.
+.playwright-mcp/

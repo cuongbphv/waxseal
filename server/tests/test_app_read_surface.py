@@ -1,0 +1,390 @@
+"""Verify/report/inspect over HTTP, and honest reporting of what this build has.
+
+Every one of these is read-only. There is no route that edits or deletes an
+entry, and the structural test at the bottom is what keeps it that way as the
+surface grows: "verify reports, never repairs" has to hold for the UI too, and a
+convention only holds until someone adds one more handler.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+from waxseal_server.app import Settings, create_app
+
+
+@pytest.fixture
+def client(tmp_path: Path) -> TestClient:
+    return TestClient(create_app(Settings(data_dir=tmp_path / "data")))
+
+
+@pytest.fixture
+def stocked(client: TestClient, envelopes: list[dict[str, Any]]) -> TestClient:
+    for env in envelopes:
+        client.post("/v1/chains/default/entries", json=env)
+    return client
+
+
+def _trail(tmp_path: Path) -> Path:
+    return tmp_path / "data" / "chains" / "default" / "trail.jsonl"
+
+
+class TestCapabilities:
+    def test_it_reports_which_commands_this_build_has(self, client: TestClient) -> None:
+        commands = client.get("/v1/capabilities").json()["commands"]
+        assert commands["verify"] is True
+        assert commands["report"] is True
+
+    def test_a_planned_command_is_reported_absent_not_omitted(
+        self, client: TestClient
+    ) -> None:
+        # Omitting it would leave the UI unable to distinguish "this build lacks
+        # segments" from "the server forgot to answer". Present-and-false is the
+        # measured answer; a missing key is not.
+        commands = client.get("/v1/capabilities").json()["commands"]
+        assert commands["segments"] is False
+        assert commands["preflight"] is False
+
+
+class TestVerifyEndpoint:
+    def test_an_intact_chain_verifies(self, stocked: TestClient) -> None:
+        body = stocked.get("/v1/chains/default/verify").json()
+        assert body["status"] == "ok"
+        assert body["exit_code"] == 0
+        assert body["verdict"] == "ok"
+
+    def test_the_response_carries_the_argv_that_produced_it(
+        self, stocked: TestClient
+    ) -> None:
+        assert "verify" in stocked.get("/v1/chains/default/verify").json()["argv"]
+
+    def test_a_chain_that_does_not_exist_is_absent_not_broken(
+        self, client: TestClient
+    ) -> None:
+        body = client.get("/v1/chains/nothinghere/verify").json()
+        assert body["status"] == "absent"
+        assert body["verdict"] is None
+
+    def test_a_tampered_chain_is_broken(self, stocked: TestClient, tmp_path: Path) -> None:
+        trail = _trail(tmp_path)
+        lines = trail.read_text().splitlines()
+        record = json.loads(lines[2])
+        record["header"]["ts"] = "2000-01-01T00:00:00+00:00"
+        lines[2] = json.dumps(record, sort_keys=True, separators=(",", ":"))
+        trail.write_text("\n".join(lines) + "\n")
+
+        body = stocked.get("/v1/chains/default/verify").json()
+        assert body["status"] == "broken"
+        assert body["exit_code"] == 1
+
+    def test_an_unknown_fingerprint_is_unverifiable_never_broken(
+        self, stocked: TestClient, tmp_path: Path
+    ) -> None:
+        trail = _trail(tmp_path)
+        lines = trail.read_text().splitlines()
+        record = json.loads(lines[2])
+        record["header"]["hash_version"] = "ff" * 32
+        lines[2] = json.dumps(record, sort_keys=True, separators=(",", ":"))
+        trail.write_text("\n".join(lines) + "\n")
+
+        body = stocked.get("/v1/chains/default/verify").json()
+        assert body["status"] == "unverifiable"
+        assert body["exit_code"] == 2
+
+    def test_an_invalid_chain_id_is_400(self, client: TestClient) -> None:
+        assert client.get("/v1/chains/a%20b/verify").status_code == 400
+
+
+class TestReportEndpoint:
+    def test_the_parsed_report_comes_through(self, stocked: TestClient) -> None:
+        body = stocked.get("/v1/chains/default/report").json()
+        assert body["report"]["inventory"]["entries_total"] == 5
+
+    def test_the_scope_statement_is_carried_verbatim(self, stocked: TestClient) -> None:
+        body = stocked.get("/v1/chains/default/report").json()
+        assert body["report"]["scope"]["id"] == "waxseal-scope-v1"
+
+    def test_dropped_writes_stays_null_when_never_measured(
+        self, stocked: TestClient
+    ) -> None:
+        body = stocked.get("/v1/chains/default/report").json()
+        assert body["report"]["completeness"]["dropped_writes"] is None
+
+    def test_a_missing_chain_reports_absent_with_no_report_body(
+        self, client: TestClient
+    ) -> None:
+        body = client.get("/v1/chains/nothinghere/report").json()
+        assert body["status"] == "absent"
+        assert body["report"] is None
+
+
+class TestInspectEndpoint:
+    def test_inspect_returns_its_stdout(self, stocked: TestClient) -> None:
+        assert stocked.get("/v1/chains/default/inspect").json()["stdout"]
+
+
+class TestExportProofEndpoint:
+    def test_a_bundle_is_returned_for_a_present_seq(self, stocked: TestClient) -> None:
+        body = stocked.get("/v1/chains/default/export-proof/2").json()
+        assert body["status"] == "ok"
+        bundle = json.loads(body["stdout"])
+        assert bundle["bundle_version"] == "waxseal-proof-bundle-v1"
+        assert bundle["header"]["seq"] == 2
+
+    def test_a_seq_past_the_head_is_reported_not_crashed(
+        self, stocked: TestClient
+    ) -> None:
+        assert stocked.get("/v1/chains/default/export-proof/99").json()["exit_code"] == 1
+
+    def test_a_negative_seq_is_400_and_never_reaches_argv(
+        self, stocked: TestClient
+    ) -> None:
+        assert stocked.get("/v1/chains/default/export-proof/-1").status_code == 400
+
+
+class TestPlannedCommandsDegradeHonestly:
+    @pytest.mark.parametrize("command", ["segments", "preflight"])
+    def test_a_planned_screen_says_unavailable_rather_than_faking_a_verdict(
+        self, stocked: TestClient, command: str
+    ) -> None:
+        # Workstreams B4 and E ship these. Until then the screen must say the
+        # capability is missing — never draw a verdict from argparse's exit 2.
+        body = stocked.get(f"/v1/chains/default/{command}").json()
+        assert body["status"] == "unavailable"
+        assert body["verdict"] is None
+        assert body["exit_code"] is None
+
+
+class TestPublicReceiptRecords:
+    def test_the_raw_receipt_records_are_public(self, stocked: TestClient) -> None:
+        # A third party should not have to take the server's own verdict on the
+        # server's own log. Handing over the records lets them recompute it.
+        body = stocked.get("/public/v1/chains/default/receipts").json()
+        assert [r["receipt_seq"] for r in body["receipts"]] == [0, 1, 2, 3, 4]
+
+    def test_an_absent_log_is_404_not_an_empty_list(self, client: TestClient) -> None:
+        assert client.get("/public/v1/chains/default/receipts").status_code == 404
+
+
+class TestNoWriteSurfaceAnywhere:
+    """Every mutating route, enumerated — and what each one is allowed to touch.
+
+    The list is asserted exactly rather than filtered, so a sixth one cannot
+    arrive unnoticed. Three of them append (a chain entry, a witness
+    checkpoint, an imported file); three write the server's OWN records
+    (operators and keys). None edits, deletes, reorders or repairs a chain
+    entry, and no scope exists that would let one — see
+    `test_operators_domain.py::TestScopes::test_no_role_can_edit_an_entry`.
+    """
+
+    #: route -> what it mutates. Membership is the assertion; the value is the
+    #: justification, so adding a route means writing down what it may touch.
+    EXPECTED_MUTATIONS = {
+        ("/v1/chains/{chain_id}/entries", "post"): "appends one chain entry under CAS",
+        ("/v1/witness/{witness_id}", "post"): "deposits a checkpoint with a witness",
+        ("/v1/imports", "post"): "stores an uploaded trail, read-only",
+        ("/v1/operators", "post"): "registers an operator (server records)",
+        ("/v1/keys", "post"): "mints an API key (server records)",
+        ("/v1/keys/{key_id}/revoke", "post"): "revokes an API key (server records)",
+        ("/v1/operators/{username}", "patch"): "corrects an operator (server records)",
+    }
+
+    def test_there_is_no_delete_anywhere(self, client: TestClient) -> None:
+        # Not for an entry, and not for an operator either: an operator who
+        # acted is part of the history, and removing the row would orphan every
+        # key that names them. Deactivation is the reversible alternative.
+        for _, method in self.EXPECTED_MUTATIONS:
+            assert method != "delete"
+
+    def test_the_mutating_routes_are_exactly_the_documented_ones(
+        self, client: TestClient
+    ) -> None:
+        paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
+        mutating = {
+            (path, method)
+            for path, operations in paths.items()
+            for method in operations
+            if method in {"post", "put", "patch", "delete"}
+        }
+        assert mutating == set(self.EXPECTED_MUTATIONS)
+
+    def test_no_mutating_route_addresses_an_existing_entry(
+        self, client: TestClient
+    ) -> None:
+        # An entry is addressed by its seq. No route that writes may name one:
+        # that is what "verify reports, never repairs" looks like in a URL table.
+        for path, _ in self.EXPECTED_MUTATIONS:
+            assert "{seq}" not in path, path
+
+
+class TestReadSurfaceRespectsTheCredential:
+    @pytest.fixture
+    def keyed(self, tmp_path: Path) -> TestClient:
+        return TestClient(
+            create_app(Settings(data_dir=tmp_path / "data", api_key="chain-write-key"))
+        )
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v1/chains/default/verify",
+            "/v1/chains/default/report",
+            "/v1/chains/default/inspect",
+            "/v1/chains/default/export-proof/0",
+            "/v1/chains/default/segments",
+            "/v1/chains/default/preflight",
+        ],
+    )
+    def test_every_read_route_refuses_an_unauthenticated_caller(
+        self, keyed: TestClient, path: str
+    ) -> None:
+        assert keyed.get(path).status_code == 401
+
+
+class TestBadIdsOnTheReadSurface:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v1/chains/a%20b/report",
+            "/v1/chains/a%20b/inspect",
+            "/v1/chains/a%20b/export-proof/0",
+            "/public/v1/chains/a%20b/receipts",
+        ],
+    )
+    def test_a_bad_chain_id_is_400_before_anything_runs(
+        self, client: TestClient, path: str
+    ) -> None:
+        assert client.get(path).status_code == 400
+
+
+class TestPublicReceiptCrossCheck:
+    """Published because the comparison needs no trust in the server to repeat.
+
+    The server holds the acknowledgments and the trail; anyone holding both
+    (they are both public) reaches the same verdict. That is what makes it
+    evidence rather than an assurance.
+    """
+
+    def test_an_untouched_chain_agrees_with_its_receipts(
+        self, stocked: TestClient
+    ) -> None:
+        body = stocked.get("/public/v1/chains/default/receipts/cross-check").json()
+        assert body == {
+            "verdict": "ok",
+            "checked": 5,
+            "reason": None,
+            "broken_seq": None,
+            "exit_code": 0,
+        }
+
+    def test_a_self_consistent_rewrite_is_caught_here_and_not_by_verify(
+        self, stocked: TestClient, tmp_path: Path
+    ) -> None:
+        from waxseal.domain.hashing import compute_entry_hash
+        from waxseal.domain.header import header_from_obj
+
+        trail = _trail(tmp_path)
+        lines = trail.read_text().splitlines()
+        record = json.loads(lines[0])
+        record["header"]["ts"] = "2000-01-01T00:00:00+00:00"
+        record["entry_hash"] = compute_entry_hash(header_from_obj(record["header"]))
+        lines[0] = json.dumps(record, sort_keys=True, separators=(",", ":"))
+        trail.write_text("\n".join(lines) + "\n")
+
+        body = stocked.get("/public/v1/chains/default/receipts/cross-check").json()
+        assert body["verdict"] == "broken"
+        assert body["reason"] == "receipt_mismatch"
+        assert body["broken_seq"] == 0
+
+    def test_no_receipts_reports_not_recorded_never_zero(self, client: TestClient) -> None:
+        body = client.get("/public/v1/chains/default/receipts/cross-check").json()
+        assert body["checked"] is None
+        assert body["reason"] == "not_recorded"
+
+    def test_an_invalid_chain_id_is_400(self, client: TestClient) -> None:
+        assert client.get("/public/v1/chains/a%20b/receipts/cross-check").status_code == 400
+
+
+class TestADamagedReceiptLogIsReportedNotCrashed:
+    def test_reading_the_records_is_422_with_a_label(
+        self, stocked: TestClient, tmp_path: Path
+    ) -> None:
+        # "I could not read the log" must not arrive as a 500, and must not
+        # arrive as the 404 that means "there is no log".
+        (tmp_path / "data" / "chains" / "default" / "receipts.jsonl").write_text("{not json\n")
+        resp = stocked.get("/public/v1/chains/default/receipts")
+        assert resp.status_code == 422
+        assert resp.json()["error"] == "damaged_receipt_log"
+
+    def test_the_cross_check_reports_it_as_a_break(
+        self, stocked: TestClient, tmp_path: Path
+    ) -> None:
+        (tmp_path / "data" / "chains" / "default" / "receipts.jsonl").write_text("{not json\n")
+        body = stocked.get("/public/v1/chains/default/receipts/cross-check").json()
+        assert body["verdict"] == "broken"
+        assert body["reason"] == "malformed_receipt_record"
+
+
+class TestSummaryEndpoint:
+    """One request per dashboard row.
+
+    It reports counts and identities and no verdict at all — counting lines is
+    not verifying them, and a row that implied otherwise would be claiming a
+    check nobody ran. The verdict is a separate call, to the CLI.
+    """
+
+    def test_it_reports_counts_head_and_receipt(self, stocked: TestClient) -> None:
+        body = stocked.get("/v1/chains/default/summary").json()
+        assert body["chain_id"] == "default"
+        assert body["entries"] == 5
+        assert body["size_bytes"] > 0
+        assert body["head"]["seq"] == 4
+        assert body["receipt"]["receipt_seq"] == 4
+
+    def test_an_empty_chain_has_a_null_head_not_a_zero_one(
+        self, client: TestClient
+    ) -> None:
+        # seq 0 is a real entry. `head: null` is the only honest way to say
+        # there is not one.
+        body = client.get("/v1/chains/nothinghere/summary").json()
+        assert body["head"] is None
+        assert body["receipt"] is None
+        assert body["entries"] == 0
+
+    def test_it_carries_no_verdict(self, stocked: TestClient) -> None:
+        assert "verdict" not in stocked.get("/v1/chains/default/summary").json()
+
+    def test_an_invalid_chain_id_is_400(self, client: TestClient) -> None:
+        assert client.get("/v1/chains/a%20b/summary").status_code == 400
+
+    def test_it_needs_the_credential_when_one_is_configured(
+        self, tmp_path: Path
+    ) -> None:
+        keyed = TestClient(create_app(Settings(data_dir=tmp_path / "d", api_key="k")))
+        assert keyed.get("/v1/chains/default/summary").status_code == 401
+
+
+class TestOnlyTheOfferedReadsAreRoutable:
+    """One route serves every CLI-backed chain read, driven by `CHAIN_READS`.
+
+    That is what makes adding Workstream B's `segments` screen a tuple entry
+    rather than a new handler — and it is also why the allowlist has to be
+    checked here: without it, the same route would happily pass `anchor` or
+    `install` down to the runner.
+    """
+
+    @pytest.mark.parametrize("command", ["anchor", "install", "cadence", "nonsense"])
+    def test_a_command_outside_the_offered_reads_is_404(
+        self, stocked: TestClient, command: str
+    ) -> None:
+        resp = stocked.get(f"/v1/chains/default/{command}")
+        assert resp.status_code == 404
+        assert resp.json()["error"] == "no_such_read"
+
+    @pytest.mark.parametrize("command", ["verify", "report", "inspect", "segments", "preflight"])
+    def test_every_offered_read_is_reachable(self, stocked: TestClient, command: str) -> None:
+        assert stocked.get(f"/v1/chains/default/{command}").status_code == 200

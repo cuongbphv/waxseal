@@ -1,0 +1,198 @@
+/* waxseal web — design tokens.
+ *
+ * Every colour, type step, radius and spacing value in this app is declared
+ * exactly once, here, and referenced by name everywhere else. No component
+ * stylesheet may contain a literal hex, a literal px type step, or a literal
+ * radius.
+ *
+ * Sources, in precedence order:
+ *   1. `Waxseal Portal v2.dc.html` — the delivered design. Where it disagrees
+ *      with the doc below, it wins: it is the artifact that was approved.
+ *   2. `DESIGN-apple.md` — the house system, for everything the portal
+ *      design does not pin down.
+ *
+ * The delivered design pins exact px type steps (13.5 / 12.5 / 11 …) rather
+ * than a named ramp, so the ramp below is numeric by necessity. Naming them
+ * here is still what keeps the steps out of component stylesheets.
+ */
+
+:root {
+  /* ---------------------------------------------------------------- colour */
+  /* Single interactive accent. There is no second one. */
+  --color-primary: #0066cc;
+  --color-primary-focus: #0071e3;
+  --color-primary-on-dark: #2997ff;
+
+  --color-ink: #1d1d1f;
+  --color-body: #1d1d1f;
+  --color-body-on-dark: #ffffff;
+  --color-body-muted: #cccccc;
+  --color-ink-muted-80: #333333;
+  --color-ink-muted-48: #7a7a7a;
+  /* The design's second muted step, for hints and column headers that must
+   * recede behind the already-muted body text. */
+  --color-ink-muted-2: #a1a1a6;
+
+  --color-divider-soft: #f0f0f0;
+  --color-hairline: #e0e0e0;
+
+  --color-canvas: #ffffff;
+  --color-canvas-parchment: #f5f5f7;
+  --color-surface-pearl: #fafafc;
+  --color-surface-ink: #1d1d1f;
+  --color-surface-chip-translucent: #d2d2d7;
+
+  --color-on-primary: #ffffff;
+  --color-on-dark: #ffffff;
+
+  /* Header chrome: white at 80% behind a saturating blur, per the design. */
+  --color-canvas-80: rgba(255, 255, 255, 0.8);
+  --header-blur: blur(20px) saturate(180%);
+
+  /* Text colours that carry a semantic without being a dot. These are darker
+   * than the dot fills because they have to pass as body text. */
+  --color-text-affirm: #1a7f37;
+  --color-text-caution: #b25000;
+  --color-text-destructive: #d70015;
+
+  /* Tint fills — the pale ground under a badge, a banner or a notice. */
+  --tint-blue: #eaf1fb;
+  --tint-blue-border: #b9d4f3;
+  --tint-green: #eaf6ed;
+  --tint-red: #fdecec;
+  --tint-amber: #fdf1e5;
+  --tint-neutral: #f5f5f7;
+
+  /* Status semantics — never used for interactive elements.
+   *
+   * These are NOT a second accent. They label a verdict the verifier
+   * returned; they never appear on a button, a link, or anything else that
+   * says "click me". Every status is ALSO carried by its word or its `title`,
+   * so the colour is redundant by construction and the screen is readable
+   * without it.
+   *
+   * Three families per state, because one colour cannot do three jobs: `dot`
+   * is the 8–9px fill, `text` is the same meaning at body contrast, `tint` is
+   * the ground behind them. */
+  --status-dot-ok: #34c759;
+  --status-dot-broken: #ff3b30;
+  --status-dot-unverifiable: #ff9500;
+  --status-dot-neutral: #d2d2d7;
+
+  --status-text-ok: #1a7f37;
+  --status-text-broken: #d70015;
+  --status-text-unverifiable: #b25000;
+  --status-text-neutral: #7a7a7a;
+
+  --status-tint-ok: #eaf6ed;
+  --status-tint-broken: #fdecec;
+  --status-tint-unverifiable: #fdf1e5;
+  --status-tint-neutral: #f5f5f7;
+
+  /* Kept as the names `states.ts` refers to, mapped onto the dot family. */
+  --status-ok: var(--status-dot-ok);
+  --status-broken: var(--status-dot-broken);
+  --status-unverifiable: var(--status-dot-unverifiable);
+  --status-absent: var(--status-dot-neutral);
+  --status-unavailable: var(--status-dot-neutral);
+
+  /* -------------------------------------------------------------- type */
+  --font-text:
+    system-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  --font-display:
+    system-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  /* The delivered design's exact steps. */
+  --fs-stat: 32px;
+  --fs-price: 28px;
+  --fs-h1: 24px;
+  --fs-h2: 17px;
+  --fs-h3: 16px;
+  --fs-h4: 15px;
+  --fs-lg: 14px;
+  --fs-md: 13.5px;
+  --fs-base: 13px;
+  --fs-sm: 12.5px;
+  --fs-xs: 12px;
+  --fs-2xs: 11.5px;
+  --fs-3xs: 11px;
+  --fs-4xs: 10.5px;
+
+  --lh-tight: 1.2;
+  --lh-body: 1.5;
+  --lh-mono: 1.85;
+  --ls-tight: -0.5px;
+  --ls-snug: -0.3px;
+  --ls-nav: -0.1px;
+  --ls-caps: 0.06em;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* ------------------------------------------------------------ spacing */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-9: 18px;
+  --space-10: 20px;
+  --space-11: 22px;
+  --space-12: 24px;
+  --space-14: 28px;
+  --space-16: 32px;
+  --space-20: 44px;
+
+  /* -------------------------------------------------------------- shape */
+  --radius-badge: 6px;
+  --radius-nav: 8px;
+  --radius-tile: 9px;
+  --radius-code: 10px;
+  --radius-control: 12px;
+  --radius-panel: 14px;
+  --radius-card: 18px;
+  --radius-pill: 9999px;
+  --radius-circle: 50%;
+
+  --hairline: 1px;
+  --focus-ring: 2px;
+
+  /* ------------------------------------------------------------- layout */
+  --sidebar-width: 238px;
+  --header-pad-y: 12px;
+  --content-pad-y: 28px;
+  --content-pad-x: 32px;
+  --content-gap: 18px;
+  --content-gap-lg: 20px;
+  --card-pad-y: 18px;
+  --card-pad-x: 20px;
+  --row-pad-y: 13px;
+
+  /* Widths the design gives its tables so a narrow window scrolls the table
+   * rather than the page. */
+  --table-min-trails: 900px;
+  --table-min-entries: 880px;
+  --table-min-imports: 820px;
+  --table-min-receipts: 780px;
+  --table-min-operators: 760px;
+  --table-min-keys: 940px;
+
+  /* Reading measures for the screens the design caps. */
+  --measure-narrow: 960px;
+  --measure-wide: 1060px;
+
+  --icon-nav: 17px;
+  --dot-size: 9px;
+  --dot-size-sm: 8px;
+  --avatar-size: 32px;
+
+  /* The system's only micro-interaction. */
+  --press-scale: 0.95;
+  --press-scale-soft: 0.97;
+}

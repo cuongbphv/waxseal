@@ -36,3 +36,60 @@ jobs:
       - run: uv run --extra dev python tools/gen_rfc3161_vectors.py
       - run: uv run --extra dev python tools/gen_consistency_vectors.py
       - run: uv run --extra dev python tools/gen_checkpoint_vectors.py
+
+  # The self-hosted server (docs/plans/waxseal-0.1.5-contract.md, Workstream I).
+  # A separate job with its own coverage floor: it is a separate application with
+  # its own dependencies, and mixing it into the wheel's gate would let one
+  # move the other.
+  server:
+    runs-on: ubuntu-latest
+    # The operator-store contract runs against BOTH adapters. Without a real
+    # database the Postgres half skips with a label, which is honest but means
+    # nobody ever runs it — so CI provides one.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: waxseal
+          POSTGRES_PASSWORD: waxseal-dev
+          POSTGRES_DB: waxseal
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U waxseal"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      WAXSEAL_TEST_DATABASE_URL: postgresql://waxseal:waxseal-dev@127.0.0.1:55432/waxseal
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.13"
+      # The load-bearing test in here runs the LIBRARY's own backend-conformance
+      # contract against the real server over TCP, using the shipped
+      # RemoteBackend unmodified. If that passes, a real waxseal client cannot
+      # tell this server apart from the backends waxseal ships with.
+      - run: uv sync --extra dev
+        working-directory: server
+      - run: uv run pytest --cov=waxseal_server
+        working-directory: server
+      - run: uv run mypy
+        working-directory: server
+
+  # The web UI is a build artifact, not a checked-in one: if it stops building,
+  # the image stops carrying a UI, and nothing else in CI would notice.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: npm ci || npm install
+        working-directory: server/web
+      - run: npx vue-tsc --noEmit
+        working-directory: server/web
+      - run: npm run build
+        working-directory: server/web

@@ -1,0 +1,156 @@
+@import './tokens.css';
+
+/* Reset and the global chassis.
+ *
+ * Elevation in this app comes from surface change and 1px hairlines only:
+ * there is no box-shadow anywhere. Everything beyond the reset lives in a
+ * component — the handful of globals below are the ones that would otherwise
+ * be repeated in every single scoped block.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas-parchment);
+  color: var(--color-body);
+  font-family: var(--font-text);
+  font-size: var(--fs-base);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  /* The page body never scrolls horizontally; wide content scrolls inside its
+   * own container. */
+  overflow-x: hidden;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+figure,
+ul,
+ol,
+dl,
+dd {
+  margin: 0;
+}
+
+ul,
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+img,
+svg {
+  max-width: 100%;
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+code,
+pre,
+kbd {
+  font-family: var(--font-mono);
+}
+
+pre {
+  margin: 0;
+}
+
+input,
+button,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+input::placeholder {
+  color: var(--color-ink-muted-2);
+}
+
+/* A visible focus ring everywhere, including on the `all: unset` buttons the
+ * design's markup uses: unsetting a button removes its focus ring too, and a
+ * keyboard operator auditing a trail needs to see where they are. */
+:focus-visible {
+  outline: var(--focus-ring) solid var(--color-primary-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-badge);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.muted {
+  color: var(--color-ink-muted-48);
+}
+
+.muted-2 {
+  color: var(--color-ink-muted-2);
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Visually hidden but read aloud — for the skip link and for the words that
+ * accompany a dot where the design shows only the dot. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--space-4);
+  top: calc(-1 * var(--space-20));
+  z-index: 20;
+  background: var(--color-canvas);
+  border: var(--hairline) solid var(--color-hairline);
+  border-radius: var(--radius-nav);
+  padding: var(--space-4) var(--space-6);
+  font-size: var(--fs-base);
+  transition: top 0.12s ease;
+}
+
+.skip-link:focus {
+  top: var(--space-4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

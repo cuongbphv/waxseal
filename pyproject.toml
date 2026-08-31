@@ -73,6 +73,11 @@ exclude = [
   ".claude",
   "tools/pm",
   "docs/assets",
+  # server/ is a separate application with its own dependencies and its own
+  # release story (a Docker image), the same standing contracts/ has. A library
+  # consumer downloading the waxseal sdist has no use for a FastAPI app and a
+  # Vue project, and every byte of it would be dead weight in the tarball.
+  "server",
 ]
 
 [tool.pytest.ini_options]

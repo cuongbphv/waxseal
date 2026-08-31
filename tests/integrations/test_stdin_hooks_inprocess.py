@@ -145,3 +145,105 @@ class TestToolResultFieldNaming:
             {"hook_event_name": "PostToolUse", "tool_response": "total 0\n"}
         )
         assert payload["tool_response"] == "total 0\n"
+
+
+class TestClaudeCodeRemoteTargetInProcess:
+    """The remote branch of the Claude Code hook, measured.
+
+    `test_claude_code_remote.py` drives this through a subprocess, which is the
+    honest contract test and invisible to coverage. These run the same code
+    in-process so the shipped logic is actually measured, and assert the same
+    facts.
+    """
+
+    @pytest.fixture()
+    def claude(self):
+        return importlib.import_module("waxseal.integrations.claude_code")
+
+    def test_an_http_trail_is_kept_as_a_string(self, monkeypatch, claude) -> None:
+        # Path("http://host") collapses the // and drops the scheme, so the
+        # target would silently become a local file named `http:`.
+        monkeypatch.setenv("WAXSEAL_TRAIL", "http://127.0.0.1:9/")
+        target = claude._trail_target()
+        assert isinstance(target, str)
+        assert target == "http://127.0.0.1:9/"
+
+    def test_an_https_trail_is_kept_as_a_string(self, monkeypatch, claude) -> None:
+        monkeypatch.setenv("WAXSEAL_TRAIL", "https://audit.example.test")
+        assert isinstance(claude._trail_target(), str)
+
+    def test_a_local_trail_is_still_a_path(self, monkeypatch, claude, tmp_path) -> None:
+        monkeypatch.setenv("WAXSEAL_TRAIL", str(tmp_path / "trail.jsonl"))
+        assert isinstance(claude._trail_target(), Path)
+
+    def test_an_explicit_chain_id_wins(self, monkeypatch, claude) -> None:
+        monkeypatch.setenv("WAXSEAL_CHAIN_ID", "waxseal")
+        assert claude._chain_id({"cwd": "/somewhere/else"}) == "waxseal"
+
+    def test_the_project_directory_names_the_chain(self, monkeypatch, claude) -> None:
+        monkeypatch.delenv("WAXSEAL_CHAIN_ID", raising=False)
+        assert claude._chain_id({"cwd": "/Users/dev/Projects/waxseal"}) == "waxseal"
+
+    @pytest.mark.parametrize(
+        ("cwd", "expected"),
+        [
+            ("/Users/dev/My Project (v2)", "my-project-v2"),
+            ("/Users/dev/UPPER", "upper"),
+            ("/Users/dev/__weird__", "weird"),
+            ("/Users/dev/...", "default"),
+        ],
+    )
+    def test_a_directory_name_is_folded_to_a_safe_chain_id(
+        self, monkeypatch, claude, cwd, expected
+    ) -> None:
+        monkeypatch.delenv("WAXSEAL_CHAIN_ID", raising=False)
+        assert claude._chain_id({"cwd": cwd}) == expected
+
+    @pytest.mark.parametrize("event", [{}, {"cwd": ""}, {"cwd": 7}])
+    def test_an_absent_or_unusable_cwd_falls_back_to_default(
+        self, monkeypatch, claude, event
+    ) -> None:
+        monkeypatch.delenv("WAXSEAL_CHAIN_ID", raising=False)
+        assert claude._chain_id(event) == "default"
+
+    def test_an_unreachable_server_exits_zero_and_records_no_sidecar(
+        self, monkeypatch, claude, tmp_path, capsys
+    ) -> None:
+        # The observer contract, and the reason record_drops is off for a URL:
+        # a remote trail has no next-to for a sidecar, and asking for one raises
+        # in AuditLog.open before the append is ever attempted.
+        monkeypatch.setenv("WAXSEAL_TRAIL", "http://127.0.0.1:1")
+        monkeypatch.setenv("WAXSEAL_CHAIN_ID", "waxseal")
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"hook_event_name": "Stop"})))
+
+        assert claude.main() == 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "waxseal-audit" in captured.err
+        assert not list(tmp_path.iterdir())
+
+    def test_a_remote_trail_that_cannot_be_opened_writes_no_sidecar(
+        self, monkeypatch, claude, tmp_path, capsys
+    ) -> None:
+        # The local path records the loss in a `.drops` sidecar NEXT TO the
+        # trail. A URL has no next-to, so this branch must return without
+        # inventing a location — a file called `http:` in the working directory
+        # would be a worse outcome than the unrecorded drop it was avoiding.
+        #
+        # Forced, because `AuditLog.open` on a URL builds a backend without
+        # connecting and so has no natural failure: the branch is defensive, and
+        # a defensive branch nothing exercises is a branch nobody has run.
+        def refuse(*_args, **_kwargs):
+            raise RuntimeError("simulated: cannot construct the remote backend")
+
+        monkeypatch.setenv("WAXSEAL_TRAIL", "http://127.0.0.1:1")
+        monkeypatch.setenv("WAXSEAL_CHAIN_ID", "waxseal")
+        monkeypatch.setattr(claude.AuditLog, "open", refuse)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"hook_event_name": "Stop"})))
+        monkeypatch.chdir(tmp_path)
+
+        assert claude.main() == 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "cannot open trail" in captured.err
+        assert not list(tmp_path.iterdir())

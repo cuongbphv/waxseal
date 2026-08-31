@@ -88,7 +88,7 @@ _RUNNER_USAGE = {
     "openclaw": (
         "OpenClaw keeps its own audit ledger but prunes it (30 days, 100k rows) and\n"
         "hashes no row. Chain it from a timer — nothing runs on the agent's path:\n\n"
-        "  */5 * * * * python -m waxseal.integrations.openclaw\n\n"
+        f"  */5 * * * * {sys.executable} -m waxseal.integrations.openclaw\n\n"
         "Trail: $OPENCLAW_HOME/audit/trail.jsonl (default ~/.openclaw/audit/trail.jsonl).\n"
         "Verify anytime: waxseal verify ~/.openclaw/audit/trail.jsonl\n"
         "Requires the `openclaw` CLI on PATH and a running gateway to answer it."
@@ -197,7 +197,15 @@ def _config_name(target: str) -> str:
 
 
 def _config_snippet(target: str, shim: Path) -> str:
-    cmd = f"python3 {shim}"
+    # sys.executable, never a bare `python3`: the interpreter on PATH is not
+    # necessarily the one that has waxseal installed. When it is not, every hook
+    # event is dropped with a label nobody reads and the trail stays empty while
+    # the hooks look installed — which is exactly what happened on the
+    # repository owner's machine (0.1.5 plan, Workstream D1). The interpreter
+    # running `waxseal install` demonstrably has waxseal, so it is the one to
+    # name. The shim keeps its `#!/usr/bin/env python3` shebang, which is a
+    # fail-open the host may deliberately override.
+    cmd = f"{sys.executable} {shim}"
     if target == "cursor":
         events = (
             "beforeShellExecution", "afterShellExecution", "beforeMCPExecution",

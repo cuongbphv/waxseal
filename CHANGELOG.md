@@ -5,6 +5,160 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`server/`: a self-hosted chain server, witness, and public read point, with a
+  read-only web portal** (0.1.5 plan, Workstream I). It is a separate application, not
+  part of the wheel: CLAUDE.md rule 1 constrains the wheel's `[project] dependencies`,
+  and `server/` carries its own stack (FastAPI + uvicorn) on the same footing as
+  `contracts/`. Nothing in it is packaged into `waxseal`.
+
+  The split inside it is the load-bearing decision. The **write** path uses waxseal as a
+  library: a posted envelope goes to `JSONLBackend.append`, whose builder runs while the
+  backend's own file lock is held, so REMOTE.md section 4's compare-and-set is atomic
+  with the append rather than a check racing beside it. Every **read/verify** surface
+  shells out to `python -m waxseal.cli` and reports its exit code, because the CLI is the
+  stable contract and a server computing verdicts of its own would be a second opinion
+  for operators to reconcile. The server never re-derives an `entry_hash`, and no route
+  edits, deletes, reorders or repairs anything — a test enumerates every mutating route in
+  the OpenAPI schema and fails if a third one appears.
+
+  Three authorities are kept apart: the chain API (`WAXSEAL_API_KEY`), the witness
+  (`WAXSEAL_WITNESS_API_KEY`, and the chain key is refused there — REMOTE.md section 8),
+  and a credential-free public read point with no write route on it at all. That last one
+  is the mirror-node pattern from Workstream G4, adopted as architecture rather than as a
+  permission bit.
+
+- **The server maintains its own receipt chain** (REMOTE.md section 10, frame from
+  SPEC.md section 19): a running hash over what it has acknowledged, durable across
+  restarts, returned as `receipt_seq`/`receipt_head` on every `201`. It is published for
+  anyone to check without a credential — the raw records, the server's own
+  recomputation, and a **cross-check against the stored trail** — because a receipt chain
+  only the server can evaluate is a promise rather than evidence.
+
+  The cross-check is the half that earns the feature. Recomputing the log asks whether the
+  acknowledgments are internally consistent, and stays `ok` after an edit to the *trail*
+  because the log was not touched. The cross-check asks whether entry `seq` still carries
+  the hash that was acknowledged for it, which is what catches a **self-consistent** local
+  rewrite — one that recomputes `entry_hash` so plain `verify` passes. The receipt is the
+  memory the rewriter does not hold. Reasons are SPEC.md section 19's `receipt_mismatch`
+  and `receipt_beyond_head`, and the honest limit is section 19's too: a rewrite that
+  curates both sides passes both checks.
+
+- **Imported trails.** Upload a foreign `.jsonl`/`.db`/`.sqlite` trail and the server
+  verifies it and shows the verdict. The stored copy is `chmod 0400` and lives in its own
+  id namespace, so no chain route can address it and no append path can reach it.
+
+- **Vue 3 + Vite web portal** in `server/web/`, built to `waxseal_server/static`, styled
+  to the delivered design. (The design sources — the `.dc.html` mockup, its reference
+  screenshots, and `DESIGN-apple.md` — live in the repository owner's untracked `.docs/`
+  and are deliberately not committed.) Read-only
+  throughout: there is no control that edits,
+  deletes or repairs anything, every verdict panel prints the `argv` that produced it,
+  and the frozen scope statement is printed verbatim rather than paraphrased. If the UI
+  was never built the API is unaffected and `/` says so in as many words, with
+  `GET /v1/meta` reporting `"web_ui": "not_built"` — a labelled absence, not a missing
+  page.
+
+- **Operators, roles and API keys, on PostgreSQL.** The server keeps its own records
+  in a real database (`WAXSEAL_SERVER_DATABASE_URL`); the trails do not, and that line is
+  deliberate. A trail stays a JSONL file so a third party can verify it with the stock
+  `waxseal verify` on their own machine — put it in the database and this server becomes
+  the only thing that can read it, which is exactly the trust concentration the public
+  read point exists to remove. The library and its CLI know nothing about PostgreSQL, and
+  the wheel's `dependencies` is still `[]`.
+
+  Authorisation is a scope check rather than a boolean. Two properties are enforced, not
+  merely intended: **no role can edit an entry**, because no such scope exists to grant
+  (a test walks every scope of every role), and **a writer cannot read the trail it
+  writes to** — the machine account an agent hook carries can extend the chain and
+  discover the tail it is extending, and nothing else, so a leaked hook key is not a
+  leaked audit history.
+
+  Seeding is what secures a deployment: a server with no credential anywhere is open and
+  says so at `GET /v1/meta`, and the moment the first key is minted it stops being open.
+  There is no separate "turn auth on" switch to forget. `WAXSEAL_API_KEY` survives as a
+  bootstrap credential and is reported as `is_operator: false`, so the portal never lists
+  it as a person.
+
+  A key's plaintext exists once, at mint. Only its SHA-256 is stored, so the server
+  cannot show a key twice — and cannot leak every key at once.
+
+- **`waxseal-server-admin`**, the deployment's admin entrypoint: `seed`, `operator-add`,
+  `operator-list`, `key-mint`, `key-list`, `key-revoke`. `seed` is idempotent so a deploy
+  script may re-run it; `key-mint` is deliberately not, because a second mint is a second
+  credential.
+
+- **An agent hook can write to the server.** `WAXSEAL_TRAIL` has always chosen where a
+  hook writes; an `http(s)://` value now makes it a chain server over REMOTE.md, so there
+  is no second configuration mechanism. Three things change for a URL target and each has
+  a reason: the value stays a `str` (`Path("http://host")` collapses the `//` and drops
+  the scheme, so the target would silently become a local file named `http:`);
+  `record_drops` is off, because a drop record is a sidecar NEXT TO the trail and a URL
+  has no next-to; and the chain gets an id derived from the event's own `cwd`, because
+  one server holds many projects' trails. The observer contract is unchanged — an
+  unreachable server costs a labelled notice on stderr and exit 0, never a vetoed tool
+  call.
+
+- **`GET /public/v1/scope`**, serving the frozen `waxseal-scope-v1` statement from
+  `waxseal.domain.report` itself. The portal prints it beside every verdict, so it must
+  not be retyped in JavaScript where it could drift, and it must not depend on a chain
+  existing: a qualification that disappears when there is nothing to qualify is not a
+  qualification.
+
+- **`server/Dockerfile` and `docker-compose.yml`**, plus `server/docs/deployment.md`
+  covering configuration, data layout, TLS termination at a reverse proxy, and what
+  self-hosting does and does not buy.
+
+### Fixed
+
+- **`waxseal install` printed a bare `python3`** (0.1.5 plan, Workstream D1). The
+  interpreter on `PATH` is not necessarily the one that has waxseal installed, and when
+  it is not, every hook event is dropped with a label nobody reads while the hooks look
+  installed — which is what happened on the repository owner's machine, leaving an empty
+  trail. The snippet an operator pastes now names `sys.executable`, the interpreter that
+  just ran `waxseal install` and therefore demonstrably has waxseal. The openclaw crontab
+  line had the same bug and the same fix. The shim keeps its `#!/usr/bin/env python3`
+  shebang, which is a fail-open a host may deliberately override.
+
+### Notes on honesty in the server's output
+
+Three states the server refuses to collapse, each with a test:
+
+- Commands this waxseal build does not have (`segments`, `preflight` — Workstreams B4
+  and E) report `"status": "unavailable"` with a **null** verdict, and are never executed.
+  argparse also exits 2, so running them would produce something indistinguishable from
+  "unverifiable" — a verdict nobody computed.
+- CLI exit 3 ("nothing was read") reports `"absent"`, never a break. A tamper report
+  against a file that does not exist is a false alarm.
+- The receipt-log check returns `checked: null` with `reason: "not_recorded"` when there
+  is no log, which is never rendered as a measured zero.
+
+### Structure
+
+`server/waxseal_server` is layered the way the library it serves is layered, with a
+one-way dependency arrow — `api/` → `runtime/`+`storage/` → `domain/` → `config` — and
+`tests/test_architecture.py` enforces it by parsing the imports rather than describing
+the rule in a README. `domain/` imports nothing that touches a filesystem, so the parsing
+and verdict rules are testable without standing a server up, and the check carries its own
+falsifiability receipt: add a forbidden import and it goes red. Each credential guard is
+built from one key and handed to one router, which is what makes REMOTE.md section 8's
+separation structural — the witness router cannot consult the chain key because it never
+receives it.
+
+### Tests
+
+`server/` has its own suite and its own 100% line-and-branch floor, deliberately kept out
+of the wheel's gate. The load-bearing test runs the library's own backend-conformance
+contract (`tests/adapters/backend_contract.py`, imported rather than restated) against
+the real server over TCP using the shipped `RemoteBackend`, `HTTPAnchorSink` and
+`HTTPWitness` unmodified — including the four-thread no-fork case. The compare-and-set
+race carries a falsifiability receipt: remove the precondition inside
+`ChainStore.append`'s builder and no 409 is ever served, both writers land at seq 0, and
+`verify_chain` reports the fork.
+
 ## [0.1.4] - 2026-08-29
 
 An independent re-analysis of the library (an arXiv-style paper plus a code-level

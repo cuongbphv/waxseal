@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "waxseal-server"
+version = "0.1.5"
+description = "Self-hosted chain server and read-only portal for waxseal trails."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Bui Phan Viet Cuong" }]
+
+# CLAUDE.md rule 1 constrains the WHEEL's `[project] dependencies`. This is a
+# separate application that is never packaged into that wheel (same precedent
+# as contracts/), so it may carry its own stack — FastAPI + uvicorn, fixed by
+# the repository owner 31/08/2026.
+dependencies = [
+    "waxseal",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    # Trail upload on the import screen is multipart; FastAPI needs this to
+    # parse it. A runtime need, not a test-time one.
+    "python-multipart>=0.0.20",
+    "psycopg[binary]>=3.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+    # starlette's TestClient warns that httpx is deprecated in its favour; a
+    # warning left standing is a warning nobody reads the next time.
+    "httpx2",
+    "mypy>=2.3.1",
+]
+
+[project.scripts]
+# The deployment's admin entrypoint: `docker compose exec server
+# waxseal-server-admin seed`. Named distinctly from the library's `waxseal` so
+# no one confuses administering this server with verifying a trail.
+waxseal-server-admin = "waxseal_server.admin_cli:main"
+
+[tool.uv.sources]
+waxseal = { path = "..", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["waxseal_server"]
+
+[tool.mypy]
+# Same bar as the wheel (root pyproject sets strict over src/waxseal). A server
+# that shells out to a verifier and reports exit codes has very little room for
+# a type it guessed wrong about.
+strict = true
+files = ["waxseal_server"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["waxseal_server"]
+branch = true
+
+[tool.coverage.report]
+# The server has its OWN floor, deliberately not mixed into the wheel's gate
+# (CLAUDE.md's 100% is a statement about src/waxseal). This one is a ratchet
+# too: it may go up, never down.
+fail_under = 100
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "^\\s*\\.\\.\\.$",
+    "if TYPE_CHECKING:",
+]

@@ -28,8 +28,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from waxseal import AuditLog
@@ -52,7 +53,54 @@ _COMMON_FIELDS = (
 )
 
 
+#: A `WAXSEAL_TRAIL` naming one of these is a chain SERVER (REMOTE.md), not a
+#: file. `AuditLog.open` already dispatches on the scheme; the hook's job is to
+#: keep the value a `str` so it reaches that check — `Path("http://host")`
+#: collapses the `//` and drops the scheme, and the target would silently
+#: become a local file named `http:`.
+_REMOTE_SCHEMES = ("http://", "https://")
+
+# A chain id may only be a safe path segment on the server, so a directory name
+# is folded to lowercase and everything else becomes a separator.
+_CHAIN_ID_UNSAFE = re.compile(r"[^a-z0-9._-]+")
+
+
+def _is_remote(target: str) -> bool:
+    return target.startswith(_REMOTE_SCHEMES)
+
+
+def _chain_id(event: dict[str, Any]) -> str:
+    """Which chain a remote append belongs to.
+
+    One server holds many projects' trails, so a hook that always wrote to
+    "default" would braid every project a developer touches into one chain.
+    `WAXSEAL_CHAIN_ID` wins; otherwise the project directory names it.
+
+    This is the minimal form of the per-project routing Workstream B specifies
+    for local trails. It is deliberately not that slug: a chain id is read by
+    people in a portal, and `waxseal` is a better name there than
+    `waxseal-3f9a12bc84de`.
+    """
+    explicit = os.environ.get("WAXSEAL_CHAIN_ID")
+    if explicit:
+        return explicit
+    cwd = event.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        return "default"
+    name = _CHAIN_ID_UNSAFE.sub("-", PurePosixPath(cwd).name.lower()).strip("-._")
+    return name or "default"
+
+
+def _trail_target() -> str | Path:
+    """Where this hook writes: a chain server's base URL, or a local path."""
+    env = os.environ.get("WAXSEAL_TRAIL")
+    if env and _is_remote(env):
+        return env
+    return _trail_path()
+
+
 def _trail_path() -> Path:
+    """The local file this hook writes to when no server is configured."""
     env = os.environ.get("WAXSEAL_TRAIL")
     if env:
         return Path(env)
@@ -105,18 +153,29 @@ def main() -> int:
     except Exception as e:
         print(f"[waxseal-audit] unreadable hook event (entry dropped): {e}", file=sys.stderr)
         return 0
+    target = _trail_target()
+    remote = isinstance(target, str)
     try:
-        log = AuditLog.open(_trail_path(), redactor=RegexRedactor(), record_drops=True)
+        if remote:
+            # A drop record is a sidecar file NEXT TO the trail, and a URL has
+            # no next-to; AuditLog.open rejects the combination outright.
+            log = AuditLog.open(
+                target, redactor=RegexRedactor(), chain_id=_chain_id(event)
+            )
+        else:
+            log = AuditLog.open(target, redactor=RegexRedactor(), record_drops=True)
     except Exception as e:
         print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
+        if remote:
+            # Nowhere to record it: the loss is labelled on stderr and nothing
+            # else, which is still better than inventing a sidecar location.
+            return 0
         # No AuditLog to route this through, so record it directly. Best-effort
         # (FileDropRecorder.record() never raises): a trail we cannot even
         # open must not become a second failure on top of the first.
         from waxseal.adapters.drops import FileDropRecorder
 
-        FileDropRecorder(_trail_path()).record(
-            reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-        )
+        FileDropRecorder(target).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
         return 0
     if not log.try_append(payload=build_payload(event), payload_type=PAYLOAD_TYPE):
         # Labelled fail-open (chain integrity ≠ trail completeness): the loss
