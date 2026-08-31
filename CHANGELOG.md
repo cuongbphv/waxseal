@@ -112,6 +112,216 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   covering configuration, data layout, TLS termination at a reverse proxy, and what
   self-hosting does and does not buy.
 
+- **Per-project trail routing and sealed-segment rotation** (0.1.5 plan, Workstream B). One
+  hook trail grew without bound and braided every project a developer touched into a single
+  chain. Both are now structurally impossible. Routing and rotation are on by default for
+  the three hook integrations that receive a `cwd` (Claude Code, Codex, Cursor); the
+  library-style integrations route and rotate nothing, because nothing hands them a project
+  key.
+
+  The project key is the hook event's own `cwd`, and the slug is
+  `sanitize(basename(cwd))[:32] + "-" + sha256(cwd)[:12]` over the **literal** cwd.
+  `session_id` was rejected because it changes every session and would spawn thousands of
+  trails nobody verifies; `resolve()` was rejected because it is host-dependent, so a host
+  that disagreed would split one project into two slugs, and a split trail is
+  indistinguishable from a truncated one. A 48-bit collision merely merges two projects into
+  one trail — weaker privacy separation, never a broken chain. Routing goes through the
+  shared `integrations/_trail.py` resolver, so precedence is unchanged: explicit argument >
+  `WAXSEAL_TRAIL` > the routed default. No new environment variable and no flag. The legacy
+  shared trail is neither migrated nor force-sealed; routed appends simply stop arriving and
+  it keeps verifying with plain `waxseal verify`.
+
+  Rotation triggers on one `stat` at open against 16 MiB — a constant in code with no
+  environment variable, because a threshold an operator can raise is one that gets raised
+  the first time rotation is inconvenient, and the file it bounds is the one an incident
+  review has to read. At the measured 1.9 KB per stored hook entry that is roughly 8.8k
+  entries per segment. Triggering by entry count was rejected: stored line sizes differ by
+  about two orders of magnitude (a prompt line versus a clipped terminal dump), so a count
+  says almost nothing about bytes. The notice prints value *and* provenance — `rotated at
+  16777216 bytes (built-in default)` — because a bare number reads as something an operator
+  configured (rule 6 applied to a threshold).
+
+  Segments are linked by a binding entry only, **never by `prev_hash`**: a chain extended
+  across files would make verifying the newest segment cost every byte of every older one,
+  which is the growth problem rotation exists to solve. The binding reuses
+  `domain/handoff.py`'s `HandoffBinding` verbatim under a new payload type
+  (`application/vnd.waxseal.rotation-binding+json`) rather than the handoff type, so
+  `verify-handoff` does not report rotation bindings and the two obligations stay apart — a
+  rotation binding is mandatory at seq 0 where a handoff binding is optional. Nothing is
+  renamed: `adapters/atomic.py` stays the single owner of the atomic-replace syscall and the
+  active segment is simply the highest ordinal present. Sidecars needed zero code change,
+  proven rather than assumed, because every sidecar name already derives as
+  `with_name(name + suffix)`.
+
+  Rule 7 is widened one level. Reading the closing segment's tail and appending the new
+  segment's genesis binding are ONE critical section spanning TWO files, held by
+  `<dir>/segments.lock`, with its own falsifiability receipt: with that lock swapped for
+  `contextlib.nullcontext()`, 8 writers produced 3 or 4 segments and 8 rotation bindings
+  instead of 2 and 1, on 3 of 3 runs. What does *not* break without it is the chain — every
+  segment still verified `ok`, because each append still holds its own per-file lock. What
+  is lost is the one-rotation invariant, which is exactly why this critical section has to
+  span both files instead of trusting the per-file lock underneath it.
+
+- **`waxseal segments <dir>`**: read-only, appends nothing, and takes the DIRECTORY holding
+  the segments rather than a trail file (SPEC.md section 20, appended for this: layout,
+  payload type, binding rules and the full reason vocabulary). It walks each stem in ordinal
+  order, takes each segment's own `verify_chain` verdict, checks each rotation binding
+  against the predecessor's own current entry hashes, and aggregates through `Verdict.join`
+  — never by comparing exit codes, since 2 is the larger code but the weaker finding.
+  `segment_missing` is BROKEN at exit 1 (owner decision, 31/08/2026): a surviving binding is
+  positive evidence the segment existed, and UNVERIFIABLE would let segment deletion pick
+  its own verdict. It is still never printed as "tampered", because a legitimate archival
+  move leaves identical evidence and which one happened is an operator's call (rule 4). Two
+  states the plan's vocabulary did not name are filled rather than crashed:
+  `segment_unreadable` (a segment torn by a crash mid-rotation) and
+  `rotation_binding_unchecked` (predecessor present but unreadable, so nothing to compare),
+  both UNVERIFIABLE. A binding that is *present* is checked wherever the segment sits,
+  including at the lowest ordinal — exempting the lowest unconditionally would make prefix
+  deletion free, since deleting segments 0 and 1 makes segment 2 "the first" and nothing
+  then asks about the binding it still carries. `open_segmented`, `verify_segments` and
+  `project_slug` stay behind their modules and are deliberately not new public exports:
+  widening a frozen surface later is easy where narrowing it is breaking.
+
+- **S3 Object Lock (WORM) for sealed segments, as a ternary** (0.1.5 plan, Workstream J1).
+  Sealed segments can be archived under operator-declared Object Lock retention, so storage
+  *refuses* an overwrite instead of the chain merely detecting one afterwards. That is the
+  scoped half of the tamper-proof claim (DESIGN.md §11) and nothing beyond it: one object
+  version, until its retain-until date, and nothing at all about write-time honesty. It is
+  opt-in and needs both the `s3` extra and a bucket an operator configured for Object Lock;
+  the wheel's `dependencies` stays `[]`, with `boto3` behind one guarded import whose
+  `ImportError` becomes a labelled `worm_unknown` rather than a crash inside a caller's
+  rotation flow.
+
+  This is the **eighth** instance of the Ternary Evidence Principle, and it was found by
+  looking rather than by being told: `worm_locked` / `worm_unlocked` / `worm_unknown`.
+  Deliberately not `domain.verdict.Verdict`, whose values carry severity and exit codes — a
+  bucket without Object Lock mapped to BROKEN would cry tamper (migration 060's collapse)
+  and mapped to OK would claim a guarantee it does not have (beads v1.2.2's collapse).
+  `WormState` reuses `Verdict`'s vocabulary and shape while keeping its own three values.
+
+  Two questions of two different strengths share that vocabulary, so every report records
+  which one was asked. `object_worm_state` answers "is THIS object version retained";
+  `bucket_worm_state` answers "is Object Lock configured on this bucket", and AWS protects
+  "only the version that's specified in the request", so the bucket answer establishes
+  nothing about any particular segment. `WormSubject` is therefore required with no default
+  — a default subject is exactly how a later call site would inherit the wrong claim in
+  silence — and the label map is keyed on the (subject, state) *pair*, exhaustive over all
+  six findings with no silent fallback. Only the object-version/locked pair may print a
+  storage-refusal promise, and a test asserts that across all 18 report constructions in the
+  module rather than leaving it to inspection. Retention is established by ASKING after the
+  PUT, never inferred from the PUT having succeeded: trusting a writer at write time is the
+  one thing this library exists not to do.
+
+  The AWS semantics came out of the plan labelled `[Unverified]` and were re-checked against
+  official documentation before any code was written, with their sources recorded in the
+  module docstring. Two results are kept rather than smoothed over. The plan's claim that
+  Object Lock must be enabled at bucket creation is **wrong**: it can be enabled on an
+  existing bucket, and what is irreversible is disabling it. And the error code for "no
+  Object Lock configuration here" keeps its `[Unverified]` label, because neither the S3 API
+  reference nor botocore's own service model documents one. That uncertainty is safe by
+  construction — an observed-code allowlist is the only path to `worm_unlocked` — so a wrong
+  guess costs an honest "could not tell" and never a false verdict in either direction.
+  Rotation archiving (J3) and `preflight` (J4) are not built here.
+
+- **`WAXSEAL_TRAIL` is now honoured by all nine trail-resolving integrations** (0.1.5 plan,
+  Workstream D3). Four read it (claude_code, codex, cursor, openclaw) and five silently
+  ignored it, which is the worst shape an audit tool can have: the operator aims the
+  variable at a path, restarts the host, runs `waxseal verify` on that path and is shown
+  nothing — an absent trail and a truncated one look identical, and no output says the
+  writer was never pointed there. `integrations/_trail.py` is now the single reader of the
+  variable and all nine modules go through it, with precedence explicit argument >
+  `WAXSEAL_TRAIL` > the host's default. No new variable, no config flag. The three
+  library-style integrations (langchain, crewai, openai_agents) take
+  `trail: Path | str | None = None`; the default moved to a `None` sentinel because "the
+  caller passed nothing" has to be distinguishable from "the caller passed the default path"
+  or the environment rung has nowhere to sit, and the resolved path for a caller who passes
+  nothing is unchanged. `hermes`/`hermes_gateway` have no argument rung at all (the host
+  loads them and passes no path), so theirs is `WAXSEAL_TRAIL` > `HERMES_HOME` > the home
+  fallback, and a dropped write is now filed beside the trail the operator named instead of
+  beside the host default, where nobody looking at their own path would see it. The
+  environment value stays verbatim while an explicit argument gets `expanduser()`: the four
+  modules that already read this variable have always taken it verbatim, and widening who
+  reads a variable must not change what an already-deployed value means.
+
+- **[`docs/research/landscape.md`](docs/research/landscape.md) and
+  [`docs/research/hedera-lessons.md`](docs/research/hedera-lessons.md)** (0.1.5 plan,
+  Workstream G), with Vietnamese counterparts
+  ([`landscape.vi.md`](docs/research/landscape.vi.md),
+  [`hedera-lessons.vi.md`](docs/research/hedera-lessons.vi.md)) — every other document under
+  `docs/` already had one, so a Vietnamese-only reader had no access to the positioning
+  document or the Hedera reading at all. Docs only; no `src/waxseal` change. Every datum was
+  re-checked against the surveyed projects' own sources in the session that wrote them
+  rather than carried over from the plan, and what a README cannot establish stays labelled:
+  the "neither project copied the other" conclusion keeps its `[Inference]` tag with its
+  basis stated, and the two claims resting on a README alone keep `[Unverified]`, with no
+  comparison drawn where the underlying spec went unread. Domain and npm-scope ownership is
+  reported as what a 200 response shows and no more; no registrar or trademark record was
+  consulted and the document takes no position on renaming. `hedera-lessons.md` opens with
+  the owner's clarification that no service was used, no fees were paid and no adapter was
+  written, and it records two of its three ideas as **built** in 9162abf rather than as
+  backlog.
+
+  All six epistemic labels survive translation with their basis, each still at the start of
+  the clause it guards, and the bracketed tag stays in English because it is this
+  repository's controlled vocabulary rather than prose — a label whose basis is lost in
+  translation is how a hedged claim becomes an assertion, and it would be worse in the
+  Vietnamese, where that reader never sees the original hedge. Verbatim quotes stay in
+  English with the Vietnamese meaning alongside, since a translated quote is no longer a
+  quote. One doc-to-doc link deliberately breaks the `.vi.md`-prefers-`.vi.md` convention:
+  `landscape.vi.md`'s Install note points at `README.md`, because the npm disambiguation
+  sentence exists only there and linking `README.vi.md` would have described something the
+  reader cannot find. The gap is stated in the document rather than papered over.
+
+- **README "Capability extras"**: zero hard dependencies is the core, not a ceiling, and the
+  route out is an extra plus injection. It lists what `pyproject.toml` actually carries
+  today (`s3`, `postgres`) and marks `rfc3161` and `evm` as planned and **not shipped**,
+  because [Written, unwired] is not [Shipped]. No hard dependency was added and rule 1 is
+  untouched. The Install section gains a disambiguation notice for the unrelated WaxSeal SDK
+  on npm, so a reader after the identity product does not land here by mistake.
+
+### Changed
+
+- **`JSONLBackend.append()` no longer raises `JSONLCorruptionError`, and a durably
+  completed append can no longer report failure.** The scan ran *after* the entry was
+  written and flushed, still inside the lock, so a `JSONLCorruptionError` about some other,
+  pre-existing line surfaced as an exception out of an append that had already durably
+  succeeded. A caller that retries on exception then recorded the same event twice: two
+  entries, contiguous seq, no gap — so `verify()` still returned `ok` and the duplicate was
+  invisible to chain integrity, which is the shape of bug this library's whole design is
+  meant to keep out. Measured, one event and one retry: 2 rows before, 1 after. `try_append`
+  also counted a drop for an entry that was on the chain, which is `dropped_writes` lying
+  (rule 5).
+
+  Two changes, and neither alone is enough. The scan now fires BEFORE the pending write, on
+  the same predicate over the same entry, so *any* way it can fail — an `OSError` off the
+  read, a warning filter escalated to an error — lands where there is no durable write to
+  misreport. And corruption it finds is now reported as a labelled `RuntimeWarning` (rule 6,
+  the channel the sibling SQLite adapter already uses for its degraded path) rather than as
+  an exception from `append`: bytes torn long ago are not grounds to veto a new entry,
+  refusing would silence the host's whole trail over one old line, and rule 4 forbids the
+  only other exit. The operator is told; nothing is repaired and nothing is dropped.
+  `JSONLCorruptionError` is now raised only by a direct `_integrity_scan()` call. Nothing in
+  `src/` or `server/` ever caught it, so no shipped consumer changes — but code outside this
+  repository that catches it around `append()` will now never see it, and that is the
+  upgrade note.
+
+- **The two checkpoint frame prefixes are renamed, and their bytes are unchanged** (0.1.5
+  plan, Workstream D2). `CHECKPOINT_FRAME_PREFIX` → `CHECKPOINT_FRAME_PREFIX_BARE`, and
+  `CHECKPOINT_FRAME_PREFIX_V2` → `CHECKPOINT_FRAME_PREFIX_AGG_BOUND`. They are parallel
+  frame *shapes* chosen by content — bare, or aggregate-bound — not an old-then-new version
+  pair. The `_V2` name said otherwise and the repository owner himself misread it that way,
+  and a version reading invites "migrate the old one away", which is the migration-060
+  reflex this library exists to make unrepresentable. The **bytes do not move**:
+  `b"waxseal-checkpoint-v1\n"` and `b"waxseal-checkpoint-v2\n"` are already inside
+  externally issued RFC 3161 receipts, so changing them would orphan evidence that exists.
+  The old names stay as aliases of the very same objects — they may be referenced outside
+  this repository, and SPEC.md section 9 spells the first one out in prose — pinned by an
+  identity test rather than an equality one so they cannot drift.
+  `tools/gen_checkpoint_vectors.py` is untouched, its independence from the library being
+  the point, and it reproduces every frozen vector byte-for-byte after the rename. SPEC.md
+  section 15 gains one appended note saying the same thing in prose; no existing SPEC text
+  changed.
+
 ### Fixed
 
 - **Read-only commands cost more than the bytes they read** (0.1.5 plan, Workstream A).
@@ -160,14 +370,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line had the same bug and the same fix. The shim keeps its `#!/usr/bin/env python3`
   shebang, which is a fail-open a host may deliberately override.
 
+- **The server ran `waxseal segments` against the trail *file* instead of the segment
+  directory** (SPEC.md section 20), so it printed "no such segment directory" and exited 3,
+  and a fully rotated, fully intact chain was reported as `absent` — "nothing was read" —
+  about a directory that does exist. `read_target()` now gives that one read its real
+  subject, in the single place where both the chain and the import surfaces render a CLI
+  outcome. A chain with no segments reports `absent` with "no sealed segments", which is
+  honest: nothing was checked, and rule 5 forbids printing that as `ok`. Four server tests
+  had also hard-coded `segments` as their stand-in for a planned-but-absent command and all
+  four inverted the moment Workstream B shipped it — batching debt, since B was kept out of
+  `server/` to keep footprints disjoint, not a defect in B. None of them is deleted or
+  weakened: each is re-pointed at `preflight`, a command this build really does lack, *and*
+  at the condition rather than a name, via a fixture that withholds a command the build does
+  ship. That second form cannot expire the next time a planned command lands, which is how
+  this recurred in the first place. The shipped half of the capability gate had never been
+  tested at all — B landing is what made it testable — and is covered now against a rotated
+  fixture built with `open_segmented` rather than hand-written files.
+
+- **`server/waxseal_server/api/public.py`'s docstring promised a test that every route on
+  the public read point is GET. No such test existed.** The property held only by
+  implication from the mutating-route census, which would go red for a `POST
+  /public/v1/...` but would name the wrong reason while doing it and says nothing about the
+  guarantee the docstring was pointing at. The public read point carrying no write route is
+  the mirror-node guarantee — read authority separated from write authority
+  architecturally, not by a permission bit — and it deserves a test that fails for its own
+  reason. The new assertion is an allowlist of permitted methods (`{"get"}`) and never a
+  `POST` blocklist, which would have been silent about `PUT`, `PATCH` and `DELETE`; the
+  surface is selected two ways, by the router's tag and by the `/public/v1` prefix, with a
+  third test asserting the two agree, because either selector alone can be made vacuous by
+  one edit; and emptiness is asserted too, since a selector that quietly matched nothing
+  would pass forever. The docstring now describes the test that exists, by name, and no
+  more.
+
 ### Notes on honesty in the server's output
 
 Three states the server refuses to collapse, each with a test:
 
-- Commands this waxseal build does not have (`segments`, `preflight` — Workstreams B4
-  and E) report `"status": "unavailable"` with a **null** verdict, and are never executed.
-  argparse also exits 2, so running them would produce something indistinguishable from
-  "unverifiable" — a verdict nobody computed.
+- Commands this waxseal build does not have (`preflight` — Workstream E) report
+  `"status": "unavailable"` with a **null** verdict, and are never executed. argparse also
+  exits 2, so running them would produce something indistinguishable from "unverifiable" —
+  a verdict nobody computed. (`segments` was the second example here until Workstream B
+  shipped it inside this same release; it now returns a real verdict, and the tests that
+  had borrowed its name are re-pointed — see Fixed, above.)
 - CLI exit 3 ("nothing was read") reports `"absent"`, never a break. A tamper report
   against a file that does not exist is a false alarm.
 - The receipt-log check returns `checked: null` with `reason: "not_recorded"` when there
