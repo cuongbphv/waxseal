@@ -26,8 +26,8 @@ from pathlib import Path
 import pytest
 
 from waxseal.domain.checkpoint import (
-    CHECKPOINT_FRAME_PREFIX,
-    CHECKPOINT_FRAME_PREFIX_V2,
+    CHECKPOINT_FRAME_PREFIX_AGG_BOUND,
+    CHECKPOINT_FRAME_PREFIX_BARE,
     Checkpoint,
     checkpoint_frame,
 )
@@ -85,9 +85,9 @@ class TestCheckpointFrames:
         # unrepresentable.
         frame = bytes.fromhex(vector["frame_hex"])
         if vector["agg_commit"] is None:
-            assert frame.startswith(CHECKPOINT_FRAME_PREFIX)
+            assert frame.startswith(CHECKPOINT_FRAME_PREFIX_BARE)
         else:
-            assert frame.startswith(CHECKPOINT_FRAME_PREFIX_V2)
+            assert frame.startswith(CHECKPOINT_FRAME_PREFIX_AGG_BOUND)
 
 
 class TestAggregateCommits:

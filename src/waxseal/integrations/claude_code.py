@@ -35,6 +35,7 @@ from typing import Any
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations._trail import env_trail, home_base, resolve_trail
 
 # _sanitize redacts BEFORE clipping: a clip can split a secret across the
 # boundary (a PEM losing its END marker stops matching) and land it on disk.
@@ -93,23 +94,15 @@ def _chain_id(event: dict[str, Any]) -> str:
 
 def _trail_target() -> str | Path:
     """Where this hook writes: a chain server's base URL, or a local path."""
-    env = os.environ.get("WAXSEAL_TRAIL")
-    if env and _is_remote(env):
+    env = env_trail()
+    if env is not None and _is_remote(env):
         return env
     return _trail_path()
 
 
 def _trail_path() -> Path:
     """The local file this hook writes to when no server is configured."""
-    env = os.environ.get("WAXSEAL_TRAIL")
-    if env:
-        return Path(env)
-    # HOME before Path.home(): ntpath resolves "~" from USERPROFILE and
-    # ignores HOME, so a host that launches this hook with HOME set would
-    # strand the trail in the wrong profile on Windows.
-    home = os.environ.get("HOME")
-    base = Path(home) if home else Path.home()
-    return base / ".claude" / "waxseal" / "trail.jsonl"
+    return resolve_trail(default=lambda: home_base() / ".claude" / "waxseal" / "trail.jsonl")
 
 
 def _clip(text: str) -> str:

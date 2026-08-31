@@ -28,22 +28,22 @@ from pathlib import Path
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations._trail import home_base
+from waxseal.integrations._trail import resolve_trail as _resolve_trail
 from waxseal.sources.openclaw import DEFAULT_LIMIT, DEFAULT_MAX_PAGES, KINDS, ingest
 
 
 def resolve_trail() -> Path:
-    env = os.environ.get("WAXSEAL_TRAIL")
-    if env:
-        return Path(env)
+    return _resolve_trail(default=_openclaw_default)
+
+
+def _openclaw_default() -> Path:
+    # OpenClaw relocates its state directory via OPENCLAW_HOME; a trail left
+    # behind in ~/.openclaw would not follow the install it belongs to.
     home = os.environ.get("OPENCLAW_HOME")
     if home:
         return Path(home) / "audit" / "trail.jsonl"
-    # HOME before Path.home(): ntpath resolves "~" from USERPROFILE and
-    # ignores HOME, so a host that launches this runner with HOME set would
-    # strand the trail in the wrong profile on Windows.
-    unix_home = os.environ.get("HOME")
-    base = Path(unix_home) if unix_home else Path.home()
-    return base / ".openclaw" / "audit" / "trail.jsonl"
+    return home_base() / ".openclaw" / "audit" / "trail.jsonl"
 
 
 def main(argv: list[str] | None = None) -> int:

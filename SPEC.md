@@ -638,6 +638,20 @@ present-but-unconvertible nonce is malformed sidecar content — this format's
 own bytes, so a break (exit 1), not a foreign format. What the stored nonce
 buys is section 17's re-verify replay detection.
 
+**Note (0.1.5): the two frame prefixes are parallel SHAPES, not a version
+pair.** `waxseal-checkpoint-v1\n` and `waxseal-checkpoint-v2\n` select between
+two frame shapes by CONTENT — bare, and aggregate-bound — not between an old
+encoding and its replacement. Neither is superseded: a writer holding no
+aggregate binding emits the first shape forever. The `v1`/`v2` inside the bytes
+is historical naming only, and reading it as an old-then-new pair invites
+migrating the "old" shape away — precisely the class of change this document's
+frozen material forbids. The implementation therefore names the constants
+`CHECKPOINT_FRAME_PREFIX_BARE` and `CHECKPOINT_FRAME_PREFIX_AGG_BOUND`, keeping
+the pre-0.1.5 names (`CHECKPOINT_FRAME_PREFIX`, as spelled in section 9, and
+`CHECKPOINT_FRAME_PREFIX_V2`) as aliases of the same values. The BYTES above are
+frozen: externally issued anchor receipts already contain them, so a change
+would orphan evidence that exists.
+
 ## 16. Scope statement
 
 Every auditor report carries a fixed, machine-identifiable scope statement:

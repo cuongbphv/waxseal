@@ -33,6 +33,7 @@ from typing import Any
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations._trail import home_base, resolve_trail
 
 # _sanitize redacts BEFORE clipping: a clip can split a secret across the
 # boundary (a PEM losing its END marker stops matching) and land it on disk.
@@ -52,18 +53,16 @@ _COMMON_FIELDS = (
 
 
 def _trail_path() -> Path:
-    env = os.environ.get("WAXSEAL_TRAIL")
-    if env:
-        return Path(env)
+    return resolve_trail(default=_codex_default)
+
+
+def _codex_default() -> Path:
+    # Codex relocates its whole state directory via CODEX_HOME; a trail left
+    # behind in ~/.codex would not follow the session it belongs to.
     codex_home = os.environ.get("CODEX_HOME")
     if codex_home:
         return Path(codex_home) / "waxseal" / "trail.jsonl"
-    # HOME before Path.home(): ntpath resolves "~" from USERPROFILE and
-    # ignores HOME, so a host that launches this hook with HOME set would
-    # strand the trail in the wrong profile on Windows.
-    home = os.environ.get("HOME")
-    base = Path(home) if home else Path.home()
-    return base / ".codex" / "waxseal" / "trail.jsonl"
+    return home_base() / ".codex" / "waxseal" / "trail.jsonl"
 
 
 def _clip(text: str) -> str:

@@ -6,6 +6,10 @@ hash chain. Attach per run:
     from waxseal.integrations.openai_agents import WaxsealRunHooks
     result = await Runner.run(agent, "input", hooks=WaxsealRunHooks(trail))
 
+The trail argument is optional: with none given, `WAXSEAL_TRAIL` is honoured,
+and `DEFAULT_TRAIL` is the last resort. An argument passed here always wins
+over the environment.
+
 Contract verified against openai.github.io/openai-agents-python
 (/ref/lifecycle, 2026-08-21):
 
@@ -35,6 +39,7 @@ from agents import RunHooks
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations._trail import resolve_trail
 
 # _sanitize redacts BEFORE clipping: a clip can split a secret across the
 # boundary (a PEM losing its END marker stops matching) and land it on disk.
@@ -45,6 +50,10 @@ PAYLOAD_TYPE = "application/vnd.openai-agents.run-event+json"
 # Tool results can be megabytes (file reads, API dumps). Clip stored fields,
 # visibly, because silent truncation would read as "the full result".
 MAX_FIELD_CHARS = 4096
+
+#: Where this integration writes when the caller names no path and
+#: `WAXSEAL_TRAIL` is unset.
+DEFAULT_TRAIL = "~/.waxseal/openai-agents-trail.jsonl"
 
 
 def _clip(text: str) -> str:
@@ -67,8 +76,16 @@ def _sanitize(value: Any) -> Any:
 
 
 class WaxsealRunHooks(RunHooks):
-    def __init__(self, trail: Path | str = "~/.waxseal/openai-agents-trail.jsonl") -> None:
-        self._trail = Path(trail).expanduser()
+    def __init__(self, trail: Path | str | None = None) -> None:
+        """``trail`` wins over `WAXSEAL_TRAIL`, which wins over
+        `DEFAULT_TRAIL`. The default is a None sentinel rather than the path
+        itself so "the caller passed nothing" stays distinguishable from
+        "the caller passed the default path" — without that distinction
+        there is nowhere for the environment rung to sit, and an operator's
+        `WAXSEAL_TRAIL` would be silently ignored by this integration while
+        the stdin hooks honoured it.
+        """
+        self._trail = resolve_trail(trail, default=lambda: Path(DEFAULT_TRAIL).expanduser())
         self._log: AuditLog | None = None
 
     def _append(self, payload: dict[str, Any]) -> None:

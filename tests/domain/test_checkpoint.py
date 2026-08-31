@@ -13,9 +13,11 @@ import struct
 
 import pytest
 
+from waxseal.domain import checkpoint
 from waxseal.domain.anchoring import batch_root
 from waxseal.domain.checkpoint import (
-    CHECKPOINT_FRAME_PREFIX,
+    CHECKPOINT_FRAME_PREFIX_AGG_BOUND,
+    CHECKPOINT_FRAME_PREFIX_BARE,
     Checkpoint,
     checkpoint_for,
     checkpoint_frame,
@@ -38,7 +40,7 @@ class TestCheckpointFrame:
             return struct.pack(">Q", len(enc)) + enc
 
         expected = (
-            CHECKPOINT_FRAME_PREFIX
+            CHECKPOINT_FRAME_PREFIX_BARE
             + struct.pack(">Q", 3)
             + lp("2")
             + lp("ab" * 32)
@@ -49,7 +51,7 @@ class TestCheckpointFrame:
     def test_frame_prefix_is_exactly_this_constant(self) -> None:
         # Pinned literal, not derived from the constant itself — a change to
         # the constant must be a visible diff in this test.
-        assert CHECKPOINT_FRAME_PREFIX == b"waxseal-checkpoint-v1\n"
+        assert CHECKPOINT_FRAME_PREFIX_BARE == b"waxseal-checkpoint-v1\n"
 
     def test_different_seq_gives_different_frame(self) -> None:
         a = Checkpoint(seq=1, entry_hash="aa" * 32, root="bb" * 32)
@@ -156,3 +158,47 @@ class TestSinkReceiptLivesInDomain:
 
         hints = typing.get_type_hints(AnchorSink.anchor)
         assert SinkReceipt in typing.get_args(hints["return"])
+
+
+class TestFramePrefixNaming:
+    """The `-v1`/`-v2` in the two frame prefixes are NOT an old-then-new
+    version pair, and reading them that way invites "migrate the old one
+    away" — the migration-060 reflex CLAUDE.md exists to block. They are two
+    parallel frame SHAPES chosen by content: bare, and aggregate-bound. The
+    repository owner himself misread `_V2` as a version pair, which is why
+    the constants were renamed in 0.1.5.
+
+    The BYTES may never move: they are already inside externally issued
+    RFC 3161 receipts, and changing them would orphan real evidence.
+    """
+
+    def test_bare_prefix_bytes_are_frozen(self) -> None:
+        # Pinned literal, not derived from the constant — a change to the
+        # constant must be a visible diff in this test.
+        assert CHECKPOINT_FRAME_PREFIX_BARE == b"waxseal-checkpoint-v1\n"
+
+    def test_aggregate_bound_prefix_bytes_are_frozen(self) -> None:
+        assert CHECKPOINT_FRAME_PREFIX_AGG_BOUND == b"waxseal-checkpoint-v2\n"
+
+    def test_legacy_names_are_aliases_of_the_very_same_objects(self) -> None:
+        # Kept because they may be referenced outside this repo (SPEC.md
+        # section 9 prose names the old one). An alias that merely held an
+        # equal value could drift; identity cannot.
+        assert checkpoint.CHECKPOINT_FRAME_PREFIX is CHECKPOINT_FRAME_PREFIX_BARE
+        assert checkpoint.CHECKPOINT_FRAME_PREFIX_V2 is CHECKPOINT_FRAME_PREFIX_AGG_BOUND
+
+    def test_a_bare_frame_still_starts_with_the_legacy_alias(self) -> None:
+        # The alias exercised through the real encoder, not just compared.
+        cp = Checkpoint(seq=0, entry_hash="aa" * 32, root="bb" * 32)
+        assert checkpoint_frame(cp).startswith(checkpoint.CHECKPOINT_FRAME_PREFIX)
+
+    def test_the_two_shapes_are_chosen_by_content_not_by_a_version_flag(self) -> None:
+        # There is no version parameter to pass: the presence of a binding
+        # picks the shape. That is what "parallel shapes" means.
+        bare = Checkpoint(seq=1, entry_hash="aa" * 32, root="bb" * 32)
+        bound = Checkpoint(
+            seq=1, entry_hash="aa" * 32, root="bb" * 32,
+            agg_commit="cc" * 32, agg_epoch=2,
+        )
+        assert checkpoint_frame(bare).startswith(CHECKPOINT_FRAME_PREFIX_BARE)
+        assert checkpoint_frame(bound).startswith(CHECKPOINT_FRAME_PREFIX_AGG_BOUND)
