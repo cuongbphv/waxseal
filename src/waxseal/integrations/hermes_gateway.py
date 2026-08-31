@@ -17,7 +17,7 @@ from typing import Any
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
-from waxseal.integrations._trail import resolve_trail
+from waxseal.integrations._trail import home_base, resolve_trail
 
 PAYLOAD_TYPE = "application/vnd.hermes.hook-event+json"
 
@@ -56,7 +56,11 @@ def _hermes_home() -> Path:
 
         return Path(get_hermes_home())
     except Exception:
-        return Path.home() / ".hermes"
+        # home_base(), not Path.home(): the last rung has to honour HOME
+        # first or a host that sets it writes into a different Windows
+        # profile than `waxseal verify` reads (waxseal-fg4.3; the rule and
+        # the ntpath split are documented on home_base itself).
+        return home_base() / ".hermes"
 
 
 def _trail_path() -> Path:
@@ -66,7 +70,8 @@ def _trail_path() -> Path:
     honour it: an operator who aims the variable at a path and then verifies
     that path must not be shown an empty file. There is no explicit-argument
     rung — hermes loads this module itself and passes no path — so the chain
-    is `WAXSEAL_TRAIL` > `HERMES_HOME` > the home fallback.
+    is `WAXSEAL_TRAIL` > `HERMES_HOME` > the home fallback, and that last
+    rung reads `HOME` before ``Path.home()`` like every other integration.
     """
     return resolve_trail(default=lambda: _hermes_home() / "audit" / "trail.jsonl")
 

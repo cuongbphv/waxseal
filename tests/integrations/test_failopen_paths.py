@@ -30,9 +30,25 @@ class TestHermesHomeResolution:
     def test_falls_back_to_dot_hermes_without_env_or_hermes_cli(
         self, hermes_module, monkeypatch, tmp_path: Path
     ) -> None:
+        # Path.home() is the LAST rung, reached only with no HOME at all —
+        # the fallback still works, now stated against the corrected rule
+        # (waxseal-fg4.3).
         monkeypatch.delenv("HERMES_HOME", raising=False)
+        monkeypatch.delenv("HOME", raising=False)
         monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
         assert hermes_module._hermes_home() == tmp_path / ".hermes"
+
+    def test_home_env_is_preferred_over_path_home(
+        self, hermes_module, monkeypatch, tmp_path: Path
+    ) -> None:
+        # The resolver goes through _trail.home_base(): on Windows
+        # Path.home() reads USERPROFILE and ignores HOME, so a host that
+        # sets HOME would otherwise seal the trail into the wrong profile
+        # and `waxseal verify` would read a chain that looks truncated.
+        monkeypatch.delenv("HERMES_HOME", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "windows"))
+        assert hermes_module._hermes_home() == tmp_path / "posix-home" / ".hermes"
 
     def test_asks_hermes_cli_when_available(
         self, hermes_module, monkeypatch, tmp_path: Path

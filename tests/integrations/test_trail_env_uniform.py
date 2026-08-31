@@ -31,6 +31,7 @@ The three hook/plugin families differ in which rungs they can HAVE:
 
 from __future__ import annotations
 
+import ast
 import importlib
 import sys
 import types
@@ -269,9 +270,29 @@ class TestHermesPrecedence:
             tmp_path / "hermes-home" / "audit" / "trail.jsonl"
         )
 
-    def test_home_fallback_when_nothing_is_named(
+    def test_home_env_beats_path_home_in_the_fallback(
         self, hermes_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        # waxseal-fg4.3. Both hermes modules resolved the bottom rung with a
+        # bare Path.home(), which goes through ntpath on Windows and IGNORES
+        # HOME: a plugin launched with HOME set (git-bash, WSL-style
+        # wrappers, CI images) wrote the trail into one profile while
+        # `waxseal verify` read the other, and the missing entries look
+        # exactly like a truncated chain. The other integrations already
+        # went through _trail.home_base(); these two did not.
+        monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "windows"))
+        assert hermes_module._trail_path() == (
+            tmp_path / "posix-home" / ".hermes" / "audit" / "trail.jsonl"
+        )
+
+    def test_path_home_is_the_fallback_when_no_home_env(
+        self, hermes_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Same coverage the Path.home monkeypatch used to carry, now stated
+        # against the corrected rule: Path.home() is consulted only when
+        # there is no HOME at all.
+        monkeypatch.delenv("HOME", raising=False)
         monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "profile"))
         assert hermes_module._trail_path() == (
             tmp_path / "profile" / ".hermes" / "audit" / "trail.jsonl"
@@ -397,6 +418,45 @@ class TestEveryIntegrationHonoursTheVariable:
             if path.name != "_trail.py" and '"WAXSEAL_TRAIL"' in path.read_text()
         ]
         assert offenders == []
+
+    def test_no_integration_resolves_home_for_itself(self) -> None:
+        # waxseal-fg4.3: home_base() landed in _trail.py during D3 and 7 of
+        # the 9 modules were wired to it, while both hermes modules kept a
+        # bare Path.home(). That is the Windows/ntpath profile split — the
+        # writer seals into one profile, `waxseal verify` reads another, and
+        # the absent entries are indistinguishable from a truncated chain.
+        # Matched on the parsed CALL, not the source text, so prose naming
+        # the rule stays legal and a real lookup does not; the divergence is
+        # DETECTED next time rather than merely unlikely. _install.py is out
+        # of scope here because it places shim files, not trails.
+        src = Path(_trail.__file__).parent
+        offenders = []
+        for path in sorted(src.glob("*.py")):
+            if path.stem.startswith("_"):
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "home"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "Path"
+                ):
+                    offenders.append(path.name)
+                    break
+        assert offenders == []
+
+    def test_both_hermes_modules_resolve_the_same_home(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The two modules carry byte-identical resolvers; a fix applied to
+        # one and not the other is how fg4.3 happened in the first place.
+        monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "windows"))
+        plugin = importlib.import_module("waxseal.integrations.hermes")
+        gateway = importlib.import_module("waxseal.integrations.hermes_gateway")
+        assert plugin._trail_path() == gateway._trail_path()
 
     def test_the_census_is_complete(self) -> None:
         src = Path(_trail.__file__).parent
