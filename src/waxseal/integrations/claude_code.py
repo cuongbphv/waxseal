@@ -18,6 +18,13 @@ Contract verified against https://code.claude.com/docs/en/hooks.md (2026-08):
   other events stdout is parsed for decision JSON. This script never writes
   to stdout; diagnostics go to stderr (shown as a non-blocking notice).
 
+Per-project routing (SPEC 20, on by default): the trail is keyed by the hook
+event's `cwd`, so two projects never braid their histories into one file, and
+rolled over into sealed segments once the active one passes 16 MiB. There is
+no new environment variable and no flag. `WAXSEAL_TRAIL` still wins on
+LOCATION and is NOT a rotation off-switch: a trail named through it rotates
+too, and on its first rotation it is adopted as the base segment.
+
 Secrets are redacted BEFORE hashing/storage (RegexRedactor), so a key that
 Claude leaked into a command or that the user pasted into a prompt reaches
 this trail only as ***REDACTED***, unlike the session transcript, which
@@ -35,7 +42,12 @@ from typing import Any
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
-from waxseal.integrations._trail import env_trail, home_base, resolve_trail
+from waxseal.integrations._trail import env_trail, home_base, resolve_trail, routed_trail
+from waxseal.sources.rotation import (
+    DEFAULT_MAX_SEGMENT_BYTES,
+    active_segment,
+    open_segmented,
+)
 
 # _sanitize redacts BEFORE clipping: a clip can split a secret across the
 # boundary (a PEM losing its END marker stops matching) and land it on disk.
@@ -92,17 +104,37 @@ def _chain_id(event: dict[str, Any]) -> str:
     return name or "default"
 
 
-def _trail_target() -> str | Path:
+def _trail_target(event: dict[str, Any]) -> str | Path:
     """Where this hook writes: a chain server's base URL, or a local path."""
     env = env_trail()
     if env is not None and _is_remote(env):
         return env
-    return _trail_path()
+    return _trail_path(event)
 
 
-def _trail_path() -> Path:
-    """The local file this hook writes to when no server is configured."""
-    return resolve_trail(default=lambda: home_base() / ".claude" / "waxseal" / "trail.jsonl")
+def _trail_path(event: dict[str, Any]) -> Path:
+    """The local file this hook writes to when no server is configured.
+
+    Precedence is `_trail.resolve_trail`'s, unchanged: an explicit argument,
+    then `WAXSEAL_TRAIL`, then the host's own default — which is now routed
+    per project rather than shared.
+    """
+    return resolve_trail(
+        default=lambda: routed_trail(_WAXSEAL_HOME(), _project_key(event))
+    )
+
+
+def _WAXSEAL_HOME() -> Path:  # noqa: N802 - a constant-shaped accessor, not a class
+    """Claude Code's own waxseal home. FIXED: there is no
+    `WAXSEAL_TRAIL_ROOT`, and `WAXSEAL_TRAIL` (above) is the one supported way
+    to move the trail."""
+    return home_base() / ".claude" / "waxseal"
+
+
+def _project_key(event: dict[str, Any]) -> str | None:
+    """The event's `cwd`, the documented Claude Code hook field."""
+    cwd = event.get("cwd")
+    return cwd if isinstance(cwd, str) and cwd else None
 
 
 def _clip(text: str) -> str:
@@ -146,7 +178,7 @@ def main() -> int:
     except Exception as e:
         print(f"[waxseal-audit] unreadable hook event (entry dropped): {e}", file=sys.stderr)
         return 0
-    target = _trail_target()
+    target = _trail_target(event)
     remote = isinstance(target, str)
     try:
         if remote:
@@ -156,7 +188,14 @@ def main() -> int:
                 target, redactor=RegexRedactor(), chain_id=_chain_id(event)
             )
         else:
-            log = AuditLog.open(target, redactor=RegexRedactor(), record_drops=True)
+            # The hook passes the built-in constant; the rotation notice says
+            # so, so nobody reads 16777216 as something they configured.
+            log = open_segmented(
+                target,
+                max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES,
+                redactor=RegexRedactor(),
+                record_drops=True,
+            )
     except Exception as e:
         print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
         if remote:
@@ -168,7 +207,11 @@ def main() -> int:
         # open must not become a second failure on top of the first.
         from waxseal.adapters.drops import FileDropRecorder
 
-        FileDropRecorder(target).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
+        # Beside the segment actually in play, not beside the logical base:
+        # a `.drops` file in the wrong directory is a loss nobody finds.
+        FileDropRecorder(active_segment(target)).record(
+            reason=type(e).__name__, payload_type=PAYLOAD_TYPE
+        )
         return 0
     if not log.try_append(payload=build_payload(event), payload_type=PAYLOAD_TYPE):
         # Labelled fail-open (chain integrity ≠ trail completeness): the loss

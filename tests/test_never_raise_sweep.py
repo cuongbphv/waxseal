@@ -117,8 +117,13 @@ from waxseal.domain.sealing import (
     verify_anchored_aggregate,
     verify_seals,
 )
+from waxseal.domain.segments import (
+    ROTATION_PAYLOAD_TYPE,
+    SegmentRead,
+    verify_segments,
+)
 from waxseal.domain.separation import SeparationTopology
-from waxseal.domain.verify import verify_chain
+from waxseal.domain.verify import VerifyResult, verify_chain
 from waxseal.domain.witnessing import WitnessObservation, check_witnessed
 
 # --------------------------------------------------------------------------
@@ -186,6 +191,7 @@ FUZZED_ENTRY_POINTS: frozenset[str] = frozenset(
         "waxseal.domain.rfc3161.decode_receipt",
         "waxseal.domain.rfc3161.parse_timestamp_resp",
         "waxseal.domain.rfc3161.read_timestamp_resp",
+        "waxseal.domain.segments.verify_segments",
         "waxseal.domain.sealing.verify_aggregate",
         "waxseal.domain.sealing.verify_anchored_aggregate",
         "waxseal.domain.sealing.verify_seals",
@@ -521,6 +527,62 @@ class TestBindingHoldsNeverRaises:
     ) -> None:
         binding = HandoffBinding(chain_id="fuzz-origin", seq=seq, head_hash=head_hash)
         binding_holds(binding, origin_entry_hashes)
+
+
+# --------------------------------------------------------------------------
+# domain/segments.py
+# --------------------------------------------------------------------------
+#
+# Landed by waxseal-9uz (Workstream B). The hostile input is a DIRECTORY of
+# segment files an attacker can write: a seq-0 payload that is any JSON value
+# at all (or none), a chain_id naming anything, a predecessor whose hash list
+# is the wrong length or not hex, and a `chain` that is None because the file
+# would not parse. Every one of those is a verdict here, never an exception --
+# `waxseal segments` has to print a per-segment state for whatever it finds.
+
+
+def _hostile_genesis_payload() -> st.SearchStrategy[object]:
+    return st.one_of(
+        st.none(),
+        _HOSTILE_TEXT,
+        _HOSTILE_INT,
+        st.lists(_HOSTILE_TEXT, max_size=3),
+        st.fixed_dictionaries(
+            {"chain_id": _HOSTILE_TEXT, "seq": _HOSTILE_INT, "head_hash": _HEXLIKE}
+        ),
+        st.dictionaries(_HOSTILE_TEXT, _HOSTILE_TEXT, max_size=3),
+    )
+
+
+def _hostile_segment_read() -> st.SearchStrategy[SegmentRead]:
+    return st.builds(
+        SegmentRead,
+        identity=_HOSTILE_TEXT,
+        chain=st.one_of(st.none(), st.builds(_verify_result_from, st.booleans())),
+        entry_hashes=st.lists(_HEXLIKE, max_size=4).map(tuple),
+        genesis_payload_type=st.one_of(
+            st.none(), st.just(ROTATION_PAYLOAD_TYPE), _HOSTILE_TEXT
+        ),
+        genesis_payload=_hostile_genesis_payload(),
+    )
+
+
+def _verify_result_from(ok: bool) -> VerifyResult:
+    return VerifyResult(
+        ok=ok,
+        checked=0,
+        broken_seq=None if ok else 0,
+        reason=None if ok else "entry_hash_mismatch",
+        unverifiable=() if ok else (0,),
+        dropped_writes=None,
+    )
+
+
+class TestVerifySegmentsNeverRaises:
+    @_FUZZ_SETTINGS
+    @given(segments=st.lists(_hostile_segment_read(), max_size=5))
+    def test_never_raises(self, segments: list[SegmentRead]) -> None:
+        verify_segments(segments)
 
 
 # --------------------------------------------------------------------------

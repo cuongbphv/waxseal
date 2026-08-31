@@ -9,17 +9,33 @@ output says the writer was never pointed at that path in the first place.
 
 The variable is the pre-existing one. Nothing here invents a second name, and
 there is no config flag: an audit sink with two ways to be aimed has two ways
-to be aimed at the wrong place.
+to be aimed at the wrong place. `routed_trail` below is the 0.1.5 per-project
+DEFAULT that sits at the bottom of that precedence chain — routing changes
+where the default points, never how the precedence works.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
+from waxseal.domain.segments import project_slug, segment_name
+
 ENV_VAR: Final = "WAXSEAL_TRAIL"
+
+#: Sub-directory of a host's waxseal home that holds the per-project trails.
+#: The root above it is FIXED per host: there is no `WAXSEAL_TRAIL_ROOT` and
+#: no new environment variable (owner decision, 31/08/2026).
+TRAILS_DIRNAME: Final = "trails"
+
+#: The pre-0.1.5 shared trail's file name, kept as the labelled fallback for
+#: an event with no project key. It is never migrated and never force-sealed:
+#: routed appends simply stop arriving, and it keeps verifying forever with
+#: plain `waxseal verify`.
+SHARED_TRAIL_NAME: Final = "trail.jsonl"
 
 
 def env_trail() -> str | None:
@@ -83,3 +99,41 @@ def home_base() -> Path:
     """
     home = os.environ.get("HOME")
     return Path(home) if home else Path.home()
+
+
+def routed_trail(root: Path, cwd: str | None) -> Path:
+    """The per-project default: ``<root>/trails/<slug>/trail.00000.jsonl``.
+
+    ``root`` is the host's own waxseal home (``~/.claude/waxseal``,
+    ``$CODEX_HOME/waxseal``, ``~/.cursor/waxseal``) so each host keeps the
+    directory its own docs and its own relocation variable already name.
+
+    ``cwd`` is the project key, taken from the hook event. ``session_id`` was
+    rejected: it changes every session, so it would spawn thousands of trails
+    nobody ever verifies.
+
+    Prints ONE labelled stderr line on the first routed append for a project,
+    naming where writes moved. Keyed off the routed segment not existing yet,
+    because a hook is a fresh process every time and nothing in memory can
+    remember a "first". With no ``cwd`` at all it falls back to the shared
+    trail and says so on EVERY append (rule 6: a degraded router is labelled,
+    never silent — and unlike the routing notice, this one is a live
+    degradation, not a one-off migration).
+    """
+    if not cwd:
+        shared = root / SHARED_TRAIL_NAME
+        print(
+            "[waxseal-audit] hook event carries no cwd — cannot route per "
+            f"project; writing to the shared trail {shared}",
+            file=sys.stderr,
+        )
+        return shared
+    path = root / TRAILS_DIRNAME / project_slug(cwd) / segment_name("trail", 0)
+    if not path.exists():
+        print(
+            f"[waxseal-audit] trail routed per project: {cwd} -> {path} "
+            f"(writes moved here from {root / SHARED_TRAIL_NAME}, which is "
+            "not migrated and still verifies with `waxseal verify`)",
+            file=sys.stderr,
+        )
+    return path

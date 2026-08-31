@@ -18,6 +18,13 @@ Contract verified against openai/codex source, rust-v0.149.0 (2026-08-21):
   therefore exits 0 with empty stdout on EVERY path, including its own
   failures; diagnostics go to stderr.
 
+Per-project routing (SPEC 20, on by default): the trail is keyed by the hook
+event's cwd, so two projects never braid their histories into one file, and it
+rolls over into sealed segments once the active one passes 16 MiB. There is no
+new environment variable and no flag. `WAXSEAL_TRAIL` still wins on LOCATION
+and is NOT a rotation off-switch: a trail named through it rotates too, and on
+its first rotation it is adopted as the base segment.
+
 Secrets are redacted BEFORE hashing/storage (RegexRedactor): a key leaked
 into a command or pasted into a prompt reaches this trail only as
 ***REDACTED***.
@@ -31,9 +38,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
-from waxseal.integrations._trail import home_base, resolve_trail
+from waxseal.integrations._trail import home_base, resolve_trail, routed_trail
+from waxseal.sources.rotation import (
+    DEFAULT_MAX_SEGMENT_BYTES,
+    active_segment,
+    open_segmented,
+)
 
 # _sanitize redacts BEFORE clipping: a clip can split a secret across the
 # boundary (a PEM losing its END marker stops matching) and land it on disk.
@@ -52,17 +63,24 @@ _COMMON_FIELDS = (
 )
 
 
-def _trail_path() -> Path:
-    return resolve_trail(default=_codex_default)
+def _trail_path(event: dict[str, Any]) -> Path:
+    return resolve_trail(default=lambda: routed_trail(_codex_home(), _project_key(event)))
 
 
-def _codex_default() -> Path:
+def _codex_home() -> Path:
     # Codex relocates its whole state directory via CODEX_HOME; a trail left
-    # behind in ~/.codex would not follow the session it belongs to.
+    # behind in ~/.codex would not follow the session it belongs to. The
+    # per-project trails nest UNDER this, so relocation still carries them.
     codex_home = os.environ.get("CODEX_HOME")
     if codex_home:
-        return Path(codex_home) / "waxseal" / "trail.jsonl"
-    return home_base() / ".codex" / "waxseal" / "trail.jsonl"
+        return Path(codex_home) / "waxseal"
+    return home_base() / ".codex" / "waxseal"
+
+
+def _project_key(event: dict[str, Any]) -> str | None:
+    """The event's `cwd` — a documented snake_case Codex hook field."""
+    cwd = event.get("cwd")
+    return cwd if isinstance(cwd, str) and cwd else None
 
 
 def _clip(text: str) -> str:
@@ -104,15 +122,24 @@ def main() -> int:
     except Exception as e:
         print(f"[waxseal-audit] unreadable hook event (entry dropped): {e}", file=sys.stderr)
         return 0
+    target = _trail_path(event)
     try:
-        log = AuditLog.open(_trail_path(), redactor=RegexRedactor(), record_drops=True)
+        # The hook passes the built-in constant; the rotation notice says so,
+        # so nobody reads 16777216 as something they configured.
+        log = open_segmented(
+            target,
+            max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES,
+            redactor=RegexRedactor(),
+            record_drops=True,
+        )
     except Exception as e:
         print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
         # No AuditLog to route this through, so record it directly, best-effort
-        # (FileDropRecorder.record() never raises).
+        # (FileDropRecorder.record() never raises). Beside the segment actually
+        # in play: a `.drops` file in the wrong directory is a loss nobody finds.
         from waxseal.adapters.drops import FileDropRecorder
 
-        FileDropRecorder(_trail_path()).record(
+        FileDropRecorder(active_segment(target)).record(
             reason=type(e).__name__, payload_type=PAYLOAD_TYPE
         )
         return 0

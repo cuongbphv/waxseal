@@ -315,27 +315,38 @@ class TestHermesPrecedence:
 # --------------------------------------------------------------------------
 
 
-#: module -> the host directory it nests its default trail under
+#: module -> (host directory, sub-directory, routes-per-project?)
+#: 0.1.5 routes the three stdin hooks' DEFAULT per project, so their expected
+#: tail gains `trails/<slug>/trail.00000.jsonl`. Every rung ABOVE the default
+#: is what this class guards, and none of them moved.
 ALREADY_HONOURING = {
-    "waxseal.integrations.claude_code": (".claude", "waxseal"),
-    "waxseal.integrations.codex": (".codex", "waxseal"),
-    "waxseal.integrations.cursor": (".cursor", "waxseal"),
-    "waxseal.integrations.openclaw": (".openclaw", "audit"),
+    "waxseal.integrations.claude_code": (".claude", "waxseal", True),
+    "waxseal.integrations.codex": (".codex", "waxseal", True),
+    "waxseal.integrations.cursor": (".cursor", "waxseal", True),
+    "waxseal.integrations.openclaw": (".openclaw", "audit", False),
 }
+
+_ROUTING_EVENT = {"hook_event_name": "PreToolUse", "cwd": "/work/project"}
 
 
 @pytest.fixture(params=sorted(ALREADY_HONOURING))
 def already_honouring(request):
+    from waxseal.domain.segments import project_slug
+
     module = importlib.import_module(request.param)
-    resolve = getattr(module, "_trail_path", None) or module.resolve_trail
-    return resolve, ALREADY_HONOURING[request.param]
+    host_dir, sub, routed = ALREADY_HONOURING[request.param]
+    raw = getattr(module, "_trail_path", None) or module.resolve_trail
+    if not routed:
+        return raw, (host_dir, sub), Path("trail.jsonl")
+    tail = Path("trails") / project_slug("/work/project") / "trail.00000.jsonl"
+    return (lambda: raw(_ROUTING_EVENT)), (host_dir, sub), tail
 
 
 class TestNoRegressionForTheOriginalFour:
     def test_env_var_still_wins(
         self, already_honouring, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        resolve, _ = already_honouring
+        resolve, _, _tail = already_honouring
         monkeypatch.setenv("WAXSEAL_TRAIL", str(tmp_path / "from-env.jsonl"))
         monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
         assert resolve() == tmp_path / "from-env.jsonl"
@@ -343,19 +354,19 @@ class TestNoRegressionForTheOriginalFour:
     def test_default_location_is_unchanged(
         self, already_honouring, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        resolve, (host_dir, sub) = already_honouring
+        resolve, (host_dir, sub), tail = already_honouring
         monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
-        assert resolve() == tmp_path / "posix-home" / host_dir / sub / "trail.jsonl"
+        assert resolve() == tmp_path / "posix-home" / host_dir / sub / tail
 
     def test_home_env_still_beats_path_home(
         self, already_honouring, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # The Windows ntpath split test_trail_path_defaults.py documents:
         # extracting a shared resolver must not have moved this rung.
-        resolve, (host_dir, sub) = already_honouring
+        resolve, (host_dir, sub), tail = already_honouring
         monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
         monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "windows"))
-        assert resolve() == tmp_path / "posix-home" / host_dir / sub / "trail.jsonl"
+        assert resolve() == tmp_path / "posix-home" / host_dir / sub / tail
 
 
 class TestEveryIntegrationHonoursTheVariable:

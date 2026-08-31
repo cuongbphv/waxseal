@@ -147,6 +147,12 @@ class TestToolResultFieldNaming:
         assert payload["tool_response"] == "total 0\n"
 
 
+#: 0.1.5: the local branch of `_trail_target` routes per project, so it now
+#: takes the hook event that carries the project key. The remote branch these
+#: tests are about is unchanged — it still resolves before any path is built.
+_ROUTING_EVENT = {"hook_event_name": "PreToolUse", "cwd": "/work/project"}
+
+
 class TestClaudeCodeRemoteTargetInProcess:
     """The remote branch of the Claude Code hook, measured.
 
@@ -164,17 +170,17 @@ class TestClaudeCodeRemoteTargetInProcess:
         # Path("http://host") collapses the // and drops the scheme, so the
         # target would silently become a local file named `http:`.
         monkeypatch.setenv("WAXSEAL_TRAIL", "http://127.0.0.1:9/")
-        target = claude._trail_target()
+        target = claude._trail_target(_ROUTING_EVENT)
         assert isinstance(target, str)
         assert target == "http://127.0.0.1:9/"
 
     def test_an_https_trail_is_kept_as_a_string(self, monkeypatch, claude) -> None:
         monkeypatch.setenv("WAXSEAL_TRAIL", "https://audit.example.test")
-        assert isinstance(claude._trail_target(), str)
+        assert isinstance(claude._trail_target(_ROUTING_EVENT), str)
 
     def test_a_local_trail_is_still_a_path(self, monkeypatch, claude, tmp_path) -> None:
         monkeypatch.setenv("WAXSEAL_TRAIL", str(tmp_path / "trail.jsonl"))
-        assert isinstance(claude._trail_target(), Path)
+        assert isinstance(claude._trail_target(_ROUTING_EVENT), Path)
 
     def test_an_explicit_chain_id_wins(self, monkeypatch, claude) -> None:
         monkeypatch.setenv("WAXSEAL_CHAIN_ID", "waxseal")

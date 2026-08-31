@@ -847,3 +847,152 @@ attack: a trail edit that does not also curate the sidecar. The one-entry
 window claim holds exactly when the server sits under a different
 administrative authority than the writer — the same condition every other
 mechanism in this specification states and cannot check.
+
+## 20. Sealed segments (`trail.NNNNN.jsonl`) — added in 0.1.5
+
+A hook that appends on every tool dispatch grows one file without bound, and
+one file shared by every project a developer touches braids unrelated
+histories into a single chain. Rotation fixes the first; per-project routing
+fixes the second. Neither is optional and neither has an environment
+variable: routing and rotation are on by default.
+
+### 20.1 Layout
+
+A trail lives in a per-project directory under the host's own waxseal home
+(`~/.claude/waxseal`, `$CODEX_HOME/waxseal`, `~/.cursor/waxseal`):
+
+```
+<host waxseal home>/trails/<slug>/trail.00000.jsonl
+                                  trail.00001.jsonl
+                                  ...
+                                  segments.lock
+slug = sanitize(basename(cwd))[:32] + "-" + SHA-256(cwd)[:12]
+```
+
+`sanitize` folds to lowercase `[a-z0-9-]`; an empty result is the literal
+`unnamed`. The digest is over the LITERAL `cwd` string — never a resolved
+path. Resolving is host-dependent (symlinks, case folding), so the same
+project would land in two slugs on whichever host disagreed, and a split
+trail is indistinguishable from a truncated one. A 48-bit collision merely
+MERGES two projects into one trail: weaker privacy separation, never a broken
+chain.
+
+Ordinals are zero-padded to five digits, so LEXICOGRAPHIC order over names
+equals CHRONOLOGICAL order. Timestamp names are not permitted: clock skew
+reverses them, and a verifier walking names would check the bindings
+backwards. An ordinal past `99999` is refused rather than widened.
+
+Every sidecar keeps deriving its own path as `<segment file name> + suffix`
+(section 9's `.anchors`, section 11's `.attest`/`.sealagg`, section 12's
+`.drops`, section 19's `.receipts`), so each segment carries its own
+sidecars with no rule of its own.
+
+The pre-0.1.5 shared trail (`<host waxseal home>/trail.jsonl`) is NOT
+migrated and NOT force-sealed. Routed appends simply stop arriving, and it
+keeps verifying forever under plain `waxseal verify`. A trail named through
+`WAXSEAL_TRAIL` keeps its location, and rotation still applies to it: on its
+first rotation it is ADOPTED as the base segment, and the successor is
+`<its stem>.00000.jsonl`.
+
+### 20.2 Rotation binding
+
+The active segment is the highest ordinal present. Rotation only ever CREATES
+a file; nothing is renamed, so every `chain_id` already recorded against a
+segment stays true.
+
+A new segment is a NEW chain: `seq` 0, `prev_hash` = 64 zeros (section 1).
+Segments are linked ONLY by a binding, never by `prev_hash` across a file
+boundary — extending the chain across files would make verifying the newest
+segment require every byte of every older one, which is the growth problem
+rotation exists to solve.
+
+The binding is the seq-0 entry of every segment that has a predecessor:
+
+```
+payload_type = "application/vnd.waxseal.rotation-binding+json"
+payload      = {"chain_id": "<slug>/<predecessor identity>",
+                "head_hash": "<hex64>",
+                "seq": <int>}
+```
+
+The triple is exactly the handoff binding of section D3 / `domain/handoff.py`,
+reused verbatim including its parser and `binding_holds`. Only the payload
+type and the `chain_id` convention are new. Reusing the handoff type is not
+permitted: it would make `verify-handoff` report rotation bindings, and the
+two carry different obligations — a rotation binding is MANDATORY at seq 0 of
+every segment with a predecessor (its absence is a verdict), a handoff
+binding is optional wherever it appears.
+
+`seq` and `head_hash` name the CLOSING segment's tail at the moment of
+rotation: its last `seq` and its `entry_hash` at that `seq`. The identity in
+`chain_id` is the predecessor's file name without the `.jsonl` suffix
+(`trail.00000`, or `trail` for an adopted unnumbered base). The slug half
+records which project directory the segment lived under at rotation time and
+is metadata only — resolution is by identity, so moving or renaming the
+directory is not a break.
+
+Rotation is triggered by ONE `stat` of the active segment at open: a
+threshold of 16 MiB, a constant in code with no environment variable. By-count
+triggering is not permitted (stored entry sizes differ by roughly 100x, so a
+count says almost nothing about bytes). Reading the closing segment's tail and
+appending the new segment's genesis binding are ONE critical section, held
+across BOTH files by `<dir>/segments.lock`, so N racing writers produce
+exactly one rotation. A writer publishes one last checkpoint for the segment
+it is sealing, best-effort, into that segment's own `.anchors` (section 9's
+sidecar, never a chain append); a failure there is labelled and never blocks.
+
+### 20.3 Verification (`waxseal segments <dir>`)
+
+Read-only: it appends nothing, to the trail or to any sidecar. It walks each
+stem's segments in ordinal order (an unnumbered base first, as the oldest),
+takes each segment's own `verify_chain` verdict (section 5), and checks each
+rotation binding against the predecessor's OWN current entry hashes.
+
+A binding that is PRESENT is checked wherever the segment sits, including at
+the lowest ordinal in the directory. Exempting the lowest one unconditionally
+would make prefix deletion free: remove segments 0 and 1, and segment 2
+becomes "the first" and is never asked about the binding it still carries.
+Only a segment whose seq 0 is not a binding is exempt, and then only at
+position 0.
+
+Per-segment state is `ok`, `broken`, `unverifiable` or `missing`; the
+aggregate is the join of them under the severity order of section 5's own
+verdicts (`ok` < `unverifiable` < `broken`), never a comparison of exit
+codes — 2 is the larger code but the weaker finding.
+
+| Reason | Class | Exit |
+|---|---|---|
+| `rotation_binding_missing` | a segment with a predecessor whose seq 0 is not a binding | 1 |
+| `rotation_binding_mismatch` | the predecessor's hash at that seq differs from the one the binding committed to — deterministic, the same footing as `verify-handoff` | 1 |
+| `segment_missing` | a surviving binding names a predecessor that is not present | 1 |
+| `rotation_binding_unreadable` | a binding payload this build cannot parse — unverifiable by name | 2 |
+| `rotation_binding_unchecked` | the predecessor is present but unreadable, so there was nothing to compare | 2 |
+| `segment_unreadable` | a segment's stored lines will not parse at all (a torn write from a crash mid-rotation, an out-of-band edit) | 2 |
+| section 5's own reasons, plus `broken_seq` | a break inside one segment's chain, prefixed with the segment name | 1 |
+
+An unknown schema fingerprint inside any segment stays `unverifiable` and
+MUST NOT become exit 1 (section 4's rule, unchanged one layer up).
+
+`segment_missing` is a BREAK, not an unverifiable state. A surviving binding
+is POSITIVE evidence that the named segment existed, which puts its absence
+on the same fail-closed footing as `binding_holds` itself; reporting it as
+unverifiable would let deleting a segment downgrade the whole directory from
+exit 1 to exit 2, letting an attacker choose their own verdict. A missing
+segment is nonetheless never rendered as "tampered": it gets its own state
+and its own line, because a legitimate archival move produces exactly the
+same evidence, and which of the two happened is an operator's decision, never
+this command's.
+
+Exit 3 means nothing was read: no such directory, or a directory holding no
+numbered segment. A trail that has never rotated is not a one-segment
+directory — `waxseal verify <trail>` is the command for it, and reporting "ok,
+all bindings hold" about a directory nothing was checked in would be a verdict
+about nothing.
+
+Honest limits, in the same terms as section 19: a rotation binding is as
+attacker-writable as the segments around it. An attacker who rewrites a
+closing segment AND regenerates every binding downstream of it is caught only
+against an external anchor (section 9) or a witness (section 14) that saw the
+old head, never by the bindings alone. What the bindings alone defeat is the
+cheaper attack: editing or deleting one segment without curating the ones that
+name it.

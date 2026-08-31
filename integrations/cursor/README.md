@@ -4,10 +4,31 @@ Tamper-evident audit trail for Cursor's Agent Hooks. Verified against
 https://cursor.com/docs/hooks (2026-08-21; hooks shipped in Cursor 1.7).
 
 Shell commands, MCP tool calls, file edits, prompts, and stop events are appended
-to a hash chain at `~/.cursor/waxseal/trail.jsonl` (override with
+to a hash chain at `~/.cursor/waxseal/trails/<slug>/trail.00000.jsonl` (override the location with
 `WAXSEAL_TRAIL`). Secrets are redacted **before** hashing and storage — including
 a key the agent writes into a file, which arrives here inside the
 `afterFileEdit` diff.
+
+Trails are **routed per project** (SPEC.md section 20): the project key is the
+hook event's `cwd`, so two projects never braid their histories into one file.
+The active segment is rolled over into a new sealed segment once it passes
+16 MiB, and the segments are linked by a rotation binding at each new
+segment's `seq` 0 — never by `prev_hash` across a file boundary.
+
+```bash
+waxseal segments ~/.cursor/waxseal/trails/<slug>          # every segment + its binding
+waxseal verify   ~/.cursor/waxseal/trails/<slug>/trail.00000.jsonl   # one segment
+```
+
+`waxseal segments` exits 0 intact / 1 broken / 2 unverifiable-present / 3
+nothing read. `WAXSEAL_TRAIL` still overrides the LOCATION, and is not a
+rotation off-switch: a trail named through it rotates too, and on its first
+rotation it is adopted as the base segment. A pre-0.1.5
+`~/.cursor/waxseal/trail.jsonl` is neither migrated nor sealed — it stops receiving
+appends and keeps verifying with plain `waxseal verify`.
+
+Cursor sends `cwd` on the shell events and `workspace_roots` on the others, so
+the first workspace root is the project key when there is no `cwd`.
 
 ## Install
 
@@ -35,7 +56,7 @@ Then add to `~/.cursor/hooks.json` (or a project's `.cursor/hooks.json`):
 ## Verify anytime
 
 ```bash
-waxseal verify ~/.cursor/waxseal/trail.jsonl
+waxseal verify ~/.cursor/waxseal/trails/<slug>/trail.00000.jsonl
 # exit 0 intact / 1 broken (prints first bad seq) / 2 unverifiable rows present
 ```
 

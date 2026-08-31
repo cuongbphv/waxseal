@@ -204,5 +204,10 @@ class TestDefaultTrailLocation:
             env={"PYTHONPATH": SRC, "HOME": str(tmp_path)},
         )
         assert proc.returncode == 0
-        trail = tmp_path / ".cursor" / "waxseal" / "trail.jsonl"
+        from waxseal.domain.segments import project_slug
+
+        trail = (
+            tmp_path / ".cursor" / "waxseal" / "trails"
+            / project_slug(shell_event()["cwd"]) / "trail.00000.jsonl"
+        )
         assert AuditLog.open(trail).verify(measure_drops=False).checked == 1

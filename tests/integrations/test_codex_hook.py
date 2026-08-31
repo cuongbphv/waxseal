@@ -164,7 +164,12 @@ class TestDefaultTrailLocation:
             env={"PYTHONPATH": SRC, "HOME": str(tmp_path)},
         )
         assert proc.returncode == 0
-        trail = tmp_path / ".codex" / "waxseal" / "trail.jsonl"
+        from waxseal.domain.segments import project_slug
+
+        trail = (
+            tmp_path / ".codex" / "waxseal" / "trails"
+            / project_slug(pre_tool_use()["cwd"]) / "trail.00000.jsonl"
+        )
         assert AuditLog.open(trail).verify(measure_drops=False).checked == 1
 
     def test_codex_home_env_is_respected(self, tmp_path: Path) -> None:
@@ -176,5 +181,10 @@ class TestDefaultTrailLocation:
             env={"PYTHONPATH": SRC, "HOME": str(tmp_path), "CODEX_HOME": str(tmp_path / "cx")},
         )
         assert proc.returncode == 0
-        trail = tmp_path / "cx" / "waxseal" / "trail.jsonl"
+        from waxseal.domain.segments import project_slug
+
+        trail = (
+            tmp_path / "cx" / "waxseal" / "trails"
+            / project_slug(pre_tool_use()["cwd"]) / "trail.00000.jsonl"
+        )
         assert AuditLog.open(trail).verify(measure_drops=False).checked == 1

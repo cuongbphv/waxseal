@@ -177,5 +177,12 @@ class TestDefaultTrailLocation:
             env={"PYTHONPATH": SRC, "HOME": str(tmp_path)},
         )
         assert proc.returncode == 0
-        trail = tmp_path / ".claude" / "waxseal" / "trail.jsonl"
+        # 0.1.5: the default is routed per project (the event's cwd), so the
+        # host directory rung is unchanged but a slug directory sits under it.
+        from waxseal.domain.segments import project_slug
+
+        trail = (
+            tmp_path / ".claude" / "waxseal" / "trails"
+            / project_slug("/work/project") / "trail.00000.jsonl"
+        )
         assert AuditLog.open(trail).verify(measure_drops=False).checked == 1
