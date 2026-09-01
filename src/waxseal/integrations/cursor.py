@@ -24,6 +24,15 @@ new environment variable and no flag. `WAXSEAL_TRAIL` still wins on LOCATION
 and is NOT a rotation off-switch: a trail named through it rotates too, and on
 its first rotation it is adopted as the base segment.
 
+Off-box archiving (`domain/archive.py`) is opt-in and, until this was wired, was
+unreachable from any hook at all: `WAXSEAL_ARCHIVE` names where a SEALED
+segment is copied — `s3://bucket/prefix/`, or a chain server's `https://`
+base URL with `WAXSEAL_ARCHIVE_API_KEY` as its own import-write credential
+(deliberately neither `WAXSEAL_API_KEY` nor `WAXSEAL_WITNESS_API_KEY`; see
+`integrations/_archive.py`). Rotation itself still takes no environment
+variable and no flag — this configures only where its output goes, and unset
+means nothing is sent and the rotation line reads `archive_not_attempted`.
+
 Secrets are redacted BEFORE hashing/storage (RegexRedactor): a key leaked
 into a shell command, written into a file edit diff, or pasted into a
 prompt reaches this trail only as ***REDACTED***.
@@ -37,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations._archive import archive_destination
 from waxseal.integrations._trail import home_base, resolve_trail, routed_trail
 from waxseal.sources.rotation import (
     DEFAULT_MAX_SEGMENT_BYTES,
@@ -140,6 +150,11 @@ def main() -> int:
         log = open_segmented(
             target,
             max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES,
+            # J3's off-box copy, opt-in through `WAXSEAL_ARCHIVE`. `None` (the
+            # unconfigured case) is passed through deliberately: rotation renders
+            # it as `archive_not_attempted`, which is the line an operator who
+            # believes they configured one needs to see.
+            archive=archive_destination(),
             redactor=RegexRedactor(),
             record_drops=True,
         )

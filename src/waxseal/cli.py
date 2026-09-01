@@ -44,7 +44,11 @@ from waxseal.domain.preflight import (
     ladder_for,
     render_ladder,
 )
-from waxseal.domain.report import SCOPE_LINE, CheckSummary
+from waxseal.domain.report import (
+    RECEIPTS_NOT_RECORDED_REASON,
+    SCOPE_LINE,
+    CheckSummary,
+)
 from waxseal.domain.rfc3161 import NONCE_MISMATCH, RECEIPT_IMPRINT_MISMATCH
 from waxseal.domain.segments import SegmentRead
 from waxseal.domain.separation import (
@@ -785,7 +789,13 @@ _RECEIPTS_ABSENT_LINE: Final = (
 # The reason string and the line above are what keep them apart, so the two are
 # defined once, together, instead of rebuilt at each return.
 _RECEIPTS_NOT_RECORDED: Final = CheckSummary(
-    ok=True, checked=0, reason="no_receipts_recorded"
+    # The reason string lives in domain/report.py, because `report` renders
+    # this same state into the artifact an auditor keeps and must not print it
+    # as a flavour of "ok". Shared, never re-spelled: two surfaces agreeing by
+    # coincidence is how absent quietly becomes clean.
+    ok=True,
+    checked=0,
+    reason=RECEIPTS_NOT_RECORDED_REASON,
 )
 
 # SPEC.md section 19's honest limit, printed rather than filed in a doc: the
@@ -1738,6 +1748,13 @@ def _report(
         if count is not None:
             result = replace(result, dropped_writes=count, drops_source="sidecar")
 
+    # Unconditional, exactly as in `_verify`: there is nothing external to
+    # contact, and the absent case is the one an auditor most needs printed.
+    # `report` had no receipts dimension at all until this, so the document
+    # that outlives the terminal was the one place receipt coverage could not
+    # be read off (waxseal-fg4.24).
+    receipts = _receipts_check(log, trail).summary
+
     # τ (waxseal-mfi, closing conformance.md gap G1): `None` when no --pin was
     # given, or the pin carries no declared_topology: same rule as _verify's
     # own derivation, never inferred as 0 or 1 either way.
@@ -1749,6 +1766,7 @@ def _report(
         anchors=anchors,
         pin=pin,
         witnesses=witness_verdicts,
+        receipts=receipts,
         declared_topology=declared_topology,
     )
     if as_json:
@@ -1762,7 +1780,10 @@ def _report(
         codes.append(1)
     elif result.unverifiable:
         codes.append(2)
-    for summary in (anchors, pin):
+    # receipts joins anchors/pin in the verdict, not only in the prose: a
+    # document that prints RECEIPTS BROKEN and exits 0 is the collapse this
+    # library exists to prevent, and `verify` has always counted it.
+    for summary in (anchors, pin, receipts):
         if summary is not None:
             codes.append(_Check(summary, "").exit_code)
     if witness_verdicts is not None:

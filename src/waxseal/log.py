@@ -136,6 +136,7 @@ class AuditLog:
         record_drops: bool = False,
         chain_id: str = "default",
         timeout: float = 10.0,
+        receipts_trail: Path | str | None = None,
     ) -> AuditLog:
         if isinstance(path, str) and path.startswith(("http://", "https://")):
             # MUST come before Path(path): Path() collapses "//" and drops
@@ -154,6 +155,15 @@ class AuditLog:
                 api_key=os.environ.get("WAXSEAL_API_KEY"),
                 chain_id=chain_id,
                 timeout=timeout,
+                # SPEC.md section 19: where the server's per-append
+                # acknowledgment is filed. Threaded from here because
+                # RemoteBackend has accepted it since 63dbe2d and no documented
+                # entry point passed it, which made the sidecar reachable only
+                # by hand-constructing the backend -- built and unreachable is
+                # not shipped. `None` stays "not recorded", never an error: a
+                # receipt is corroboration, and the chain lives server-side
+                # either way.
+                receipts_trail=receipts_trail,
             )
             return cls(
                 remote_backend,
@@ -164,6 +174,18 @@ class AuditLog:
                 anchor_sink=anchor_sink,
                 anchor_every=anchor_every,
                 drop_recorder=None,
+            )
+        if receipts_trail is not None:
+            # The mirror image of the record_drops refusal above. A receipt is
+            # a SERVER's acknowledgment that it accepted an append; a local
+            # backend issues none, so accepting the argument here would name a
+            # sidecar location nothing would ever write to -- an operator
+            # reading "not recorded" could not tell that from a server that
+            # never issued one.
+            raise ValueError(
+                "receipts_trail requires a remote (http/https) trail target: a "
+                "receipt is the server's own acknowledgment of an append, and a "
+                "local backend issues none"
             )
         p = Path(path).expanduser()
         if p.suffix == ".jsonl":
