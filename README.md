@@ -154,6 +154,7 @@ Shipped today:
 | `s3` | `pip install waxseal[s3]` | `boto3` | an S3 client for `S3Backend` (conditional-PUT appends) |
 | `postgres` | `pip install waxseal[postgres]` | `psycopg[binary]>=3.1` | a connection factory for `PostgresBackend` |
 | `rfc3161` | `pip install waxseal[rfc3161]` | `cryptography>=40` | nothing — see the note below |
+| `evm` | `pip install waxseal[evm]` | none — deliberately empty, see below | a `Signer` for the on-chain ledger layer's write path |
 
 `rfc3161` is the one extra waxseal does import itself, inside a single function
 (`adapters/rfc3161_verify.py`), which is why its "inject" column is empty. It
@@ -164,19 +165,27 @@ all — the extra absent included — is exit 2 with a label saying which, never
 silent exit 0. Without the flag nothing changes: receipts are checked
 structurally, exactly as before. See [SPEC.md](SPEC.md) section 17.1.
 
+`evm` is shipped, and its emptiness is the design, not an unfinished feature:
+the on-chain ledger layer (`ports/ledger.py`, `domain/bond.py`,
+`domain/liveness.py`, `domain/abi.py`, `domain/registry.py`,
+`adapters/evm.py`) reads a contract over the same stdlib JSON-RPC `Transport`
+`RemoteBackend` already uses (`eth_call`, no client to fetch) and writes
+through a `Signer` the operator constructs and injects — there is nothing for
+`pip` to pull in. The extra exists only so `pip install waxseal[evm]` is a
+valid thing to type and the capability has a name in the metadata; it never
+becomes a route by which a crypto library reaches the core. The layer is
+chain-agnostic behind the port — EVM is the first adapter, not the design.
+CLI surface: `waxseal ledger-status`, `waxseal registry publish`, `waxseal
+bond deposit`/`bond prove`, and `verify`/`report --rpc/--liveness/--registry`,
+`anchor --evm-liveness` (see the CLI list under [Usage](#usage) below) —
+checked end-to-end against two live anvil chains running real Foundry contracts
+(`contracts/src/AnchoringLiveness.sol`, `BondedCheckpoints.sol`,
+`FingerprintRegistry.sol`; commits `26b074c`/`c21e0e6`/`20f2762`/`26e3e91`).
+[docs/paper/conformance.md](docs/paper/conformance.md) tracks this layer row
+by row, including two open, non-blocking gaps recorded there rather than
+smoothed over.
+
 (`dev` also exists, for running the test suite. It is not a capability extra.)
-
-Planned, and **not yet shipped** — do not write code against these:
-
-| Extra | Intended capability |
-|---|---|
-| `evm` | the on-chain ledger layer |
-
-It is named in the 0.1.5 contract and does not appear in `pyproject.toml`, so
-asking for it installs nothing extra. This repository does not
-describe an unshipped extra as available: written-but-unwired is not shipped, and
-[docs/paper/conformance.md](docs/paper/conformance.md) keeps that ledger row by
-row.
 
 Adding a *hard* dependency is a different question, and the answer is no. Extras
 are the sanctioned route.
@@ -227,9 +236,16 @@ waxseal head trail.jsonl       # print the chain head (seq + entry_hash) for anc
 waxseal checkpoint trail.jsonl # print {seq, entry_hash, root} — a batch root, not just the tip
 waxseal anchor trail.jsonl     # append a checkpoint to the local .anchors sidecar
 waxseal verify --anchors trail.jsonl  # also check trail history against .anchors
+waxseal preflight trail.jsonl  # which attacker-capability rung this config stops; always exit 0 (exit 3: no such trail)
+waxseal segments trail-dir/    # verify every sealed segment + rotation binding in a directory; read-only
 
 # Any of the above except `anchor` also accepts a remote chain server URL:
 waxseal verify http://chain.example.com/v1/chains/default
+
+# On-chain ledger layer (waxseal[evm]; see Capability extras above):
+waxseal ledger-status trail.jsonl --liveness 0xADDR --rpc https://rpc1 --rpc https://rpc2
+waxseal registry publish --descriptor-of FINGERPRINT --registry 0xADDR --rpc https://rpc1 --rpc https://rpc2
+waxseal bond deposit --bond 0xADDR --amount-wei 1000000000000000000 --rpc https://rpc1 --rpc https://rpc2
 ```
 
 ## Storage backends
@@ -617,6 +633,30 @@ Scope note for the coding tools: these hooks give you a parallel,
 tamper-evident, **secret-free** record of every action. They do not (and cannot)
 rewrite the tool's own transcript files. If a key lands in one of those, rotate it. The
 waxseal trail is the copy you can keep, share, and verify.
+
+## Self-hosted server
+
+`server/` is a self-hosted chain server, witness, and public read point, with
+a read-only Vue 3 web portal — a separate application on its own FastAPI +
+uvicorn stack, not part of the `waxseal` wheel (CLAUDE.md rule 1 constrains
+the library's dependencies, not this directory's; nothing here is packaged
+into it). Its write path uses `waxseal` as a library; every read/verify route
+shells out to `python -m waxseal.cli` and reports the exit code, so the CLI
+stays the one verdict authority and no route ever edits, deletes, reorders,
+or repairs an entry. Three credentials stay apart: the chain API key, the
+witness key, and a credential-free public read point with no write route at
+all. Operators, roles, and API keys live in PostgreSQL — trails themselves
+stay plain JSONL files a third party can verify with the stock `waxseal
+verify`, never something only this server can read.
+
+```bash
+docker compose -f server/docker-compose.yml up --build   # http://127.0.0.1:8000
+```
+
+[server/README.md](server/README.md) covers the layout;
+[server/docs/deployment.md](server/docs/deployment.md) covers configuration,
+data layout, TLS termination at a reverse proxy, and what self-hosting does
+and does not buy.
 
 ## Guarantees and non-guarantees
 
