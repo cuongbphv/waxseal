@@ -141,6 +141,7 @@ class TestTransitiveAnchoringTwoLevel:
 
         # Origin-side leg: the binding this anchored entry carries still
         # names exactly A's current head at seq_a.
+        assert b_entries[0].payload is not None
         binding = from_payload(json.loads(b_entries[0].payload))
         assert binding == HandoffBinding(chain_id="agent-a", seq=seq_a, head_hash=hash_a)
         assert binding_holds(binding, log_a.entry_hashes()) is True
@@ -150,6 +151,7 @@ class TestTransitiveAnchoringTwoLevel:
     ) -> None:
         _, log_b, seq_a, hash_a = self._build(tmp_path)
         b_entries = list(log_b.entries())
+        assert b_entries[0].payload is not None
         binding = from_payload(json.loads(b_entries[0].payload))
 
         # An attacker replaces A's ENTIRE trail with a different, but
@@ -205,6 +207,7 @@ class TestMultiHopDelegation:
             root=checkpoint_c.root,
         )
 
+        assert c_entries[0].payload is not None
         binding_b = from_payload(json.loads(c_entries[0].payload))
         assert binding_b == HandoffBinding(chain_id="agent-b", seq=seq_b, head_hash=hash_b)
         assert binding_holds(binding_b, log_b.entry_hashes()) is True  # pins B
@@ -213,6 +216,7 @@ class TestMultiHopDelegation:
         # hash that C's binding just confirmed against B's live trail --
         # reading it back off B pins A one hop further out.
         b_entries = list(log_b.entries())
+        assert b_entries[0].payload is not None
         binding_a = from_payload(json.loads(b_entries[0].payload))
         assert binding_a == HandoffBinding(chain_id="agent-a", seq=seq_a, head_hash=hash_a)
         assert binding_holds(binding_a, log_a.entry_hashes()) is True  # pins A
@@ -220,6 +224,7 @@ class TestMultiHopDelegation:
     def test_multi_hop_pin_catches_a_rewrite_two_hops_up(self, tmp_path: Path) -> None:
         log_a, log_b, log_c, seq_a, hash_a, _seq_b, _hash_b = self._build(tmp_path)
         b_entries = list(log_b.entries())
+        assert b_entries[0].payload is not None
         binding_a = from_payload(json.loads(b_entries[0].payload))
 
         rewritten_a = open_log(tmp_path / "a-rewritten.jsonl")

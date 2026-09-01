@@ -1,10 +1,18 @@
 """Tests for the CLI contract (CLAUDE.md): verify exits 0 intact / 1 broken /
 2 intact-but-unverifiable-present. The CLI never writes to the log."""
 
+from __future__ import annotations
+
+import http.server
 import json
+import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from tests.adapters.fake_chain_server import FakeChainServer
 
 from waxseal import AuditLog
 from waxseal.cli import main
@@ -19,14 +27,14 @@ def make_trail(path: Path, n: int = 3) -> None:
 
 
 class TestVerify:
-    def test_intact_trail_exits_0(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_intact_trail_exits_0(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path)
         assert main(["verify", str(path)]) == 0
         assert "ok" in capsys.readouterr().out
 
     def test_broken_trail_exits_1_and_names_the_break(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 4)
@@ -42,7 +50,7 @@ class TestVerify:
         assert "entry_hash_mismatch" in out
 
     def test_unverifiable_rows_exit_2_not_1(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # The beads-v1.2.2 replay: rows from an unknown (newer) schema must
         # NOT be reported as tampering — exit 2, distinct from broken.
@@ -73,7 +81,7 @@ class TestVerify:
 
 
 class TestTailAndInspect:
-    def test_tail_prints_last_entries(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_tail_prints_last_entries(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 5)
         assert main(["tail", str(path), "-n", "2"]) == 0
@@ -83,7 +91,7 @@ class TestTailAndInspect:
         assert "seq=2" not in out
 
     def test_inspect_prints_fingerprint_summary(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
@@ -103,7 +111,7 @@ class TestDropCountReporting:
     touching the chain's own exit code (completeness != integrity)."""
 
     def test_no_sidecar_prints_nothing_new(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path)
@@ -111,7 +119,7 @@ class TestDropCountReporting:
         assert "dropped_writes" not in capsys.readouterr().out
 
     def test_sidecar_drops_are_reported_on_verify(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         log = AuditLog.open(path, record_drops=True)
@@ -126,7 +134,7 @@ class TestDropCountReporting:
         assert f"{path}.drops" in out
 
     def test_sidecar_drops_are_reported_on_inspect(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         log = AuditLog.open(path, record_drops=True)
@@ -137,7 +145,7 @@ class TestDropCountReporting:
         assert "dropped_writes >= 1" in capsys.readouterr().out
 
     def test_drop_count_does_not_change_a_broken_chains_exit_code(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         log = AuditLog.open(path, record_drops=True)
@@ -159,7 +167,7 @@ class TestDropCountReporting:
 
 class TestHead:
     def test_head_prints_seq_and_entry_hash_for_anchoring(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # `waxseal head` exists so operators can anchor the chain head
         # externally (OpenTimestamps / RFC 3161 / a git commit): an attacker
@@ -184,7 +192,7 @@ class TestHead:
 
 class TestCheckpoint:
     def test_checkpoint_prints_seq_entry_hash_and_root(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
@@ -221,7 +229,7 @@ class TestCheckpoint:
 
 class TestAnchorCommand:
     def test_anchor_appends_checkpoint_to_sidecar_and_prints_it(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
@@ -279,13 +287,17 @@ def _consistent_forge_at(path: Path, position: int) -> None:
         objs[i]["header"]["prev_hash"] = prev
         header = EntryHeader(**objs[i]["header"])
         encoder = registry.encoder_for(header.hash_version)
+        # This helper only ever re-signs rows this test just wrote under a
+        # fingerprint its own registry knows -- an unresolved encoder here
+        # would mean the fixture itself is broken, not an unverifiable row.
+        assert encoder is not None
         objs[i]["entry_hash"] = compute_entry_hash(header, frame=encoder)
         prev = objs[i]["entry_hash"]
     path.write_text("\n".join(json.dumps(o) for o in objs) + "\n")
 
 
 class TestVerifyAnchors:
-    def test_ok_with_intact_anchors(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_ok_with_intact_anchors(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
         main(["anchor", str(path)])
@@ -293,7 +305,7 @@ class TestVerifyAnchors:
         assert "anchors ok" in capsys.readouterr().out
 
     def test_no_sidecar_keeps_the_chain_exit_code_absence_is_not_failure(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
@@ -301,7 +313,7 @@ class TestVerifyAnchors:
         assert "no anchors found" in capsys.readouterr().out
 
     def test_consistent_suffix_rewrite_after_anchor_is_caught(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # A consistent hash-chain forgery that reaches the anchored seq
         # always changes THAT entry's own hash too (that is the point of
@@ -320,7 +332,7 @@ class TestVerifyAnchors:
         assert "ANCHOR BROKEN at seq=3: anchor_entry_hash_mismatch" in out
 
     def test_truncation_past_the_anchored_seq_is_beyond_head(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 4)
@@ -333,7 +345,7 @@ class TestVerifyAnchors:
         assert "ANCHOR BROKEN at seq=3: anchor_beyond_head" in out
 
     def test_malformed_anchor_record_is_a_verdict_not_a_crash(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
@@ -345,7 +357,7 @@ class TestVerifyAnchors:
         assert "malformed_anchor" in capsys.readouterr().out
 
     def test_forging_both_trail_and_sidecar_consistently_is_undetected_locally(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # Honest limit (documented in REMOTE.md/SPEC.md, not hidden): a local
         # sidecar is not an independent witness. An attacker who controls
@@ -364,7 +376,7 @@ class TestVerifyAnchors:
 
 class TestMissingTrail:
     def test_verify_on_missing_sqlite_path_does_not_create_a_database(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # Read-only contract: opening a missing .db used to CREATE an empty
         # 8KB database (mkdir + DDL) and then report "ok, checked=0".
@@ -387,10 +399,9 @@ class TestRemoteURLTarget:
     transport — proves the URL-dispatch path (log.py + cli.py) works with a
     real socket, the same bar test_remote.py's own real-server test sets."""
 
-    def _start_server(self):  # type: ignore[no-untyped-def]
-        import http.server
-        import threading
-
+    def _start_server(
+        self,
+    ) -> tuple[FakeChainServer, http.server.HTTPServer, threading.Thread]:
         from tests.adapters.fake_chain_server import FakeChainServer
 
         server = FakeChainServer()
@@ -420,7 +431,7 @@ class TestRemoteURLTarget:
         return server, httpd, thread
 
     def test_verify_against_a_reachable_remote_chain_exits_0(
-        self, capsys: pytest.CaptureFixture
+        self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         from waxseal import AuditLog
 
@@ -450,7 +461,7 @@ class TestRemoteURLTarget:
         assert main(["verify", url]) == 3
 
     def test_tamper_on_the_server_is_caught_with_the_right_broken_seq(
-        self, capsys: pytest.CaptureFixture
+        self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         from waxseal import AuditLog
 
@@ -472,7 +483,7 @@ class TestRemoteURLTarget:
             thread.join(timeout=5)
 
     def test_zero_entries_on_a_url_target_gets_an_honest_caveat(
-        self, capsys: pytest.CaptureFixture
+        self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # The wire contract's GET /entries 404 means "empty" identically for
         # a genuinely fresh chain and for a mistyped chain_id/wrong path —
@@ -493,7 +504,7 @@ class TestRemoteURLTarget:
             thread.join(timeout=5)
 
     def test_verify_anchors_on_a_url_target_is_labelled_not_silent(
-        self, capsys: pytest.CaptureFixture
+        self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # main() already forces check_anchors False for a URL target (no
         # local .anchors sidecar to check) — CLAUDE.md rule 6 requires that
@@ -514,7 +525,7 @@ class TestRemoteURLTarget:
             thread.join(timeout=5)
 
     def test_anchor_command_is_refused_for_a_url_target(
-        self, capsys: pytest.CaptureFixture
+        self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # No local sidecar location to write .anchors to — refuse instead of
         # guessing one (M7 CLI decision, documented in cli.py's main()).
@@ -579,7 +590,7 @@ class TestMixedVersionTrailThroughRealCli:
             log.append(payload={"i": i}, payload_type=PT)
 
     def test_verify_on_mixed_trail_exits_0(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         self._build_mixed_trail(path)
@@ -588,7 +599,7 @@ class TestMixedVersionTrailThroughRealCli:
         assert "ok (checked=4)" in capsys.readouterr().out
 
     def test_report_json_on_mixed_trail_counts_both_the_v1_and_v2_rows(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # `checked` counting all 4 rows (not just the 3 real v2 appends) is
         # the proof that the registry dispatch actually ran for the v1 row
@@ -605,7 +616,7 @@ class TestMixedVersionTrailThroughRealCli:
 
 class TestReportCommandThroughRealCli:
     def test_report_json_on_an_intact_v2_trail_exits_0(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)  # real AuditLog.append() calls -- lp64v2 by default
@@ -618,7 +629,7 @@ class TestReportCommandThroughRealCli:
 
 class TestExportProofAndVerifyProofThroughRealCli:
     def test_export_then_verify_proof_round_trips_a_v2_row(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # This is the CLI-level proof that domain/export.py's
         # registry.encoder_for() dispatch fix (landed in waxseal-7tk.7.4,
@@ -638,7 +649,7 @@ class TestExportProofAndVerifyProofThroughRealCli:
         assert "verified against root" in out
 
     def test_export_proof_for_a_missing_seq_exits_1(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 2)  # seq 0, 1 only
@@ -649,7 +660,7 @@ class TestExportProofAndVerifyProofThroughRealCli:
 
 class TestConsistencyCommandThroughRealCli:
     def test_current_head_extends_an_earlier_checkpoint_on_a_v2_trail(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 2)  # seq 0, 1 -- real v2 appends
