@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.5] - 2026-09-01
 
 ### Added
 
@@ -142,9 +142,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Rotation triggers on one `stat` at open against 16 MiB — a constant in code with no
   environment variable, because a threshold an operator can raise is one that gets raised
   the first time rotation is inconvenient, and the file it bounds is the one an incident
-  review has to read. At the measured 1.9 KB per stored hook entry that is roughly 8.8k
-  entries per segment. Triggering by entry count was rejected: stored line sizes differ by
-  about two orders of magnitude (a prompt line versus a clipped terminal dump), so a count
+  review has to read. Measured stored hook entries span 650 B to 6,374 B
+  (`tests/test_entry_size_receipt.py`), roughly 2.6k-25.8k entries per segment. Triggering
+  by entry count was rejected: stored line sizes differ by roughly an order of magnitude (a prompt line versus a clipped terminal dump), so a count
   says almost nothing about bytes. The notice prints value *and* provenance — `rotated at
   16777216 bytes (built-in default)` — because a bare number reads as something an operator
   configured (rule 6 applied to a threshold).
