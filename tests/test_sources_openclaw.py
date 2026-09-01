@@ -215,6 +215,10 @@ class TestGaps:
         # Rows 3..9 aged out (or were dropped) before this run saw them.
         result = ingest(log, run_fn=FakeLedger([rec(10), rec(11)]))
 
+        # This is the happy path: gaps=None means "not measured" (an
+        # exceptional ingest kind, domain/openclaw.py), which does not apply
+        # here.
+        assert result.gaps is not None
         assert len(result.gaps) == 1
         gap = result.gaps[0]
         assert (gap.missing_after, gap.missing_before) == (2, 10)
@@ -245,6 +249,7 @@ class TestGaps:
 
         result = ingest(log, run_fn=FakeLedger([rec(1), rec(2), rec(9), rec(10)]))
 
+        assert result.gaps is not None
         assert [(g.missing_after, g.missing_before) for g in result.gaps] == [(2, 9)]
         assert result.ingested == 4
 

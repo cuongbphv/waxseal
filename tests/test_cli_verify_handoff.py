@@ -196,6 +196,8 @@ class TestHeaderOnlyPayloadUnavailable:
         # tests/test_sources_decisions.py::test_entry_without_payload_bytes_
         # yields_none uses to reach that branch: poke a real backend's
         # stored Entry to drop its payload after the fact.
+        from typing import cast
+
         from waxseal.adapters.memory import MemoryBackend
         from waxseal.cli import _verify_handoff
         from waxseal.domain.header import Entry
@@ -206,7 +208,10 @@ class TestHeaderOnlyPayloadUnavailable:
         log_delegate = AuditLog(MemoryBackend())
         record_handoff(log_delegate, chain_id="origin-chain", seq=0, head_hash="a" * 64)
         stored = list(log_delegate._backend.entries())[0]
-        log_delegate._backend._entries[0] = Entry(  # type: ignore[attr-defined]
+        # AuditLog.__init__ types its backend param `JSONLBackend | Any`;
+        # cast to the concrete backend this test actually constructed.
+        delegate_backend = cast(MemoryBackend, log_delegate._backend)
+        delegate_backend._entries[0] = Entry(
             header=stored.header, entry_hash=stored.entry_hash, payload=None
         )
 

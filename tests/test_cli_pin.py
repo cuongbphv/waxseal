@@ -22,8 +22,13 @@ import json
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from tests.adapters.fake_chain_server import FakeChainServer
 
 from waxseal import AuditLog
 from waxseal.cli import main
@@ -417,7 +422,9 @@ class TestRemoteTarget:
     histories, neither able to see the other's. That needs a witness.)
     """
 
-    def _start_server(self):  # type: ignore[no-untyped-def]
+    def _start_server(
+        self,
+    ) -> tuple[FakeChainServer, http.server.HTTPServer, threading.Thread]:
         import http.server
         import threading
 
@@ -522,7 +529,9 @@ class _WitnessService:
         return 200, json.dumps({"checkpoints": self.records}).encode()
 
 
-def _start_witness(service: _WitnessService):  # type: ignore[no-untyped-def]
+def _start_witness(
+    service: _WitnessService,
+) -> tuple[http.server.HTTPServer, threading.Thread, str]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def _dispatch(self, method: str) -> None:
             length = int(self.headers.get("Content-Length", 0))
@@ -625,7 +634,10 @@ class TestDeclaredTopologyShortfall:
         assert "pin ok" in out  # the trail itself still verifies
 
     def test_shortfall_does_not_fire_when_observed_meets_or_exceeds_declared(
-        self, tmp_path: Path, witness_service, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        witness_service: tuple[_WitnessService, str],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         service, url = witness_service
         trail = tmp_path / "trail.jsonl"
@@ -1559,7 +1571,7 @@ class TestDeclareViaCLI:
 
 
 @pytest.fixture
-def witness_service():  # type: ignore[no-untyped-def]
+def witness_service() -> Iterator[tuple[_WitnessService, str]]:
     service = _WitnessService()
     httpd, thread, url = _start_witness(service)
     try:

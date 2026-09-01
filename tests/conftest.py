@@ -29,8 +29,11 @@ def pytest_terminal_summary(terminalreporter: Any) -> None:
     reasons: dict[str, int] = {}
     for report in terminalreporter.stats.get("skipped", []):
         longrepr = getattr(report, "longrepr", None)
-        is_location = isinstance(longrepr, tuple) and len(longrepr) == 3
-        reason = longrepr[2] if is_location else str(longrepr)
+        reason = (
+            longrepr[2]
+            if isinstance(longrepr, tuple) and len(longrepr) == 3
+            else str(longrepr)
+        )
         if UNMEASURED_MARKER in reason:
             reasons[reason] = reasons.get(reason, 0) + 1
     if not reasons:

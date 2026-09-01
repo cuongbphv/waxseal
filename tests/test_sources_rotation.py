@@ -90,7 +90,8 @@ def grow_over(base: Path, log: AuditLog, threshold: int = TINY) -> None:
 
 def genesis_of(path: Path) -> dict[str, Any]:
     first = path.read_text(encoding="utf-8").splitlines()[0]
-    return json.loads(first)
+    result: dict[str, Any] = json.loads(first)
+    return result
 
 
 def payload_of(line: dict[str, Any]) -> Any:

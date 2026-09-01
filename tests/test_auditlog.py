@@ -8,7 +8,7 @@ import pytest
 from waxseal import AuditLog
 from waxseal.domain.fingerprint import fingerprint
 from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash, header_frame
-from waxseal.domain.header import EntryHeader
+from waxseal.domain.header import Entry, EntryHeader
 from waxseal.domain.registry import VersionRegistry
 from waxseal.domain.verify import verify_chain
 
@@ -264,9 +264,7 @@ class TestLp64v2IsTheWiredDefault:
 
         payload0 = b'{"i":0}'
 
-        def build_v1(seq: int, prev_hash: str) -> object:
-            from waxseal.domain.header import Entry
-
+        def build_v1(seq: int, prev_hash: str) -> Entry:
             header = EntryHeader(
                 seq=seq,
                 ts=TS,

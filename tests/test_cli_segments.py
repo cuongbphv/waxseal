@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -66,7 +67,7 @@ def rewrite(path: Path, line_no: int, mutate: object) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def set_payload(obj: dict, payload: object) -> None:
+def set_payload(obj: dict[str, Any], payload: object) -> None:
     obj["payload_b64"] = base64.b64encode(
         json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     ).decode("ascii")
@@ -216,7 +217,7 @@ class TestBrokenBindings:
             ])
         )
 
-        def flip(obj: dict) -> None:
+        def flip(obj: dict[str, Any]) -> None:
             set_payload(obj, {**original, "head_hash": "f" * 64})
 
         rewrite(segment, 0, flip)
@@ -259,7 +260,7 @@ class TestUnverifiable:
         segment = tmp_path / "trail.00001.jsonl"
         last = len(segment.read_text(encoding="utf-8").splitlines()) - 1
 
-        def restamp(obj: dict) -> None:
+        def restamp(obj: dict[str, Any]) -> None:
             obj["header"]["hash_version"] = "e" * 64
             obj["entry_hash"] = compute_entry_hash(EntryHeader(**obj["header"]))
 
@@ -275,7 +276,7 @@ class TestUnverifiable:
         rotate(tmp_path / "trail.00000.jsonl")
         segment = tmp_path / "trail.00001.jsonl"
 
-        def blank(obj: dict) -> None:
+        def blank(obj: dict[str, Any]) -> None:
             # A binding the payload hash still matches, but whose fields this
             # build cannot read: unverifiable by name, never tampered.
             payload = {"chain_id": "slug/trail.00000"}
@@ -326,7 +327,7 @@ class TestBrokenChainInsideASegment:
         segment = tmp_path / "trail.00001.jsonl"
         last = len(segment.read_text(encoding="utf-8").splitlines()) - 1
 
-        def touch_ts(obj: dict) -> None:
+        def touch_ts(obj: dict[str, Any]) -> None:
             obj["header"]["ts"] = "2027-01-01T00:00:00+00:00"
 
         rewrite(segment, last, touch_ts)
@@ -346,7 +347,7 @@ class TestBrokenChainInsideASegment:
         segment = tmp_path / "trail.00002.jsonl"
         last = len(segment.read_text(encoding="utf-8").splitlines()) - 1
 
-        def touch_ts(obj: dict) -> None:
+        def touch_ts(obj: dict[str, Any]) -> None:
             obj["header"]["ts"] = "2027-01-01T00:00:00+00:00"
 
         rewrite(segment, last, touch_ts)

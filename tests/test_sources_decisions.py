@@ -227,13 +227,20 @@ class TestIterDecisions:
     def test_entry_without_payload_bytes_yields_none(self, tmp_path: Path) -> None:
         # A header-only reader (Entry.payload is None) has nothing to parse;
         # that is "not available here", not "malformed".
+        from typing import cast
+
         from waxseal.adapters.memory import MemoryBackend
         from waxseal.domain.header import Entry
 
         log = AuditLog(MemoryBackend(), now_fn=lambda: FIXED_TS)
         record_decision(log, a_record())
         stored = list(log._backend.entries())[0]
-        log._backend._entries[0] = Entry(  # type: ignore[attr-defined]
+        # AuditLog.__init__ types its backend param `JSONLBackend | Any` --
+        # cast rather than reach for the private attribute through a name
+        # mypy can partly see, since MemoryBackend is neither JSONLBackend
+        # nor a declared member of that union.
+        backend = cast(MemoryBackend, log._backend)
+        backend._entries[0] = Entry(
             header=stored.header, entry_hash=stored.entry_hash, payload=None
         )
         assert [r for _, r in iter_decisions(log)] == [None]

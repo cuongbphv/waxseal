@@ -282,13 +282,11 @@ class TestHonestLimit:
         forged = tmp_path / "forged.jsonl"
         write_trail(forged, [{"i": 0}, {"i": "tampered"}, {"i": 2}])
         trail.write_text(forged.read_text())
-        rewrite_sidecar(
-            trail,
-            lambda records: [
+        def curate(records: list[dict[str, object]]) -> None:
+            for record, entry in zip(records, AuditLog.open(forged).entries(), strict=True):
                 record.update(entry_hash=entry.entry_hash)
-                for record, entry in zip(records, AuditLog.open(forged).entries(), strict=True)
-            ],
-        )
+
+        rewrite_sidecar(trail, curate)
 
         code = main(["verify", str(trail)])
         out = capsys.readouterr().out

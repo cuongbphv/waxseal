@@ -9,6 +9,7 @@ Editing a frozen vector to make tests pass is the one forbidden move.
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 from waxseal.domain.fingerprint import fingerprint
 from waxseal.domain.hashing import ENCODING, NULL, compute_entry_hash, lp
@@ -28,8 +29,9 @@ VECTORS_PATH = Path(__file__).parent / "vectors" / "vectors.json"
 FROZEN_VECTORS_SHA256 = "45506728e1aae7e3c30dbd419078305c522985a32b478c130c3a6ca5d30429c6"
 
 
-def load() -> dict:
-    return json.loads(VECTORS_PATH.read_text(encoding="utf-8"))
+def load() -> dict[str, Any]:
+    result: dict[str, Any] = json.loads(VECTORS_PATH.read_text(encoding="utf-8"))
+    return result
 
 
 class TestVectorFileIsFrozen:

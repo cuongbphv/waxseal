@@ -24,6 +24,7 @@ class TestRecordFile:
 
         import json
 
+        assert entry.payload is not None
         payload = json.loads(entry.payload)
         assert payload["doc_id"] == "spec"
         assert payload["filename"] == "spec.md"
@@ -40,6 +41,7 @@ class TestRecordFile:
             entry = record_file(log, doc, doc_id="spec")
             import json
 
+            assert entry.payload is not None
             hashes.append(json.loads(entry.payload)["sha256"])
         assert len(set(hashes)) == 3
         assert log.verify().checked == 3

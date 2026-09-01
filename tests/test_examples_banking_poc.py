@@ -194,7 +194,7 @@ class TestAnimator:
         assert animate.supports_ansi() is False
 
     def test_plain_mode_still_prints_every_stage(
-        self, capsys: pytest.CaptureFixture
+        self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         animate = load_module("_animate")
         animator = animate.FlowAnimator(enabled=False)
@@ -231,13 +231,13 @@ class TestAnimator:
         assert animate.supports_ansi() is False
 
     def test_draw_chain_on_an_empty_trail_prints_nothing(
-        self, capsys: pytest.CaptureFixture
+        self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         animate = load_module("_animate")
         animate.draw_chain([], enabled=False)
         assert capsys.readouterr().out == ""
 
-    def test_draw_chain_names_the_head(self, capsys: pytest.CaptureFixture) -> None:
+    def test_draw_chain_names_the_head(self, capsys: pytest.CaptureFixture[str]) -> None:
         animate = load_module("_animate")
         animate.draw_chain(["a" * 64, "b" * 64], enabled=False)
         assert "b" * 12 in capsys.readouterr().out
