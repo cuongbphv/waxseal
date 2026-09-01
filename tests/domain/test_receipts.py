@@ -5,38 +5,49 @@ write time, that entry `seq` carried `entry_hash` the moment it was accepted.
 Reconciling it against the trail is a DETERMINISTIC comparison — the same
 footing as a pin — so its failures are breaks, never unverifiable.
 
-The four reasons SPEC section 19 tabulates, and the exit code each carries:
+The five reasons SPEC section 19 (plus the waxseal-fg4.9 append) tabulates,
+and the exit code each carries:
 
-| receipt_mismatch          | 1 |
-| receipt_beyond_head       | 1 |
-| malformed_receipt_record  | 1 |
-| unreadable_record_version | 2 |
+| receipt_mismatch                     | 1 |
+| receipt_beyond_head                  | 1 |
+| malformed_receipt_record             | 1 |
+| unreadable_record_version            | 2 |
+| unrecognized_receipt_frame_fingerprint | 2 |
 
 The exit-1/exit-2 split is section 17's asymmetry, and it is the one thing in
 this file that must never be collapsed: corrupt bytes in a format THIS project
 defines are a break, while a record version only a NEWER build understands is
 unverifiable by name (the beads-v1.2.2 lesson applied to the sidecar's own
-format).
+format). waxseal-fg4.9 adds a SECOND, independent instance of the same split:
+`unreadable_record_version` is about the RECORD's own shape (`v`);
+`unrecognized_receipt_frame_fingerprint` is about the receipt_head HASH
+FRAME's derived identity -- a different axis, tested separately below, never
+collapsed into the first.
 """
 
 from __future__ import annotations
 
 import json
 
+from waxseal.domain.receipt_fingerprint import receipt_fingerprint, receipt_fingerprint_for
 from waxseal.domain.receipts import (
     MALFORMED_RECEIPT_RECORD,
     RECEIPT_BEYOND_HEAD,
+    RECEIPT_FRAME_FINGERPRINT_FIELD,
     RECEIPT_MISMATCH,
     RECEIPT_RECORD_VERSION,
     UNREADABLE_RECORD_VERSION,
+    UNRECOGNIZED_RECEIPT_FRAME_FINGERPRINT,
     MalformedRecord,
     ReceiptRecord,
     ReceiptSidecar,
     UnreadableRecord,
+    UnrecognizedReceiptFrame,
     build_receipt_record,
     parse_receipt_line,
     reconcile_receipts,
 )
+from waxseal.domain.registry import ReceiptFrameRegistry
 from waxseal.domain.verdict import Verdict
 
 H0 = "a" * 64
@@ -87,6 +98,7 @@ class TestRecordShape:
         )
         assert set(record) == {
             "entry_hash",
+            RECEIPT_FRAME_FINGERPRINT_FIELD,
             "receipt_head",
             "receipt_seq",
             "seq",
@@ -95,6 +107,9 @@ class TestRecordShape:
             "v",
         }
         assert record["v"] == RECEIPT_RECORD_VERSION
+        # waxseal-fg4.9: derived, never a hand-written literal (CLAUDE.md
+        # locked design, the same rule hash_version already follows).
+        assert record[RECEIPT_FRAME_FINGERPRINT_FIELD] == receipt_fingerprint()
 
     def test_record_round_trips_through_the_parser(self) -> None:
         parsed = parse_receipt_line(record_line(seq=3, receipt_seq=7), line_no=1)
@@ -107,6 +122,8 @@ class TestRecordShape:
             source="https://ledger.example",
             ts="2026-09-01T00:00:00+00:00",
         )
+        assert isinstance(parsed, ReceiptRecord)
+        assert parsed.receipt_frame_fingerprint == receipt_fingerprint()
 
 
 class TestParseClassification:
@@ -192,6 +209,129 @@ class TestParseClassification:
         assert parsed.ts == ""
 
 
+class TestReceiptFrameFingerprint:
+    """waxseal-fg4.9: the receipt_head hash frame's derived identity, checked
+    the way an unknown `hash_version` is already checked elsewhere in this
+    codebase (`domain/registry.py::VersionRegistry.recomputable`,
+    `domain/verify.py`) -- unrecognized is unverifiable (exit 2), never a
+    break, and is never confused with `v` (the record's own shape, tested
+    above)."""
+
+    def test_a_released_receipt_with_no_declared_frame_verifies_under_this_builds_identity(
+        self,
+    ) -> None:
+        # The whole point (constraint 1): every receipt issued before this
+        # change has no RECEIPT_FRAME_FINGERPRINT_FIELD key at all -- deleted
+        # here to reconstruct that shape, since build_receipt_record now
+        # always stamps it.
+        obj = json.loads(record_line())
+        del obj[RECEIPT_FRAME_FINGERPRINT_FIELD]
+        parsed = parse_receipt_line(json.dumps(obj), line_no=1)
+        assert isinstance(parsed, ReceiptRecord)
+        assert parsed.receipt_frame_fingerprint == receipt_fingerprint()
+
+    def test_this_builds_own_declared_frame_is_recognized(self) -> None:
+        assert isinstance(parse_receipt_line(record_line(), line_no=1), ReceiptRecord)
+
+    def test_build_receipt_record_accepts_an_explicit_fingerprint(self) -> None:
+        # Exercised for a registered-but-alternate identity (e.g. a widened
+        # future frame this build also knows how to declare), not because any
+        # call site in this codebase should spell one out by hand.
+        record = build_receipt_record(
+            seq=0,
+            entry_hash=H0,
+            receipt_seq=0,
+            receipt_head=HEAD,
+            source="s",
+            ts="t",
+            receipt_frame_fingerprint="f" * 64,
+        )
+        assert record[RECEIPT_FRAME_FINGERPRINT_FIELD] == "f" * 64
+
+    def test_an_unrecognized_declared_frame_is_unverifiable_not_malformed(self) -> None:
+        obj = json.loads(record_line())
+        obj[RECEIPT_FRAME_FINGERPRINT_FIELD] = "f" * 64
+        parsed = parse_receipt_line(json.dumps(obj), line_no=5)
+        assert parsed == UnrecognizedReceiptFrame(line_no=5, fingerprint="f" * 64)
+
+    def test_frame_identity_is_read_before_content_so_it_is_never_a_break(self) -> None:
+        # Mirrors test_version_is_read_before_content_so_a_newer_record_is_never_a_break:
+        # this build must not judge the record's OTHER fields under a receipt
+        # frame it does not recognize.
+        obj = json.loads(record_line())
+        obj[RECEIPT_FRAME_FINGERPRINT_FIELD] = "f" * 64
+        obj["entry_hash"] = "not-a-hash-in-this-build"
+        assert isinstance(
+            parse_receipt_line(json.dumps(obj), line_no=1), UnrecognizedReceiptFrame
+        )
+
+    def test_a_non_hex64_declared_frame_is_malformed(self) -> None:
+        # This project's own field failing to parse -- section 17's break
+        # side, not the "newer build" side.
+        obj = json.loads(record_line())
+        obj[RECEIPT_FRAME_FINGERPRINT_FIELD] = "not-a-fingerprint"
+        assert isinstance(
+            parse_receipt_line(json.dumps(obj), line_no=1), MalformedRecord
+        )
+
+    def test_a_non_string_declared_frame_is_malformed(self) -> None:
+        obj = json.loads(record_line())
+        obj[RECEIPT_FRAME_FINGERPRINT_FIELD] = 12345
+        assert isinstance(
+            parse_receipt_line(json.dumps(obj), line_no=1), MalformedRecord
+        )
+
+    def test_widening_the_receipt_frame_field_set_changes_the_fingerprint(self) -> None:
+        # The migration-060 protection this bead exists to give the receipt
+        # frame: SPEC.md section 19's three receipt_head inputs, plus one,
+        # cannot keep today's identity.
+        from waxseal.domain.receipt_fingerprint import RECEIPT_FRAME_FIELDS
+
+        widened = (*RECEIPT_FRAME_FIELDS, "chain_id")
+        assert receipt_fingerprint_for(widened) != receipt_fingerprint()
+
+    def test_a_registry_that_recognizes_the_value_accepts_it(self) -> None:
+        # A caller-supplied registry (adapters/receipts.py builds one once per
+        # read) is honored over the default, the same shape parse_receipt_line
+        # already offers verify_chain-style callers.
+        registry = ReceiptFrameRegistry()
+        obj = json.loads(record_line())
+        parsed = parse_receipt_line(json.dumps(obj), line_no=1, registry=registry)
+        assert isinstance(parsed, ReceiptRecord)
+
+    def test_falsifiability_a_registry_that_never_checks_would_silently_accept_anything(
+        self,
+    ) -> None:
+        """Falsifiability receipt (Step 5): a registry that always claims to
+        recognize a fingerprint -- the collapse this bead exists to prevent,
+        constructed directly rather than by reverting history, since the
+        check did not exist in any released build to revert to -- makes an
+        ALIEN frame identity silently pass as a ReceiptRecord. The real
+        (append-only) registry, same input, correctly reports it unverifiable.
+        This is the "unknown vs broken" collapse CLAUDE.md's Named Principle
+        describes, rebuilt on purpose to prove the fix is the thing standing
+        between it and this file.
+        """
+
+        class _NaiveRegistryThatChecksNothing:
+            def knows(self, fingerprint_: str) -> bool:  # noqa: ARG002 - the point
+                return True  # the migration-060 collapse: always "known"
+
+        alien = "e" * 64
+        obj = json.loads(record_line())
+        obj[RECEIPT_FRAME_FINGERPRINT_FIELD] = alien
+
+        naive = parse_receipt_line(
+            json.dumps(obj), line_no=1, registry=_NaiveRegistryThatChecksNothing()  # type: ignore[arg-type]
+        )
+        assert isinstance(naive, ReceiptRecord), "naive registry: red without the real check"
+
+        fixed = parse_receipt_line(json.dumps(obj), line_no=1, registry=ReceiptFrameRegistry())
+        assert fixed == UnrecognizedReceiptFrame(line_no=1, fingerprint=alien)
+        result = reconcile_receipts([H0], ReceiptSidecar(present=True, lines=(fixed,)))
+        assert result.verdict.to_exit_code() == 2
+
+
 class TestReconcileAgreement:
     def test_records_matching_the_trail_are_ok(self) -> None:
         result = reconcile_receipts(
@@ -273,6 +413,29 @@ class TestReconcileUnverifiable:
         assert result.verdict is Verdict.BROKEN
         assert result.reason == RECEIPT_MISMATCH
         assert result.unreadable_versions == ("2",)
+
+    def test_an_unrecognized_receipt_frame_is_exit_2_not_exit_1(self) -> None:
+        # Constraint 6: mirrors test_a_newer_record_version_is_exit_2_not_exit_1
+        # for the SECOND identity axis (receipt_head's frame, not `v`).
+        obj = json.loads(record_line())
+        obj[RECEIPT_FRAME_FINGERPRINT_FIELD] = "f" * 64
+        result = reconcile_receipts([H0], sidecar(json.dumps(obj)))
+        assert result.verdict is Verdict.UNVERIFIABLE
+        assert result.reason == UNRECOGNIZED_RECEIPT_FRAME_FINGERPRINT
+        assert result.unrecognized_receipt_fingerprints == ("f" * 64,)
+        assert result.verdict.to_exit_code() == 2
+        # The unreadable_versions axis stays untouched -- the two never merge.
+        assert result.unreadable_versions == ()
+
+    def test_a_real_break_outranks_an_unrecognized_receipt_frame(self) -> None:
+        obj = json.loads(record_line(seq=1, entry_hash=H1))
+        obj[RECEIPT_FRAME_FINGERPRINT_FIELD] = "f" * 64
+        result = reconcile_receipts(
+            [H0], sidecar(record_line(seq=0, entry_hash=H1), json.dumps(obj))
+        )
+        assert result.verdict is Verdict.BROKEN
+        assert result.reason == RECEIPT_MISMATCH
+        assert result.unrecognized_receipt_fingerprints == ("f" * 64,)
 
 
 class TestAbsentIsNotEmpty:

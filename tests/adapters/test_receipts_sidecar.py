@@ -12,6 +12,7 @@ import stat
 from pathlib import Path
 
 from waxseal.adapters.receipts import append_receipt, read_receipts, receipts_path
+from waxseal.domain.receipt_fingerprint import receipt_fingerprint
 from waxseal.domain.receipts import MalformedRecord, ReceiptRecord, UnreadableRecord
 
 H0 = "a" * 64
@@ -100,6 +101,9 @@ def test_a_record_is_exactly_spec_19s_json_object(tmp_path: Path) -> None:
     obj = json.loads(receipts_path(trail).read_text())
     assert obj == {
         "entry_hash": H0,
+        # waxseal-fg4.9: derived, checked separately below (test_fingerprint.py's
+        # own style) rather than pinned as a literal here.
+        "receipt_frame_fingerprint": receipt_fingerprint(),
         "receipt_head": HEAD,
         "receipt_seq": 4,
         "seq": 0,
@@ -127,3 +131,42 @@ def test_a_newer_record_version_survives_reading(tmp_path: Path) -> None:
     trail = tmp_path / "trail.jsonl"
     receipts_path(trail).write_text(json.dumps({"v": 7, "seq": 0}) + "\n")
     assert read_receipts(trail).lines == (UnreadableRecord(line_no=1, version="7"),)
+
+
+def test_a_record_this_build_wrote_reads_back_as_recognized(tmp_path: Path) -> None:
+    # waxseal-fg4.9: read_receipts threads one ReceiptFrameRegistry through
+    # every line it parses (adapters/receipts.py) rather than building one
+    # per line; this is the end-to-end proof that a record this build itself
+    # wrote is recognized on the way back in.
+    trail = tmp_path / "trail.jsonl"
+    append_receipt(
+        trail, seq=0, entry_hash=H0, receipt_seq=0, receipt_head=HEAD, source="s", ts="t"
+    )
+    lines = read_receipts(trail).lines
+    assert len(lines) == 1
+    assert isinstance(lines[0], ReceiptRecord)
+    assert lines[0].receipt_frame_fingerprint == receipt_fingerprint()
+
+
+def test_a_record_declaring_an_alien_receipt_frame_survives_reading(tmp_path: Path) -> None:
+    from waxseal.domain.receipts import UnrecognizedReceiptFrame
+
+    trail = tmp_path / "trail.jsonl"
+    receipts_path(trail).write_text(
+        json.dumps(
+            {
+                "entry_hash": H0,
+                "receipt_frame_fingerprint": "f" * 64,
+                "receipt_head": HEAD,
+                "receipt_seq": 0,
+                "seq": 0,
+                "source": "s",
+                "ts": "t",
+                "v": 1,
+            }
+        )
+        + "\n"
+    )
+    assert read_receipts(trail).lines == (
+        UnrecognizedReceiptFrame(line_no=1, fingerprint="f" * 64),
+    )

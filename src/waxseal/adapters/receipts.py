@@ -20,6 +20,7 @@ from waxseal.domain.receipts import (
     build_receipt_record,
     parse_receipt_line,
 )
+from waxseal.domain.registry import ReceiptFrameRegistry
 
 
 def receipts_path(trail_path: Path | str) -> Path:
@@ -41,12 +42,17 @@ def read_receipts(trail_path: Path | str) -> ReceiptSidecar:
     if not path.exists():
         return ReceiptSidecar(present=False)
     lines = []
+    # Built once outside the loop, mirroring how a VersionRegistry is built
+    # once per verify_chain call rather than once per row: a receipt-frame
+    # fingerprint check is a lookup against fixed, in-process state, not
+    # something that needs re-deriving per line.
+    registry = ReceiptFrameRegistry()
     with open(path, encoding="utf-8", errors="replace", newline="") as f:
         # Physical line numbers, blanks included in the count: an operator sent
         # to line N must find the record there.
         for line_no, line in enumerate(f, start=1):
             if line.strip():
-                lines.append(parse_receipt_line(line, line_no=line_no))
+                lines.append(parse_receipt_line(line, line_no=line_no, registry=registry))
     return ReceiptSidecar(present=True, lines=tuple(lines))
 
 
@@ -66,6 +72,11 @@ def append_receipt(
     O_APPEND interleaves a multi-chunk write, and a torn line makes the reader
     report a break with no attacker present — an accident masquerading as
     tampering.
+
+    `build_receipt_record` stamps this build's current receipt-frame
+    fingerprint (waxseal-fg4.9) on every record written here; there is no
+    parameter to override it because every writer in this codebase writes
+    today's frame, the same reasoning `hash_version` already applies.
     """
     record = build_receipt_record(
         seq=seq,

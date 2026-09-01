@@ -20,6 +20,25 @@ stamped with a version only a NEWER build understands is unverifiable by name.
 Collapsing those two is the beads-v1.2.2 failure class rebuilt inside the
 sidecar's own parser.
 
+Two identity axes live in one record, and waxseal-fg4.9 is precise about
+keeping them apart: `v` (`RECEIPT_RECORD_VERSION`) is the JSON RECORD's own
+shape -- which keys exist, section 17's asymmetry above. `receipt_frame_fingerprint`
+is the identity of the receipt_head HASH FRAME SPEC.md section 19 defines
+(RECEIPT_FRAME_PREFIX plus `receipt_seq`/`prev_receipt_head`/`entry_hash`,
+server-side, REMOTE.md section 10) -- a descriptor fingerprint
+(`domain/receipt_fingerprint.py`), the same mechanism `hash_version` already
+is for the header, replacing what would otherwise be a second hand-written
+ordinal literal (the migration-060 / beads-v1.2.2 shape this library exists to
+make unrepresentable). A record whose declared frame this build does not
+recognize is unverifiable by name (exit 2), never a break, mirroring exactly
+how `domain/registry.py` treats an unknown `hash_version` -- this build was
+never told what that identity means, so judging the record's OTHER fields
+under its own assumptions would be the same collapse rebuilt a second time.
+An absent field (every receipt issued before this change) defaults to this
+build's OWN current fingerprint, so a released receipt's bytes keep verifying
+under the identity they always had (CLAUDE.md rule 2) without this file ever
+reinterpreting them.
+
 Honest limit (SPEC.md section 19, stated so no caller can imply otherwise):
 the sidecar is as attacker-writable as the trail beside it. A rewrite that
 curates BOTH consistently passes this check; only the server's own receipt
@@ -34,6 +53,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+from waxseal.domain.receipt_fingerprint import receipt_fingerprint
+from waxseal.domain.registry import ReceiptFrameRegistry
 from waxseal.domain.verdict import Verdict
 
 # The record version this build writes and reads. Append-only like every other
@@ -42,17 +63,30 @@ from waxseal.domain.verdict import Verdict
 RECEIPT_RECORD_VERSION: Final = 1
 KNOWN_RECORD_VERSIONS: Final = frozenset({RECEIPT_RECORD_VERSION})
 
+# The JSON key carrying the receipt_head frame's derived identity
+# (waxseal-fg4.9). A separate key from `v` on purpose -- see the module
+# docstring's "two identity axes" paragraph.
+RECEIPT_FRAME_FINGERPRINT_FIELD: Final = "receipt_frame_fingerprint"
+
 RECEIPT_MISMATCH: Final = "receipt_mismatch"
 RECEIPT_BEYOND_HEAD: Final = "receipt_beyond_head"
 MALFORMED_RECEIPT_RECORD: Final = "malformed_receipt_record"
 UNREADABLE_RECORD_VERSION: Final = "unreadable_record_version"
+UNRECOGNIZED_RECEIPT_FRAME_FINGERPRINT: Final = "unrecognized_receipt_frame_fingerprint"
 
 RECEIPT_HEX64: Final = frozenset("0123456789abcdef")
 
 
 @dataclass(frozen=True, slots=True)
 class ReceiptRecord:
-    """One readable line of the `.receipts` sidecar."""
+    """One readable line of the `.receipts` sidecar.
+
+    `receipt_frame_fingerprint` defaults to THIS build's current fingerprint
+    (`domain/receipt_fingerprint.py`) via `default_factory` so a construction
+    that does not pass it -- every call site that predates waxseal-fg4.9,
+    including a released receipt parsed with the field absent -- means exactly
+    what it always meant, not a value invented for this dataclass.
+    """
 
     line_no: int
     seq: int
@@ -61,6 +95,7 @@ class ReceiptRecord:
     receipt_head: str
     source: str
     ts: str
+    receipt_frame_fingerprint: str = field(default_factory=receipt_fingerprint)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +117,24 @@ class UnreadableRecord:
     version: str
 
 
-ReceiptLine = ReceiptRecord | MalformedRecord | UnreadableRecord
+@dataclass(frozen=True, slots=True)
+class UnrecognizedReceiptFrame:
+    """A record in a known `v` (so this build can read every OTHER field)
+    whose declared receipt-frame fingerprint (waxseal-fg4.9) this build's
+    `ReceiptFrameRegistry` does not recognize. Unverifiable by name, the exact
+    RFC 6962 section 4.6 stance `domain/registry.py` already takes for an
+    unknown `hash_version`: this build was never told what that identity
+    means, so it must not judge the record's content under its own
+    assumptions -- the migration-060 / beads-v1.2.2 collapse rebuilt inside
+    the sidecar's own parser otherwise. Distinct from `UnreadableRecord`
+    (an unknown RECORD SHAPE) on purpose: the two identity axes are kept
+    separate, per the module docstring."""
+
+    line_no: int
+    fingerprint: str
+
+
+ReceiptLine = ReceiptRecord | MalformedRecord | UnreadableRecord | UnrecognizedReceiptFrame
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +163,9 @@ class ReceiptReconciliation:
     present: bool
     latest_seq: int | None = None
     unreadable_versions: tuple[str, ...] = field(default=())
+    # Separate from unreadable_versions on purpose -- see the module
+    # docstring's "two identity axes" paragraph.
+    unrecognized_receipt_fingerprints: tuple[str, ...] = field(default=())
 
 
 def build_receipt_record(
@@ -121,15 +176,27 @@ def build_receipt_record(
     receipt_head: str,
     source: str,
     ts: str,
+    receipt_frame_fingerprint: str | None = None,
 ) -> dict[str, Any]:
-    """The sidecar record SPEC.md section 19 defines, and nothing else.
+    """The sidecar record SPEC.md section 19 defines, plus the derived
+    receipt-frame identity waxseal-fg4.9 adds (section 19 append, prepared but
+    not yet landed -- see this bead's report).
 
     No payload field exists to accidentally populate: section 12's rule, for
     section 12's reason — the payload has not been through redact-before-hash
     at the point a sidecar sees it.
+
+    `receipt_frame_fingerprint` defaults to THIS build's own descriptor
+    fingerprint (`domain/receipt_fingerprint.py`) rather than a caller-supplied
+    literal: every caller in this codebase writes today's frame, so there is
+    no site that should ever spell out the value by hand -- the same reason
+    `hash_version` is never a hand-written string (CLAUDE.md locked design).
     """
+    if receipt_frame_fingerprint is None:
+        receipt_frame_fingerprint = receipt_fingerprint()
     return {
         "entry_hash": entry_hash,
+        RECEIPT_FRAME_FINGERPRINT_FIELD: receipt_frame_fingerprint,
         "receipt_head": receipt_head,
         "receipt_seq": receipt_seq,
         "seq": seq,
@@ -139,12 +206,22 @@ def build_receipt_record(
     }
 
 
-def parse_receipt_line(line: str, *, line_no: int) -> ReceiptLine:
+def parse_receipt_line(
+    line: str, *, line_no: int, registry: ReceiptFrameRegistry | None = None
+) -> ReceiptLine:
     """Classify one sidecar line. Never raises: a verdict, never a crash.
 
     The version stamp is read before anything else, so a record from a newer
     build is reported unverifiable even when its other fields look wrong to
     this one — those fields mean whatever the newer format says they mean.
+    The declared receipt-frame fingerprint is read next, before the rest of
+    the record's content, for the identical reason applied to the second
+    identity axis (module docstring): this build must not judge a record's
+    content under a frame identity it was never told the meaning of.
+
+    `registry` defaults to a fresh `ReceiptFrameRegistry()` -- a caller reading
+    many lines (`adapters/receipts.py`) should build one once and pass it in,
+    the same pattern `verify_chain` uses for `VersionRegistry`.
     """
     try:
         obj = json.loads(line)
@@ -166,6 +243,33 @@ def parse_receipt_line(line: str, *, line_no: int) -> ReceiptLine:
         )
     if version not in KNOWN_RECORD_VERSIONS:
         return UnreadableRecord(line_no=line_no, version=str(version))
+
+    fp_raw = obj.get(RECEIPT_FRAME_FINGERPRINT_FIELD)
+    if fp_raw is None:
+        # Absent on every receipt issued before waxseal-fg4.9: defaults to
+        # THIS build's current identity, so an already-issued receipt keeps
+        # verifying under the identity it always had (CLAUDE.md rule 2) —
+        # never reinterpreted, never orphaned.
+        declared_fingerprint = receipt_fingerprint()
+    elif (
+        not isinstance(fp_raw, str) or len(fp_raw) != 64 or not set(fp_raw) <= RECEIPT_HEX64
+    ):
+        # Present but the wrong shape: this project's own field failed to
+        # parse, section 17's break side of the asymmetry — same treatment
+        # `_hex64` gives `entry_hash`/`receipt_head` below.
+        return MalformedRecord(
+            line_no=line_no,
+            detail=(
+                f"{RECEIPT_FRAME_FINGERPRINT_FIELD} must be 64 lowercase hex "
+                f"characters, got {fp_raw!r}"
+            ),
+        )
+    else:
+        declared_fingerprint = fp_raw
+    reg = registry if registry is not None else ReceiptFrameRegistry()
+    if not reg.knows(declared_fingerprint):
+        return UnrecognizedReceiptFrame(line_no=line_no, fingerprint=declared_fingerprint)
+
     try:
         return ReceiptRecord(
             line_no=line_no,
@@ -177,6 +281,7 @@ def parse_receipt_line(line: str, *, line_no: int) -> ReceiptLine:
             # field is not a reason to call the acknowledgment unreadable.
             source=str(obj.get("source", "unknown")),
             ts=str(obj.get("ts", "")),
+            receipt_frame_fingerprint=declared_fingerprint,
         )
     except (KeyError, TypeError, ValueError) as e:
         return MalformedRecord(line_no=line_no, detail=str(e))
@@ -198,10 +303,14 @@ def reconcile_receipts(
     checked = 0
     latest_seq: int | None = None
     unreadable: list[str] = []
+    unrecognized: list[str] = []
 
     for entry in sidecar.lines:
         if isinstance(entry, UnreadableRecord):
             unreadable.append(entry.version)
+            continue
+        if isinstance(entry, UnrecognizedReceiptFrame):
+            unrecognized.append(entry.fingerprint)
             continue
         if isinstance(entry, MalformedRecord):
             if verdict is not Verdict.BROKEN:
@@ -219,8 +328,17 @@ def reconcile_receipts(
             verdict, reason = Verdict.BROKEN, RECEIPT_MISMATCH
             broken_seq, broken_line = entry.seq, entry.line_no
 
-    if unreadable and verdict is Verdict.OK:
-        verdict, reason = Verdict.UNVERIFIABLE, UNREADABLE_RECORD_VERSION
+    # A real break always outranks either unverifiable finding (Verdict's
+    # severity order, CLAUDE.md rule 5): both are checked only when the loop
+    # above never found one. Between the two, unreadable_versions is reported
+    # first when both are non-empty -- an arbitrary but stable tie-break, not
+    # a severity claim; the two axes are deliberately kept distinguishable in
+    # the RETURNED fields regardless of which one sets `reason`.
+    if verdict is Verdict.OK:
+        if unreadable:
+            verdict, reason = Verdict.UNVERIFIABLE, UNREADABLE_RECORD_VERSION
+        elif unrecognized:
+            verdict, reason = Verdict.UNVERIFIABLE, UNRECOGNIZED_RECEIPT_FRAME_FINGERPRINT
     return ReceiptReconciliation(
         verdict=verdict,
         reason=reason,
@@ -230,6 +348,7 @@ def reconcile_receipts(
         present=sidecar.present,
         latest_seq=latest_seq,
         unreadable_versions=tuple(unreadable),
+        unrecognized_receipt_fingerprints=tuple(unrecognized),
     )
 
 

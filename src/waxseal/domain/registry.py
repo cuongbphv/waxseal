@@ -3,6 +3,11 @@
 Maps schema fingerprint -> header field tuple. There is deliberately no
 removal or mutation API: a released fingerprint's meaning can never change.
 New schemas are appended under their own (automatically different) fingerprint.
+
+`ReceiptFrameRegistry` at the bottom of this file is the same doctrine
+applied to the receipt frame (SPEC.md section 19, waxseal-fg4.9) -- a
+separate, append-only registry, not a second use of `VersionRegistry`, for
+the reason `domain/receipt_fingerprint.py` gives.
 """
 
 from __future__ import annotations
@@ -22,6 +27,11 @@ from waxseal.domain.fingerprint import (
 )
 from waxseal.domain.hashing import ENCODING, header_frame
 from waxseal.domain.header import EntryHeader
+from waxseal.domain.receipt_fingerprint import (
+    RECEIPT_FRAME_FIELDS,
+    receipt_fingerprint,
+    receipt_fingerprint_for,
+)
 from waxseal.domain.verdict import Verdict
 
 # Which frame function implements each named encoding a released fingerprint
@@ -239,3 +249,38 @@ class RegistryCrossCheck:
             onchain_descriptor=decode_descriptor(onchain_descriptor),
             onchain_descriptor_hex=onchain_descriptor.hex(),
         )
+
+
+# ------------------------------------------------- receipt-frame registry (waxseal-fg4.9)
+#
+# Append-only, like VersionRegistry above, but a separate mechanism rather
+# than a reuse of it (domain/receipt_fingerprint.py explains why): the
+# receipt_head hash is computed server-side (REMOTE.md section 10), so this
+# build never recomputes one and has no `encoder_for`/`recomputable` concept
+# to offer here. What it offers is exactly what `VersionRegistry.knows` offers
+# for `hash_version` -- recognizing a declared identity, or not -- which is
+# the one fact `domain/receipts.py` needs to keep an unrecognized receipt
+# frame unverifiable (exit 2) instead of either trusting it blindly or
+# calling it a break.
+
+
+class ReceiptFrameRegistry:
+    def __init__(self) -> None:
+        self._schemas: dict[str, tuple[str, ...]] = {
+            receipt_fingerprint(): RECEIPT_FRAME_FIELDS
+        }
+
+    def knows(self, fingerprint_: str) -> bool:
+        return fingerprint_ in self._schemas
+
+    def fields(self, fingerprint_: str) -> tuple[str, ...]:
+        return self._schemas[fingerprint_]
+
+    def register(self, fields: tuple[str, ...]) -> str:
+        """Append a receipt-frame field set; returns its fingerprint.
+        Idempotent for identical field tuples (CLAUDE.md rule 2: same fields
+        ⇒ same fingerprint ⇒ setdefault is a no-op, never a conflicting
+        re-registration)."""
+        fp = receipt_fingerprint_for(fields)
+        self._schemas.setdefault(fp, fields)
+        return fp
