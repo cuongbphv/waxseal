@@ -153,6 +153,16 @@ Shipped today:
 |---|---|---|---|
 | `s3` | `pip install waxseal[s3]` | `boto3` | an S3 client for `S3Backend` (conditional-PUT appends) |
 | `postgres` | `pip install waxseal[postgres]` | `psycopg[binary]>=3.1` | a connection factory for `PostgresBackend` |
+| `rfc3161` | `pip install waxseal[rfc3161]` | `cryptography>=40` | nothing — see the note below |
+
+`rfc3161` is the one extra waxseal does import itself, inside a single function
+(`adapters/rfc3161_verify.py`), which is why its "inject" column is empty. It
+turns on the optional signature dimension of `verify`/`report`, and only when
+you name a CA bundle with `--tsa-ca-file`: a token whose CMS signature or
+certificate chain fails is exit 1, and anything that could not be checked at
+all — the extra absent included — is exit 2 with a label saying which, never a
+silent exit 0. Without the flag nothing changes: receipts are checked
+structurally, exactly as before. See [SPEC.md](SPEC.md) section 17.1.
 
 (`dev` also exists, for running the test suite. It is not a capability extra.)
 
@@ -160,11 +170,10 @@ Planned, and **not yet shipped** — do not write code against these:
 
 | Extra | Intended capability |
 |---|---|
-| `rfc3161` | verifying a timestamp token's CMS signature and certificate chain. Today `Rfc3161AnchorSink` checks structure only, so a filed receipt means "a well-formed token committing to these bytes came back from this URL", never "a genuine TSA issued it" — `openssl ts -verify` is the current answer |
 | `evm` | the on-chain ledger layer |
 
-Both are named in the 0.1.5 contract, and neither appears in `pyproject.toml` as
-of 0.1.4, so asking for one installs nothing extra. This repository does not
+It is named in the 0.1.5 contract and does not appear in `pyproject.toml`, so
+asking for it installs nothing extra. This repository does not
 describe an unshipped extra as available: written-but-unwired is not shipped, and
 [docs/paper/conformance.md](docs/paper/conformance.md) keeps that ledger row by
 row.
@@ -394,9 +403,12 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 
 - **RFC 3161** makes `ts` attested rather than asserted. waxseal checks the reply
   *structurally* (status, message imprint, nonce, digest algorithm) and says so in every
-  line it prints. It does **not** verify the CMS/X.509 signature; that is delegated to
-  `openssl ts -verify` and the recipe is in the docs. A receipt it cannot read is
-  *unverifiable* (exit 2); only one that attests different bytes is *broken* (exit 1).
+  line it prints. By default it does **not** verify the CMS/X.509 signature; that is
+  delegated to `openssl ts -verify` and the recipe is in the docs. A receipt it cannot
+  read is *unverifiable* (exit 2); only one that attests different bytes is *broken*
+  (exit 1). With the `rfc3161` extra installed and a CA bundle you name
+  (`--tsa-ca-file`), the signature dimension is checked too — and a token it could not
+  check is exit 2 with a label, never a silent pass.
 - **OpenTimestamps** stores a *pending* Bitcoin proof, opaquely and on purpose. Finish it
   later with `ots upgrade` / `ots verify`.
 - The two can be given **together on one `anchor` run**, publishing the same checkpoint to

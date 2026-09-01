@@ -22,7 +22,7 @@ import contextlib
 import functools
 import sys
 from collections import Counter, deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +30,11 @@ from typing import Final
 
 from waxseal.adapters.anchors import AnchorRecord
 from waxseal.adapters.remote import RemoteError
+from waxseal.adapters.rfc3161_verify import (
+    SIGNATURE_INVALID,
+    SIGNATURE_UNCHECKED,
+    SignatureCheck,
+)
 from waxseal.domain.checkpoint import Checkpoint
 from waxseal.domain.header import Entry
 from waxseal.domain.pinning import PinState
@@ -58,6 +63,19 @@ from waxseal.log import AuditLog
 # "not readable here": the token commits to bytes other than the record it
 # sits beside. Everything else is a format this build cannot read.
 _RECEIPT_CHECKED_FALSE: Final = frozenset({RECEIPT_IMPRINT_MISMATCH, NONCE_MISMATCH})
+
+_TSA_CA_FILE_HELP = (
+    "PEM bundle of trust anchors for the TSA that issued the RFC 3161 receipts "
+    "in <path>.anchors. Passing it TURNS ON the signature dimension, which "
+    "needs the optional extra (`pip install 'waxseal[rfc3161]'`): a receipt "
+    "whose CMS signature does not verify, or whose signer does not chain to "
+    "this bundle, is signature_invalid, exit 1; anything that could not be "
+    "checked at all (extra absent, bundle unreadable, a token shape this build "
+    "cannot parse) is signature_unchecked, exit 2, never a silent pass. "
+    "Without this flag the receipts are checked STRUCTURALLY only, exactly as "
+    "before, and every line says so — waxseal names no default trust anchor, "
+    "because choosing one would decide whom you trust on your behalf"
+)
 
 _PIN_HELP = (
     "check the trail against a checkpoint this verifier recorded previously, "
@@ -184,6 +202,9 @@ def main(argv: list[str] | None = None) -> int:
     p_verify.add_argument(
         "--witness", action="append", default=None, metavar="URL", help=_WITNESS_HELP
     )
+    p_verify.add_argument(
+        "--tsa-ca-file", type=Path, default=None, metavar="BUNDLE.PEM", help=_TSA_CA_FILE_HELP
+    )
 
     p_tail = sub.add_parser("tail", help="print the last entries")
     p_tail.add_argument("path")
@@ -226,6 +247,9 @@ def main(argv: list[str] | None = None) -> int:
     _add_pin_declaration_arguments(p_report)
     p_report.add_argument(
         "--witness", action="append", default=None, metavar="URL", help=_WITNESS_HELP
+    )
+    p_report.add_argument(
+        "--tsa-ca-file", type=Path, default=None, metavar="BUNDLE.PEM", help=_TSA_CA_FILE_HELP
     )
 
     p_export = sub.add_parser(
@@ -481,6 +505,7 @@ def main(argv: list[str] | None = None) -> int:
                 declare_expect_anchor_binding=args.expect_anchor_binding,
                 declare_max_anchor_age_s=args.max_anchor_age_s,
                 declare_topology=args.declare_topology,
+                tsa_ca_file=args.tsa_ca_file,
             )
             # Printed here rather than inside _verify so it cannot drift
             # between that function's verdict paths. `report` carries the
@@ -506,6 +531,7 @@ def main(argv: list[str] | None = None) -> int:
                 declare_expect_anchor_binding=args.expect_anchor_binding,
                 declare_max_anchor_age_s=args.max_anchor_age_s,
                 declare_topology=args.declare_topology,
+                tsa_ca_file=args.tsa_ca_file,
             )
         if args.command == "export-proof":
             return _export_proof(log, args.seq)
@@ -604,6 +630,7 @@ def _verify(
     declare_expect_anchor_binding: bool = False,
     declare_max_anchor_age_s: int | None = None,
     declare_topology: SeparationTopology | None = None,
+    tsa_ca_file: Path | None = None,
 ) -> int:
     # A CLI process saw no writes, so it cannot measure drops (None, not 0).
     result = log.verify(measure_drops=False)
@@ -651,7 +678,7 @@ def _verify(
     # check_anchors False in that case (no local sidecar to check), and this
     # guard just makes that invariant visible to mypy, not a new behavior.
     if check_anchors and trail is not None:
-        anchor_check = _anchor_check(log, trail)
+        anchor_check = _anchor_check(log, trail, tsa_ca_file=tsa_ca_file)
         observed_anchor_sinks = _observed_anchor_sinks(trail)
         observed_anchor_records = _observed_anchor_records(trail)
         observed_anchor_unreadable = _observed_anchor_unreadable(trail)
@@ -741,8 +768,19 @@ def _print_drop_count(trail: Path | None) -> None:
         print(f"dropped_writes >= {count} (measured minimum, from {trail}.drops)")
 
 
-def _anchor_check(log: AuditLog, trail: Path) -> _Check:
-    """Check the `.anchors` sidecar against the trail as it stands now."""
+def _anchor_check(log: AuditLog, trail: Path, *, tsa_ca_file: Path | None = None) -> _Check:
+    """Check the `.anchors` sidecar against the trail as it stands now.
+
+    ``tsa_ca_file`` turns on the OPTIONAL signature dimension
+    (`adapters/rfc3161_verify.py`). It is opt-in for the same reason
+    ``--anchors`` itself is: a dimension the operator did not engage is not
+    part of this run's verdict, and `verify` must not start exiting 2 on
+    every healthy trail whose TSA nobody named a bundle for -- the argument
+    ``_receipt_verdict`` already makes for a pending OpenTimestamps proof.
+    What it must never do is engage the dimension and then come back 0
+    without an answer, so once a bundle IS named every unchecked token is
+    exit 2 with a label naming its cause.
+    """
     import json
 
     from waxseal.adapters.anchors import read_anchor_records
@@ -789,6 +827,34 @@ def _anchor_check(log: AuditLog, trail: Path) -> _Check:
     notes.extend(r.note for r in receipts if r.note is not None)
     unverifiable_receipts = [r for r in receipts if r.status == _RECEIPT_UNVERIFIABLE]
 
+    signature_checks = _signature_checks(records, tsa_ca_file)
+    signature_verdict = Verdict.OK
+    if tsa_ca_file is None:
+        # Not engaged, so not part of the verdict -- but never silent either
+        # (rule 6). One line, sourced from the adapter so the remedy it names
+        # cannot drift from the one the engaged path prints.
+        if signature_checks:
+            notes.append(
+                f"{len(signature_checks)} RFC 3161 receipt(s): {signature_checks[0][1].label}"
+            )
+    else:
+        notes.extend(f"seq={seq}: {check.label}" for seq, check in signature_checks)
+        for _, check in signature_checks:
+            signature_verdict = signature_verdict.join(check.verdict)
+        if signature_verdict is Verdict.BROKEN:
+            broken_signature = next(
+                check for _, check in signature_checks if check.verdict is Verdict.BROKEN
+            )
+            return _Check(
+                CheckSummary(
+                    ok=False,
+                    checked=len(records),
+                    reason=SIGNATURE_INVALID,
+                    notes=tuple(notes),
+                ),
+                f"ANCHOR BROKEN: {broken_signature.label}",
+            )
+
     bound = sum(1 for r in records if r.checkpoint.agg_commit is not None)
     if bound:
         # The CLI holds no seal key, so the chain-shape claim of a v2 record
@@ -822,16 +888,47 @@ def _anchor_check(log: AuditLog, trail: Path) -> _Check:
         reason = "unreadable_record_version"
     elif unverifiable_receipts:
         reason = unverifiable_receipts[0].reason
+    elif signature_verdict is Verdict.UNVERIFIABLE:
+        # Engaged and unanswerable: the third way this build can lack
+        # coverage, and the only one an operator can fix by installing
+        # something. Still not evidence of tampering.
+        reason = SIGNATURE_UNCHECKED
     return _Check(
         CheckSummary(
             ok=True,
             checked=len(records),
             reason=reason,
-            unverifiable=bool(sidecar.unreadable_versions or unverifiable_receipts),
+            unverifiable=bool(
+                sidecar.unreadable_versions
+                or unverifiable_receipts
+                or signature_verdict is Verdict.UNVERIFIABLE
+            ),
             notes=tuple(notes),
         ),
         line,
     )
+
+
+def _signature_checks(
+    records: Sequence[AnchorRecord], tsa_ca_file: Path | None
+) -> list[tuple[int, SignatureCheck]]:
+    """The signature dimension for every record carrying a readable RFC 3161
+    receipt. A receipt whose base64 or DER this build cannot read is skipped:
+    ``_receipt_verdict`` already reported it as unverifiable, and reporting it
+    twice under two vocabularies would double-count one fact."""
+    from waxseal.adapters.rfc3161_verify import verify_token_signature
+    from waxseal.domain import rfc3161
+
+    checks: list[tuple[int, SignatureCheck]] = []
+    for record in records:
+        receipt = record.receipt
+        if receipt is None or not receipt.startswith(rfc3161.RECEIPT_PREFIX):
+            continue
+        der = rfc3161.decode_receipt(receipt)
+        if der is None:
+            continue
+        checks.append((record.checkpoint.seq, verify_token_signature(der, ca_file=tsa_ca_file)))
+    return checks
 
 
 def _observed_anchor_sinks(trail: Path) -> int:
@@ -1476,6 +1573,7 @@ def _report(
     declare_expect_anchor_binding: bool = False,
     declare_max_anchor_age_s: int | None = None,
     declare_topology: SeparationTopology | None = None,
+    tsa_ca_file: Path | None = None,
 ) -> int:
     from waxseal.domain.report import build_report
 
@@ -1496,7 +1594,7 @@ def _report(
     observed_anchor_records: tuple[AnchorRecord, ...] | None = None
     observed_anchor_unreadable: bool | None = None
     if check_anchors and trail is not None:
-        anchors = _anchor_check(log, trail).summary
+        anchors = _anchor_check(log, trail, tsa_ca_file=tsa_ca_file).summary
         observed_anchor_sinks = _observed_anchor_sinks(trail)
         observed_anchor_records = _observed_anchor_records(trail)
         observed_anchor_unreadable = _observed_anchor_unreadable(trail)

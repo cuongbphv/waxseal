@@ -752,6 +752,46 @@ Honest limit worth stating plainly: an attacker who rewrites BOTH the record
 and its receipt is caught only by the delegated signature verification, never
 by the structural check.
 
+### 17.1 Optional signature verification (`waxseal[rfc3161]`, added in 0.1.5)
+
+Section 17's check is structural and stays structural: it is what a
+zero-dependency build can do, and it is what runs when no bundle is named. The
+optional `rfc3161` extra adds a second, independent dimension — the CMS
+signature and the X.509 chain — engaged only by `--tsa-ca-file <bundle.pem>`
+on `verify` or `report`.
+
+The bundle is the operator's. waxseal consults no default trust store: not the
+system store, not certifi, not the certificates the token happens to carry. A
+default would decide whom the operator trusts without saying so on any line of
+output.
+
+The dimension has three states, never two:
+
+| State | Class | Exit |
+|---|---|---|
+| `signature_valid` | the CMS signature verifies and the signer chains to an anchor in the named bundle | 0 |
+| `signature_invalid` | checked and false — the signature does not verify, the signed attributes commit to another TSTInfo, or the signer chains to nobody in the bundle | 1 |
+| `signature_unchecked` | the question was never put — the extra is not installed, the bundle is unreadable, or the token's CMS is a shape this build cannot parse | 2 |
+
+`signature_unchecked` MUST NOT be rendered as a pass. An absent extra that
+exits 0 reports authenticity nobody established, and every `signature_unchecked`
+line therefore names both its cause and its remedy.
+
+Unreadable is unchecked, never invalid — section 17's asymmetry, carried into
+the module that CAN say "false". Only a signature that verifiably fails, or a
+chain that verifiably does not reach the named anchors, earns exit 1.
+
+Without `--tsa-ca-file` no exit code in section 17's table changes. The run is
+not silent about it: it prints one `signature_unchecked` line naming the flag,
+the same way a pending OpenTimestamps proof is stated without raising the exit
+code.
+
+What a `signature_valid` line does NOT claim, and says so on the line itself:
+certificate validity windows, revocation status and the `timeStamping`
+extended key usage are not checked. `openssl ts -verify` remains the documented
+route and checks more; this extra is a second option for operators who cannot
+run it, never a replacement.
+
 ## 18. OpenTimestamps anchoring
 
 Submission: POST the raw 32-byte `SHA-256(checkpoint_frame(cp))` to

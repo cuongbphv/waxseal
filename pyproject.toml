@@ -36,6 +36,10 @@ dev = [
     "ruff",
     # Integration tests only (TestRealPostgres); runtime deps stay [].
     "psycopg[binary]>=3.1",
+    # The `rfc3161` extra's own dependency, needed here so the test suite can
+    # MINT a self-signed TSA vector and exercise the valid/invalid branches.
+    # Runtime deps stay [].
+    "cryptography>=40",
 ]
 # S3Backend/SQLiteBackend/PostgresBackend take an INJECTED client — waxseal
 # itself never imports boto3/psycopg (CLAUDE.md rule 1: dependencies = []).
@@ -50,6 +54,15 @@ s3 = [
 ]
 postgres = [
     "psycopg[binary]>=3.1",
+]
+# Optional CMS/X.509 verification of an RFC 3161 token (adapters/rfc3161_verify.py).
+# The structural check in domain/rfc3161.py stays dependency-free and unchanged;
+# this extra only adds the signature dimension, and only when the operator names
+# a CA bundle with --tsa-ca-file. The floor is verified against cryptography's own
+# changelog: Certificate.verify_directly_issued_by() landed in 40.0.0 and
+# load_pem_x509_certificates() in 39.0.0, so >=40 covers both.
+rfc3161 = [
+    "cryptography>=40",
 ]
 
 [project.scripts]
@@ -120,6 +133,15 @@ ignore_missing_imports = true
 # ImportError is a reported WORM state (`worm_unknown`), not a crash.
 [[tool.mypy.overrides]]
 module = ["boto3"]
+ignore_missing_imports = true
+
+# cryptography lives in the `rfc3161` extra, never in `dependencies` (CLAUDE.md
+# rule 1), so it is legitimately absent on a correct install. It DOES ship its
+# own types, so this override exists only for the absent-on-this-machine case;
+# the imports are inside `adapters/rfc3161_verify.py::_load_backend`, guarded,
+# and their ImportError is a reported `signature_unchecked` state, not a crash.
+[[tool.mypy.overrides]]
+module = ["cryptography.*"]
 ignore_missing_imports = true
 
 # The hook classes MUST subclass the host's (untyped) base classes and use
