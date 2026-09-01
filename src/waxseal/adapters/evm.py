@@ -87,11 +87,16 @@ from typing import Any, Final, TypeVar
 from waxseal.adapters.remote import RemoteRequest, Transport, urllib_transport
 from waxseal.domain.abi import (
     SELECTOR_BOND_OF,
+    SELECTOR_DEADLINE_OF,
     SELECTOR_DEPOSIT,
     SELECTOR_IS_DELINQUENT,
     SELECTOR_LAST_SEEN,
     SELECTOR_LOOKUP,
+    SELECTOR_PROVE_EQUIVOCATION,
+    SELECTOR_PROVE_NON_EXTENSION,
     SELECTOR_REGISTER,
+    SELECTOR_REGISTER_TRAIL,
+    SELECTOR_SUBMIT,
     WORD,
     AbiError,
     Dynamic,
@@ -109,6 +114,7 @@ from waxseal.domain.abi import (
 )
 from waxseal.domain.bond import (
     BondStatus,
+    DivergentLeaf,
     EquivocationProof,
     NonExtensionProof,
     bond_status_for,
@@ -144,19 +150,20 @@ _EXECUTION_REVERTED: Final = 3
 
 # ---------------------------------------------------------------- selectors
 #
-# Frozen, and checked against contracts/abi/selectors.json by
-# tests/adapters/test_evm.py. Never computed: no keccak256 in the stdlib.
-
-# AnchoringLiveness — deployed shapes. `deadlineOf` and the six-argument
-# `submit` are the deployed spellings; domain/abi.py's `deadline(bytes32)`
-# and five-argument `submit` describe an earlier draft and are not used here.
-SELECTOR_DEADLINE_OF: Final = bytes.fromhex("4acbede3")
-SELECTOR_REGISTER_TRAIL: Final = bytes.fromhex("257fb3fd")
-SELECTOR_SUBMIT_HEAD: Final = bytes.fromhex("0d0d53d2")
-
-# BondedCheckpoints — the struct-argument shapes the deployed contract has.
-SELECTOR_PROVE_EQUIVOCATION: Final = bytes.fromhex("1698fa64")
-SELECTOR_PROVE_NON_EXTENSION: Final = bytes.fromhex("d459a73d")
+# NOT frozen here. Every function selector is frozen ONCE, in domain/abi.py,
+# whose whole table is cross-checked against `cast sig` and against
+# `forge inspect`'s own output (tests/domain/test_abi.py). This module kept
+# its own copies of five of them through 0.1.5, from a period when the domain
+# table really did describe an earlier contract draft; waxseal-fg4.40
+# corrected the table and the copies outlived their reason, leaving two
+# hand-maintained lists of the same constants — the exact shape that let six
+# selectors drift through every green gate the first time.
+# tests/architecture/test_invariants.py::TestSelectorsAreFrozenInOnePlace
+# pins the single owner.
+#
+# Only the alias is local: `SELECTOR_SUBMIT_HEAD` says which of the two
+# `submit`-shaped calls in this file is meant, at the call site.
+SELECTOR_SUBMIT_HEAD: Final = SELECTOR_SUBMIT
 
 # `error TrailNotRegistered(bytes32)` — the ONE revert this adapter reads as
 # a measured absence rather than as a failure to measure.
@@ -211,28 +218,22 @@ class EvmTxReceipt:
         return f"evm:{self.chain_id}:{self.block_number}:{self.tx_hash}"
 
 
-@dataclass(frozen=True, slots=True)
-class LeafClaim:
-    """One leaf position and the inclusion proof tying it to a signed root.
+def leaf_claim(leaf: DivergentLeaf) -> Dynamic:
+    """`BondedCheckpoints.LeafClaim` as one ABI tail blob.
 
-    A wire shape of `BondedCheckpoints.proveNonExtension`, so it lives in the
-    adapter rather than in domain: the contract's non-extension evidence is
-    POSITIVE (one index, two conflicting leaves, each proved against its own
-    signed root) and `domain/bond.NonExtensionProof` still models the earlier
-    consistency-proof design. See `EvmLedgerSink.submit_fraud_proof`.
+    Was a dataclass of its own here through 0.1.5, holding the same three
+    fields as `domain/bond.DivergentLeaf` because the domain type did not
+    exist yet: the adapter owned both the wire shape AND the evidence. Only
+    the shape was ever the adapter's — whether two of these contradict each
+    other is RFC 9162 arithmetic, which now lives in domain and is checked
+    there before any gas is spent.
     """
-
-    index: int
-    entry_hash: str
-    proof: Sequence[str] = ()
-
-    def encoded(self) -> Dynamic:
-        return Dynamic(
-            encode_uint(self.index)
-            + encode_bytes32(self.entry_hash)
-            + encode_uint(3 * WORD)
-            + bytes(encode_bytes32_array(self.proof))
-        )
+    return Dynamic(
+        encode_uint(leaf.index)
+        + encode_bytes32(leaf.entry_hash)
+        + encode_uint(3 * WORD)
+        + bytes(encode_bytes32_array(leaf.proof))
+    )
 
 
 def _signed_checkpoint(checkpoint: Checkpoint, signature: bytes) -> Dynamic:
@@ -861,24 +862,22 @@ class EvmLedgerSink:
         ).tx_hash
 
     def submit_fraud_proof(self, proof: EquivocationProof | NonExtensionProof) -> str:
-        """Submit a fraud proof to the bond contract.
+        """Submit a fraud proof to the bond contract. ONE door for both shapes.
 
-        Only `EquivocationProof` can be submitted from a domain proof object.
-        The deployed `proveNonExtension` takes POSITIVE evidence — one leaf
-        index and two inclusion proofs putting different entry hashes there,
-        each valid against its own signed root — because a FAILING
-        consistency proof shows only that the prover supplied a bad one, and
-        slashing on that would let anyone burn an honest writer's bond.
-        `domain/bond.NonExtensionProof` still carries a consistency proof, so
-        it cannot be translated into that call, and the mismatch is raised
-        rather than approximated. Use `submit_non_extension()`.
+        It was not one through 0.1.5: `domain/bond.NonExtensionProof` then
+        modelled a consistency-proof CHALLENGE, which `proveNonExtension` does
+        not accept — the contract slashes on POSITIVE evidence (one leaf index
+        and two inclusion proofs putting different entry hashes there, each
+        valid against its own signed root) because a FAILING consistency proof
+        shows only that the prover supplied a bad one, and slashing on that
+        would let anyone burn an honest writer's bond for the price of gas. So
+        this method raised on one of its own two argument types and pointed at
+        a second entry point. The domain type is now that positive evidence
+        (the challenge kept its behaviour under the honest name
+        `NonExtensionChallenge`), and the second door is gone.
         """
-        if not isinstance(proof, EquivocationProof):
-            raise LedgerError(
-                "BondedCheckpoints.proveNonExtension takes positive divergent-leaf evidence "
-                "(one index, two inclusion proofs), which a NonExtensionProof's consistency "
-                "proof cannot supply; call submit_non_extension() with the divergent leaf"
-            )
+        if isinstance(proof, NonExtensionProof):
+            return self._submit_non_extension(proof)
         reason = proof.validate()
         if reason is not None:
             # Structural admissibility is free to check here; sending an
@@ -897,26 +896,22 @@ class EvmLedgerSink:
             "proveEquivocation", self._reader._address("bond"), calldata
         ).tx_hash
 
-    def submit_non_extension(
-        self,
-        chain_id: str,
-        older: Checkpoint,
-        older_signature: bytes,
-        newer: Checkpoint,
-        newer_signature: bytes,
-        in_older: LeafClaim,
-        in_newer: LeafClaim,
-    ) -> str:
+    def _submit_non_extension(self, proof: NonExtensionProof) -> str:
         """Slash a writer whose newer head contradicts its older one at a leaf
-        both trees contain. See `submit_fraud_proof` for why this shape."""
+        both trees contain. Private: `submit_fraud_proof` is the door."""
+        reason = proof.validate()
+        if reason is not None:
+            raise LedgerError(
+                f"proveNonExtension: the pair is not a non-extension: {reason}"
+            )
         calldata = encode_call(
             SELECTOR_PROVE_NON_EXTENSION,
             [
-                encode_bytes32(trail_id_for(chain_id)),
-                _signed_checkpoint(older, older_signature),
-                _signed_checkpoint(newer, newer_signature),
-                in_older.encoded(),
-                in_newer.encoded(),
+                encode_bytes32(trail_id_for(proof.chain_id)),
+                _signed_checkpoint(proof.older, proof.older_signature),
+                _signed_checkpoint(proof.newer, proof.newer_signature),
+                leaf_claim(proof.in_older),
+                leaf_claim(proof.in_newer),
             ],
         )
         return self._send(

@@ -450,6 +450,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (`waxseal.domain.bond`): `NonExtensionProof` now means the evidence the
+  deployed contract actually accepts, and the old challenge type keeps its behaviour
+  under the name `NonExtensionChallenge`.** One name carried two incompatible ideas.
+  `BondedCheckpoints.proveNonExtension` slashes on POSITIVE evidence — one leaf index at
+  which two signed roots each prove a *different* entry — and deliberately never on a
+  consistency proof that merely failed to verify, because slashing on a failure would let
+  anyone drain an honest writer's bond for the price of gas. The domain type modelled the
+  earlier consistency-proof challenge, so `EvmLedgerSink.submit_fraud_proof` **raised
+  `LedgerError` on one of its own two declared argument types** and pointed callers at a
+  second entry point, `submit_non_extension`, that took seven hand-assembled positional
+  arguments and validated none of them.
+
+  Now: `domain/bond.DivergentLeaf` (the leaf claim, moved out of `adapters/evm.py` —
+  only the ABI *encoding* was ever the adapter's, and whether two claims contradict each
+  other is RFC 9162 arithmetic), `domain/bond.NonExtensionProof` carrying the two signed
+  checkpoints and the divergent pair, and `NonExtensionChallenge` unchanged in behaviour
+  beside them. `submit_fraud_proof` is ONE door for both shapes and validates both;
+  `submit_non_extension` and `adapters.evm.LeafClaim` are gone. `waxseal bond prove`'s
+  JSON format is unchanged — it already named these fields.
+
+  **The gap this closes was invisible while the raise stood**: `proveNonExtension` had no
+  end-to-end evidence at any layer, because there was nothing translatable to drive it
+  with. It now has two on-chain tests against real anvil chains and the real compiled
+  contract, driving the real CLI as a subprocess — a divergent leaf built by this
+  repository's own `domain/anchoring.membership_proof`, verified by the contract's
+  `Rfc9162.verifyInclusion` inside revm, asserted by reading raw `bondOf` state before
+  (funded, unslashed) and after (slashed, amount 0). A wrong tuple offset or tree size
+  reverts with `InclusionProofFailed` instead of slashing, so a pass is evidence about
+  the encoding and not only about the plumbing. The structural guard is measured the same
+  way: two leaves that AGREE exit 1 with `not a non-extension: leaves_agree` and send no
+  transaction at all.
+
+- **Function selectors are frozen in ONE place.** `adapters/evm.py` kept its own copies
+  of five constants `domain/abi.py` already froze, from a period when the domain table
+  really did describe an earlier contract draft; that table was corrected and the copies
+  outlived their reason, leaving two hand-maintained lists of the same four-byte values
+  and a comment still calling the corrected one a draft. Two lists is the shape that let
+  six selectors drift through every green gate the first time. The adapter now imports
+  them, keeps one alias (`SELECTOR_SUBMIT_HEAD`, to say which `submit` a call site
+  means), and `tests/architecture/test_invariants.py::TestSelectorsAreFrozenInOnePlace`
+  pins the single owner by scanning for `bytes.fromhex` freezes outside `domain/abi.py`.
+
 - **`JSONLBackend.append()` no longer raises `JSONLCorruptionError`, and a durably
   completed append can no longer report failure.** The scan ran *after* the entry was
   written and flushed, still inside the lock, so a `JSONLCorruptionError` about some other,
@@ -492,6 +534,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changed.
 
 ### Fixed
+
+- **SPEC.md section 20.2's "roughly 100x" was off by an order of magnitude** (owner-
+  approved frozen-path edit). The by-count-rotation paragraph justified a byte threshold
+  with a spread no measurement in the tree produced. `sources/rotation.py`'s copy of the
+  same claim was corrected in 0.1.5 with a real fixture; the spec's could not be, because
+  SPEC.md is a frozen path and the correction was the owner's to make — which left the two
+  halves of one claim disagreeing by 10x with nothing failing. Measured through the real
+  `AuditLog.append` path with an injected clock: **650 B** for a minimal
+  `UserPromptSubmit` hook event against **6_374 B** for a `PostToolUse` event clipped at
+  `MAX_FIELD_CHARS` — **9.8x**, and not reachable by a better fixture, because every entry
+  pays a ~466 B envelope floor and the clip caps the other end. The argument survives
+  unchanged (a count still says almost nothing about bytes at 10x); only the number was
+  wrong. `tests/test_entry_size_receipt.py` now asserts the spec sentence quotes the
+  numbers it measures, so neither half can drift again.
+
+- **Five tests reported "UNMEASURED" on a machine that could measure them.** One question
+  — is Foundry installed? — had three answers. `tests/adapters/test_evm_anvil.py` and
+  `tests/test_cli_ledger_e2e_anvil.py` fell back to foundryup's install directory when
+  `PATH` did not carry the tools; `tests/domain/test_abi.py` asked `shutil.which` and
+  stopped. `foundryup` writes the binaries and appends a line to the shell profile, so on
+  a pytest run started from anywhere that had not sourced it — the default state of a
+  fresh install — the same run MEASURED the on-chain end-to-end suites against real anvil
+  chains and reported 5x UNMEASURED for the selector cross-check. The skip label said
+  "install Foundry", and Foundry was installed, which is why nobody chased it: rule 5 one
+  level up from the code, where "unmeasured" is an honest verdict only when the thing
+  deciding it is not itself the defect. Resolution now lives once in `tests/_foundry.py`,
+  pinned by `TestFoundryIsResolvedInOnePlace`; absence is still reported and never worked
+  around.
+
+  **On-chain verification receipt, this machine, 2026-09-01, Foundry 1.8.1
+  (`982849d`), Foundry NOT on `PATH`:** `forge test` 53 passed / 0 failed / 0 skipped
+  across five suites; `contracts/script/selectors.sh --check` matches `forge inspect` for
+  all three contracts; full Python suite **3072 passed, 0 skipped, 100% line and branch**,
+  including the 31 anvil end-to-end tests and the 5 `cast` cross-checks that used to skip.
+  The 5 UNMEASURED are 0 with evidence, not 0 by rewording.
+
+- **Three stale citations of the coverage floor.** The floor was ratcheted 90% → 100% on
+  2026-08-23 and `CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md` and
+  `.github/workflows/release.yml` were left saying 90%, so a contributor reading the
+  contributing guide was told a gate that would fail them. `TestCoverageFloorIsStatedOnce`
+  now ties every documented floor to `pyproject.toml`'s `fail_under`; `CHANGELOG.md` is
+  excluded on purpose, because release history is not a stale copy.
+
+- **A mypy override comment named a function that no longer exists.** `pyproject.toml`
+  cited the guarded `cryptography` import as living in
+  `adapters/rfc3161_verify.py::_load_backend`; it is in `_verify`.
 
 - **Read-only commands cost more than the bytes they read** (0.1.5 plan, Workstream A).
   Four fixes, no behavior change and no hash change; every number below is a counted

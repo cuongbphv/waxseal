@@ -3,8 +3,9 @@
 Two proof shapes, and they are NOT symmetric. Equivocation is a positive,
 self-contained fact: two checkpoints at the same seq, both signed, that
 disagree. Non-extension is not — no consistency proof can demonstrate the
-absence of one — so `NonExtensionProof` carries a challenge and the
-consistency check is the writer's DEFENCE. The tests below pin that
+absence of one — so `NonExtensionChallenge` carries a challenge and
+the consistency check is the writer's DEFENCE, while `NonExtensionProof` is
+the divergent-leaf evidence the deployed contract actually slashes on. The tests below pin that
 asymmetry, because a later reader who assumes both are proofs would build a
 contract that slashes an honest writer for a garbage proof anyone can submit.
 """
@@ -16,7 +17,7 @@ import hashlib
 import pytest
 
 from waxseal.domain import bond
-from waxseal.domain.anchoring import batch_root, consistency_proof
+from waxseal.domain.anchoring import batch_root, consistency_proof, membership_proof
 from waxseal.domain.checkpoint import Checkpoint, checkpoint_for, checkpoint_frame
 from waxseal.domain.hashing import LpEncodingError
 from waxseal.domain.verdict import Verdict
@@ -188,11 +189,11 @@ class TestEquivocationProof:
         assert "structural" in (bond.EquivocationProof.validate.__doc__ or "").lower()
 
 
-class TestNonExtensionProof:
+class TestNonExtensionChallenge:
     def test_a_real_consistency_proof_defends_the_writer(self) -> None:
         older, newer = cp(3), cp(7)
         proof = consistency_proof(HASHES, older.seq + 1)
-        challenge = bond.NonExtensionProof(
+        challenge = bond.NonExtensionChallenge(
             chain_id=CHAIN_ID, older=older, newer=newer, proof=proof
         )
         assert challenge.validate() is None
@@ -201,7 +202,7 @@ class TestNonExtensionProof:
     def test_a_forked_newer_root_cannot_be_defended(self) -> None:
         older = cp(3)
         newer = Checkpoint(seq=7, entry_hash=HASHES[7], root=batch_root(HASHES[:7] + ("aa" * 32,)))
-        challenge = bond.NonExtensionProof(
+        challenge = bond.NonExtensionChallenge(
             chain_id=CHAIN_ID, older=older, newer=newer, proof=consistency_proof(HASHES, 4)
         )
         assert challenge.extension_holds() is False
@@ -211,25 +212,29 @@ class TestNonExtensionProof:
         # submit noise and make `extension_holds` False. Only the writer's
         # failure to answer with a passing proof, within the defence window,
         # is evidence of anything.
-        challenge = bond.NonExtensionProof(
+        challenge = bond.NonExtensionChallenge(
             chain_id=CHAIN_ID, older=cp(3), newer=cp(7), proof=("00" * 32,)
         )
         assert challenge.extension_holds() is False
-        assert "defence" in (bond.NonExtensionProof.__doc__ or "").lower()
+        assert "defence" in (bond.NonExtensionChallenge.__doc__ or "").lower()
 
     def test_an_older_checkpoint_that_is_not_older_is_inadmissible(self) -> None:
-        challenge = bond.NonExtensionProof(chain_id=CHAIN_ID, older=cp(7), newer=cp(3), proof=())
+        challenge = bond.NonExtensionChallenge(
+            chain_id=CHAIN_ID, older=cp(7), newer=cp(3), proof=()
+        )
         assert challenge.validate() == bond.NON_EXTENSION_SEQ_NOT_ADVANCING
 
     def test_the_same_seq_is_equivocation_business_not_this_one(self) -> None:
-        challenge = bond.NonExtensionProof(chain_id=CHAIN_ID, older=cp(3), newer=cp(3), proof=())
+        challenge = bond.NonExtensionChallenge(
+            chain_id=CHAIN_ID, older=cp(3), newer=cp(3), proof=()
+        )
         assert challenge.validate() == bond.NON_EXTENSION_SEQ_NOT_ADVANCING
 
     def test_it_never_raises_on_a_malformed_proof(self) -> None:
         # `verify_consistency` is documented never to raise; this inherits
         # that, because the proof arrives from whoever submitted the
         # challenge.
-        challenge = bond.NonExtensionProof(
+        challenge = bond.NonExtensionChallenge(
             chain_id=CHAIN_ID, older=cp(3), newer=cp(7), proof=("not-hex",)
         )
         assert challenge.extension_holds() is False
@@ -291,3 +296,179 @@ class TestFalsifiabilityReceipt:
 
     def test_the_receipt_is_recorded(self) -> None:
         assert "1 failed" in (TestFalsifiabilityReceipt.__doc__ or "")
+
+
+FORKED = HASHES[:2] + ("aa" * 32,) + HASHES[3:]
+
+
+def forked_cp(seq: int) -> Checkpoint:
+    """A checkpoint over a tree that diverges from `HASHES` at index 2."""
+    return checkpoint_for(FORKED[: seq + 1])
+
+
+def divergent_pair() -> tuple[bond.DivergentLeaf, bond.DivergentLeaf]:
+    """The positive evidence: index 2 holds two different entries, each
+    provable against its own signed root."""
+    return (
+        bond.DivergentLeaf(index=2, entry_hash=HASHES[2], proof=membership_proof(HASHES[:4], 2)),
+        bond.DivergentLeaf(index=2, entry_hash=FORKED[2], proof=membership_proof(FORKED, 2)),
+    )
+
+
+class TestNonExtensionProofIsPositiveEvidence:
+    """The shape `BondedCheckpoints.proveNonExtension` actually accepts.
+
+    The contract slashes on a divergent leaf PROVED to be in both trees, and
+    deliberately never on a consistency proof that merely failed to verify —
+    slashing on a failure would let anyone burn an honest writer's bond for
+    the price of gas. This type is that evidence, in domain, so the adapter
+    encodes it rather than refusing to translate it (F3 left the two shapes
+    unreconciled and `submit_fraud_proof` raised on its own domain type).
+    """
+
+    def test_a_real_divergent_leaf_is_admissible_and_holds(self) -> None:
+        in_older, in_newer = divergent_pair()
+        proof = bond.NonExtensionProof(
+            chain_id=CHAIN_ID,
+            older_signature=b"\x01" * 65,
+            newer_signature=b"\x02" * 65,
+            older=cp(3),
+            newer=forked_cp(7),
+            in_older=in_older,
+            in_newer=in_newer,
+        )
+        assert proof.validate() is None
+        assert proof.divergence_holds() is True
+
+    def test_a_newer_that_does_not_advance_is_inadmissible(self) -> None:
+        in_older, in_newer = divergent_pair()
+        proof = bond.NonExtensionProof(
+            chain_id=CHAIN_ID,
+            older_signature=b"\x01" * 65,
+            newer_signature=b"\x02" * 65,
+            older=forked_cp(7),
+            newer=cp(3),
+            in_older=in_older,
+            in_newer=in_newer,
+        )
+        assert proof.validate() == bond.NON_EXTENSION_SEQ_NOT_ADVANCING
+
+    def test_two_claims_at_different_indices_prove_nothing(self) -> None:
+        in_older, in_newer = divergent_pair()
+        proof = bond.NonExtensionProof(
+            chain_id=CHAIN_ID,
+            older_signature=b"\x01" * 65,
+            newer_signature=b"\x02" * 65,
+            older=cp(3),
+            newer=forked_cp(7),
+            in_older=in_older,
+            in_newer=bond.DivergentLeaf(index=3, entry_hash=in_newer.entry_hash),
+        )
+        assert proof.validate() == bond.NON_EXTENSION_LEAF_INDEX_DIFFERS
+
+    def test_a_leaf_outside_the_older_tree_prove_nothing(self) -> None:
+        # Index 6 is in the newer tree only, so the older tree never claimed
+        # anything there and there is no contradiction to exhibit.
+        proof = bond.NonExtensionProof(
+            chain_id=CHAIN_ID,
+            older_signature=b"\x01" * 65,
+            newer_signature=b"\x02" * 65,
+            older=cp(3),
+            newer=forked_cp(7),
+            in_older=bond.DivergentLeaf(index=6, entry_hash=HASHES[6]),
+            in_newer=bond.DivergentLeaf(index=6, entry_hash=FORKED[2]),
+        )
+        assert proof.validate() == bond.NON_EXTENSION_LEAF_OUTSIDE_OLDER_TREE
+
+    def test_two_leaves_that_agree_are_not_a_contradiction(self) -> None:
+        in_older, _ = divergent_pair()
+        proof = bond.NonExtensionProof(
+            chain_id=CHAIN_ID,
+            older_signature=b"\x01" * 65,
+            newer_signature=b"\x02" * 65,
+            older=cp(3),
+            newer=forked_cp(7),
+            in_older=in_older,
+            in_newer=bond.DivergentLeaf(index=2, entry_hash=in_older.entry_hash),
+        )
+        assert proof.validate() == bond.NON_EXTENSION_LEAVES_AGREE
+
+    def test_noise_makes_it_hold_false_and_slashes_nobody(self) -> None:
+        """The asymmetry that makes this a PROOF and the challenge not one.
+
+        A submitter who supplies junk gets False here too — but False means
+        "you proved nothing", so the writer keeps its bond. On the challenge
+        type the same False was the alarming answer, which is exactly why it
+        could not be the contract's input.
+        """
+        in_older, in_newer = divergent_pair()
+        proof = bond.NonExtensionProof(
+            chain_id=CHAIN_ID,
+            older_signature=b"\x01" * 65,
+            newer_signature=b"\x02" * 65,
+            older=cp(3),
+            newer=forked_cp(7),
+            in_older=bond.DivergentLeaf(
+                index=2, entry_hash=in_older.entry_hash, proof=("00" * 32,)
+            ),
+            in_newer=in_newer,
+        )
+        assert proof.validate() is None
+        assert proof.divergence_holds() is False
+
+    def test_it_never_raises_on_malformed_hex(self) -> None:
+        in_older, in_newer = divergent_pair()
+        proof = bond.NonExtensionProof(
+            chain_id=CHAIN_ID,
+            older_signature=b"\x01" * 65,
+            newer_signature=b"\x02" * 65,
+            older=cp(3),
+            newer=forked_cp(7),
+            in_older=bond.DivergentLeaf(index=2, entry_hash="not-hex"),
+            in_newer=in_newer,
+        )
+        assert proof.divergence_holds() is False
+
+
+class TestNonExtensionProofCarriesTheSignatures:
+    """Symmetric with `EquivocationProof`, and for the same reason.
+
+    `proveNonExtension` recovers ONE writer from both signed checkpoints
+    (`_recoverBoth`), so a proof that does not carry them is not a proof the
+    contract can act on — it is two roots and an assertion. Holding bytes
+    needs no crypto library; recovering an address from them does, and that
+    stays the contract's job (CLAUDE.md rule 1).
+    """
+
+    def test_the_two_digests_are_the_ones_the_contract_recovers_from(self) -> None:
+        in_older, in_newer = divergent_pair()
+        older, newer = cp(3), forked_cp(7)
+        proof = bond.NonExtensionProof(
+            chain_id=CHAIN_ID,
+            older=older,
+            newer=newer,
+            older_signature=b"\x01" * 65,
+            newer_signature=b"\x02" * 65,
+            in_older=in_older,
+            in_newer=in_newer,
+        )
+        assert proof.digests() == (
+            bond.checkpoint_signing_digest(CHAIN_ID, older),
+            bond.checkpoint_signing_digest(CHAIN_ID, newer),
+        )
+
+    def test_an_unsigned_pair_is_inadmissible_before_the_gas(self) -> None:
+        in_older, in_newer = divergent_pair()
+        proof = bond.NonExtensionProof(
+            chain_id=CHAIN_ID,
+            older=cp(3),
+            newer=forked_cp(7),
+            older_signature=b"\x01" * 65,
+            newer_signature=b"",
+            in_older=in_older,
+            in_newer=in_newer,
+        )
+        assert proof.validate() == bond.NON_EXTENSION_MISSING_SIGNATURE
+
+    def test_validate_still_says_nothing_about_whose_signatures_they_are(self) -> None:
+        assert "structural" in (bond.NonExtensionProof.validate.__doc__ or "").lower()

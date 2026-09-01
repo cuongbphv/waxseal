@@ -54,24 +54,27 @@ import pytest
 from waxseal.adapters.evm import (
     ERROR_TRAIL_NOT_REGISTERED,
     MIN_ENDPOINTS,
-    SELECTOR_DEADLINE_OF,
-    SELECTOR_PROVE_EQUIVOCATION,
-    SELECTOR_PROVE_NON_EXTENSION,
-    SELECTOR_REGISTER_TRAIL,
     SELECTOR_SUBMIT_HEAD,
     EvmAnchorSink,
     EvmContracts,
     EvmLedgerReader,
     EvmLedgerSink,
     EvmTxReceipt,
-    LeafClaim,
+    leaf_claim,
 )
 from waxseal.adapters.remote import RemoteRequest, RemoteResponse
 from waxseal.domain import abi
+from waxseal.domain.abi import (
+    SELECTOR_DEADLINE_OF,
+    SELECTOR_PROVE_EQUIVOCATION,
+    SELECTOR_PROVE_NON_EXTENSION,
+    SELECTOR_REGISTER_TRAIL,
+)
 from waxseal.domain.bond import (
     BONDED,
     SLASHED,
     UNBONDED,
+    DivergentLeaf,
     EquivocationProof,
     NonExtensionProof,
     trail_id_for,
@@ -1010,40 +1013,42 @@ class TestFraudProofs:
             sink(chain).submit_fraud_proof(self.pair(seq_b=9))
         assert chain.calldata == []
 
-    def test_a_non_extension_proof_cannot_be_translated_and_says_so(self) -> None:
-        # domain/bond.NonExtensionProof carries a CONSISTENCY proof; the
-        # deployed contract takes positive divergent-leaf evidence. The gap is
-        # raised, never approximated into a call that would revert.
-        proof = NonExtensionProof(
+    @staticmethod
+    def divergence(index: int = 3, newer_hash: str = "cc" * 32) -> NonExtensionProof:
+        return NonExtensionProof(
             chain_id="trail",
             older=CHECKPOINT,
             newer=Checkpoint(seq=99, entry_hash=ENTRY_HASH, root=ROOT),
+            older_signature=b"\x01" * 65,
+            newer_signature=b"\x02" * 65,
+            in_older=DivergentLeaf(index=index, entry_hash="aa" * 32, proof=["bb" * 32]),
+            in_newer=DivergentLeaf(index=index, entry_hash=newer_hash, proof=["dd" * 32]),
         )
-        with pytest.raises(LedgerError, match="positive divergent-leaf evidence"):
-            sink(FakeChain()).submit_fraud_proof(proof)
 
-    def test_submit_non_extension_encodes_two_leaf_claims(self) -> None:
+    def test_a_non_extension_proof_goes_through_the_same_one_door(self) -> None:
+        # Through 0.1.5 this raised: the domain type carried a consistency
+        # proof the deployed contract does not accept, so `submit_fraud_proof`
+        # refused its own argument type. The domain type is now the
+        # divergent-leaf evidence the contract takes, and the door is one.
         chain = FakeChain()
-        older = LeafClaim(index=3, entry_hash="aa" * 32, proof=["bb" * 32])
-        newer = LeafClaim(index=3, entry_hash="cc" * 32, proof=["dd" * 32])
-        assert (
-            sink(chain).submit_non_extension(
-                "trail",
-                CHECKPOINT,
-                b"\x01" * 65,
-                Checkpoint(seq=99, entry_hash=ENTRY_HASH, root=ROOT),
-                b"\x02" * 65,
-                older,
-                newer,
-            )
-            == TX_HASH
-        )
+        assert sink(chain).submit_fraud_proof(self.divergence()) == TX_HASH
         calldata = bytes.fromhex(chain.calldata[0][2:])
         assert calldata[:4] == SELECTOR_PROVE_NON_EXTENSION
+        assert calldata[4:36] == trail_id_for("trail")
         assert bytes.fromhex("aa" * 32) in calldata and bytes.fromhex("cc" * 32) in calldata
 
-    def test_a_leaf_claim_encodes_index_hash_and_proof(self) -> None:
-        blob = bytes(LeafClaim(index=3, entry_hash="aa" * 32, proof=["bb" * 32]).encoded())
+    def test_a_structurally_inadmissible_divergence_is_refused_before_the_gas(self) -> None:
+        # Two leaves that agree are not a contradiction; the contract reverts
+        # on it (`LeavesAgree`), so sending it only buys the gas that paid for
+        # the revert. Same guard `submit_fraud_proof` already had for an
+        # equivocation, now on both branches instead of one.
+        chain = FakeChain()
+        with pytest.raises(LedgerError, match="not a non-extension: leaves_agree"):
+            sink(chain).submit_fraud_proof(self.divergence(newer_hash="aa" * 32))
+        assert chain.calldata == []
+
+    def test_a_divergent_leaf_encodes_index_hash_and_proof(self) -> None:
+        blob = bytes(leaf_claim(DivergentLeaf(index=3, entry_hash="aa" * 32, proof=["bb" * 32])))
         assert int.from_bytes(blob[:32], "big") == 3
         assert blob[32:64] == bytes.fromhex("aa" * 32)
         assert int.from_bytes(blob[64:96], "big") == 3 * 32

@@ -135,9 +135,15 @@ class LedgerSink(Protocol):
     def submit_fraud_proof(self, proof: EquivocationProof | NonExtensionProof) -> str:
         """Submit a fraud proof to the bond contract.
 
-        The two proof types are not symmetric (see `domain/bond.py`): an
-        equivocation is self-contained, a non-extension challenge only
-        becomes evidence when the defence window closes unanswered.
+        BOTH shapes go here (see `domain/bond.py`): two signed checkpoints
+        that disagree at one seq, or one leaf index at which two signed roots
+        prove different entries. Both are self-contained — an implementation
+        that cannot act on one of them is required to say so rather than
+        approximate it into a call the contract reverts on.
+
+        A `NonExtensionChallenge` is deliberately NOT accepted here. It only
+        becomes evidence when the defence window closes unanswered, which is
+        a clock no ledger call owns.
         """
         ...
 

@@ -25,6 +25,7 @@ from waxseal.domain.bond import (
     SLASHED,
     UNBONDED,
     BondStatus,
+    DivergentLeaf,
     EquivocationProof,
     NonExtensionProof,
     bond_status_for,
@@ -369,10 +370,22 @@ class TestSinkAndSigner:
             checkpoint_b=b,
             signature_b=b"\x02",
         )
-        challenge = NonExtensionProof(chain_id=CHAIN_ID, older=a, newer=checkpoint_for(HASHES))
+        # The second shape used to be a consistency-proof CHALLENGE that the
+        # deployed contract could not accept, so the "one entry point" this
+        # test names was one the adapter raised from. It is now the
+        # divergent-leaf evidence `proveNonExtension` takes.
+        divergence = NonExtensionProof(
+            chain_id=CHAIN_ID,
+            older=a,
+            newer=checkpoint_for(HASHES),
+            older_signature=b"\x01",
+            newer_signature=b"\x02",
+            in_older=DivergentLeaf(index=1, entry_hash=HASHES[1]),
+            in_newer=DivergentLeaf(index=1, entry_hash="ee" * 32),
+        )
         sink.submit_fraud_proof(equivocation)
-        sink.submit_fraud_proof(challenge)
-        assert sink.proofs == [equivocation, challenge]
+        sink.submit_fraud_proof(divergence)
+        assert sink.proofs == [equivocation, divergence]
 
     def test_a_transaction_signer_is_also_a_digest_signer(self) -> None:
         signer = FakeTransactionSigner()

@@ -24,8 +24,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from waxseal.adapters.evm import SELECTOR_DEADLINE_OF as _DEADLINE_OF
 from waxseal.domain import abi as _abi
+from waxseal.domain.abi import SELECTOR_DEADLINE_OF as _DEADLINE_OF
 
 WORD = 32
 

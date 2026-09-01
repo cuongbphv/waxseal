@@ -13,14 +13,19 @@ not extend its old one, is NOT self-contained, and the asymmetry is easy to
 miss:
 
   * Equivocation is PROVEN by exhibiting the pair. `EquivocationProof`.
-  * Non-extension cannot be proven by exhibiting anything. An RFC 9162
-    consistency proof establishes that a tree DOES extend another; there is
-    no proof of the negative, because a submitter who wants the check to
-    fail need only submit noise. `NonExtensionProof` is therefore a
-    CHALLENGE, and `extension_holds()` is the writer's DEFENCE. Only the
-    expiry of the defence window without a passing proof is slashable, and
-    that window is why the contract's `withdraw()` must be delayed by at
-    least delta.
+  * Non-extension cannot be proven by exhibiting a CONSISTENCY proof. An RFC
+    9162 consistency proof establishes that a tree DOES extend another; there
+    is no proof of the negative that way, because a submitter who wants the
+    check to fail need only submit noise. `NonExtensionChallenge` is
+    therefore a CHALLENGE, and `extension_holds()` is the writer's DEFENCE.
+    Only the expiry of the defence window without a passing proof is
+    slashable, and that window is why the contract's `withdraw()` must be
+    delayed by at least delta.
+  * It CAN be proven by exhibiting a divergent leaf: one index at which two
+    signed roots each prove a different entry. `NonExtensionProof`, and what
+    the deployed `proveNonExtension` accepts. The two ideas shared the name
+    `NonExtensionProof` through 0.1.5, which left `submit_fraud_proof`
+    raising on one of its own argument types; they are now two names.
 
 Signature verification is not here and cannot be: waxseal imports no crypto
 library (CLAUDE.md rule 1). `validate()` decides STRUCTURAL admissibility —
@@ -43,7 +48,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from waxseal.domain.anchoring import verify_consistency
+from waxseal.domain.anchoring import verify_consistency, verify_membership
 from waxseal.domain.checkpoint import Checkpoint, checkpoint_frame
 from waxseal.domain.hashing import LpEncodingError, lp
 from waxseal.domain.verdict import Verdict
@@ -163,17 +168,29 @@ class EquivocationProof:
 
 
 NON_EXTENSION_SEQ_NOT_ADVANCING: Final = "seq_not_advancing"
+NON_EXTENSION_LEAF_INDEX_DIFFERS: Final = "leaf_index_differs"
+NON_EXTENSION_LEAF_OUTSIDE_OLDER_TREE: Final = "leaf_outside_older_tree"
+NON_EXTENSION_LEAVES_AGREE: Final = "leaves_agree"
+NON_EXTENSION_MISSING_SIGNATURE: Final = "missing_signature"
 
 
 @dataclass(frozen=True, slots=True)
-class NonExtensionProof:
+class NonExtensionChallenge:
     """A challenge that a newer checkpoint does not extend an older one, and
     the consistency proof offered as the writer's defence.
 
-    Named `NonExtensionProof` because that is what the contract's
-    `proveNonExtension` entry point is called, but it is a challenge: see the
-    module docstring. `extension_holds()` returning False is NOT evidence of
-    a fork on its own — a submitter who supplies noise gets False every time.
+    NOT what `BondedCheckpoints.proveNonExtension` takes — that is
+    `NonExtensionProof` below. This type carried the `NonExtensionProof` name
+    through 0.1.5, which put one name on two incompatible ideas and left
+    `EvmLedgerSink.submit_fraud_proof` raising on its own domain type; the
+    name moved to the shape the deployed contract accepts, and this kept the
+    behaviour under an honest one.
+
+    It is a challenge, not a proof: see the module docstring.
+    `extension_holds()` returning False is NOT evidence of a fork on its own
+    — a submitter who supplies noise gets False every time. Only the expiry
+    of the defence window without a passing proof is slashable, and that
+    expiry is a clock this process does not own.
     """
 
     chain_id: str
@@ -205,6 +222,103 @@ class NonExtensionProof:
             self.newer.root,
             self.newer.seq + 1,
             self.proof,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DivergentLeaf:
+    """One leaf position, the entry claimed to sit there, and the inclusion
+    proof tying it to a signed root.
+
+    `BondedCheckpoints.LeafClaim` on the wire. It lived in `adapters/evm.py`
+    through 0.1.5 on the reasoning that a wire shape belongs to the adapter,
+    which was true of the ENCODING and not of the evidence: whether a pair of
+    these actually contradicts each other is RFC 9162 arithmetic over hashes,
+    which is domain work and had no domain home. The adapter now encodes this
+    and decides nothing.
+    """
+
+    index: int
+    entry_hash: str
+    proof: Sequence[str] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class NonExtensionProof:
+    """POSITIVE evidence that a newer tree contradicts an older one: one leaf
+    index at which the two signed roots each prove a DIFFERENT entry.
+
+    This is what `BondedCheckpoints.proveNonExtension` accepts, and the
+    asymmetry with `NonExtensionChallenge` is the whole design. A consistency
+    proof that fails shows only that the submitter supplied a bad one, so
+    slashing on it would let anyone drain an honest writer's bond for the
+    price of gas. A divergent leaf needs no such trust: both inclusion proofs
+    verify against roots the writer signed, and no context beyond them is
+    required to see the contradiction.
+
+    `validate()` is STRUCTURAL admissibility, as on `EquivocationProof`: it
+    reproduces the three conditions the contract reverts on before spending
+    gas, and it says nothing about whose signatures these are. The contract
+    folds two of them into one `LeafIndexOutsideOlderTree` revert; they are
+    separate reasons here because they need different fixes — one submitter
+    named two indices, the other named a leaf the older tree never claimed.
+    """
+
+    chain_id: str
+    older: Checkpoint
+    newer: Checkpoint
+    older_signature: bytes
+    newer_signature: bytes
+    in_older: DivergentLeaf
+    in_newer: DivergentLeaf
+
+    def digests(self) -> tuple[bytes, bytes]:
+        """The two digests the contract recovers ONE writer's address from."""
+        return (
+            checkpoint_signing_digest(self.chain_id, self.older),
+            checkpoint_signing_digest(self.chain_id, self.newer),
+        )
+
+    def validate(self) -> str | None:
+        """Structural admissibility, in the contract's own order, and never a
+        signature check — the two `ecrecover` calls are the contract's, as on
+        `EquivocationProof`."""
+        if not self.older_signature or not self.newer_signature:
+            return NON_EXTENSION_MISSING_SIGNATURE
+        if self.newer.seq <= self.older.seq:
+            return NON_EXTENSION_SEQ_NOT_ADVANCING
+        if self.in_older.index != self.in_newer.index:
+            return NON_EXTENSION_LEAF_INDEX_DIFFERS
+        if self.in_older.index > self.older.seq:
+            # A leaf the older tree does not contain cannot contradict it.
+            return NON_EXTENSION_LEAF_OUTSIDE_OLDER_TREE
+        if self.in_older.entry_hash == self.in_newer.entry_hash:
+            return NON_EXTENSION_LEAVES_AGREE
+        return None
+
+    def divergence_holds(self) -> bool:
+        """Do BOTH inclusion proofs check out against their own roots?
+
+        Delegates to `verify_membership` (`domain/anchoring.py`), the same
+        RFC 9162 implementation `Rfc9162.verifyInclusion` is cross-checked
+        against, so Python and Solidity cannot drift into two notions of
+        inclusion. False here means the submitter proved nothing and nobody
+        is slashed — the opposite direction from the challenge type, where
+        False was the alarming answer. Never raises: the claims are
+        submitter-supplied.
+        """
+        return verify_membership(
+            self.in_older.entry_hash,
+            self.in_older.index,
+            self.older.seq + 1,
+            self.in_older.proof,
+            self.older.root,
+        ) and verify_membership(
+            self.in_newer.entry_hash,
+            self.in_newer.index,
+            self.newer.seq + 1,
+            self.in_newer.proof,
+            self.newer.root,
         )
 
 

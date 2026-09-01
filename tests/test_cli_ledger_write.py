@@ -403,6 +403,48 @@ class TestBondProve:
         assert code == 0
         assert "tx=0x" in out
 
+    def test_an_inadmissible_non_extension_is_refused_before_the_gas(
+        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Two leaves that AGREE are not a contradiction.
+
+        The contract reverts on it (`LeavesAgree`), and until the two
+        non-extension shapes were reconciled this path could not check: the
+        CLI built adapter-level leaf claims and called a second entry point
+        that validated nothing, so an operator learned this from a revert
+        and the gas that paid for it. `submit_fraud_proof` now validates both
+        shapes, so the answer arrives before the transaction.
+        """
+        import json
+
+        leaf = {"index": 3, "entry_hash": "aa" * 32, "proof": ["bb" * 32]}
+        proof_path = tmp_path / "proof.json"
+        proof_path.write_text(
+            json.dumps(
+                {
+                    "kind": "non_extension",
+                    "chain_id": "t",
+                    "older": self._checkpoint(5, "ab" * 32, "cd" * 32),
+                    "older_signature": "0x" + "11" * 65,
+                    "newer": self._checkpoint(9, "ef" * 32, "01" * 32),
+                    "newer_signature": "0x" + "22" * 65,
+                    "in_older": leaf,
+                    "in_newer": leaf,
+                }
+            )
+        )
+        urls = two_write_nodes()
+        code = main(
+            [
+                "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
+                "--rpc", urls[0], "--rpc", urls[1],
+            ]
+        )
+        err = capsys.readouterr().err
+        assert code == 1
+        assert "not a non-extension: leaves_agree" in err
+
     def test_checkpoint_not_an_object_is_malformed(
         self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
         capsys: pytest.CaptureFixture[str],

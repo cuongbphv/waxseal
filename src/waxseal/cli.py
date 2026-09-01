@@ -35,6 +35,7 @@ from waxseal.adapters.rfc3161_verify import (
     SIGNATURE_UNCHECKED,
     SignatureCheck,
 )
+from waxseal.domain.bond import DivergentLeaf
 from waxseal.domain.checkpoint import Checkpoint
 from waxseal.domain.header import Entry
 from waxseal.domain.pinning import PinState
@@ -71,7 +72,7 @@ if TYPE_CHECKING:
     # function that needs it at runtime: `adapters/evm.py` is zero-dep
     # stdlib, so there is no cost this guards against except parsing ~900
     # lines of module on every CLI invocation, including `waxseal tail`.
-    from waxseal.adapters.evm import EvmContracts, EvmLedgerSink, LeafClaim
+    from waxseal.adapters.evm import EvmContracts, EvmLedgerSink
 
 # The only two RFC 3161 outcomes that mean "checked and false" rather than
 # "not readable here": the token commits to bytes other than the record it
@@ -3740,12 +3741,10 @@ def _checkpoint_from_json(raw: Any) -> Checkpoint:
     return Checkpoint(seq=int(raw["seq"]), entry_hash=raw["entry_hash"], root=raw["root"])
 
 
-def _leaf_claim_from_json(raw: Any) -> LeafClaim:
-    from waxseal.adapters.evm import LeafClaim
-
+def _divergent_leaf_from_json(raw: Any) -> DivergentLeaf:
     if not isinstance(raw, dict):
         raise ValueError(f"a leaf claim must be a JSON object, got {type(raw).__name__}")
-    return LeafClaim(
+    return DivergentLeaf(
         index=int(raw["index"]),
         entry_hash=raw["entry_hash"],
         proof=tuple(_strip_0x(p) for p in raw.get("proof", ())),
@@ -3758,21 +3757,19 @@ def _bond_prove(
     """`waxseal bond prove <proof.json>` (F4). NOT a chain-entry append (see
     `_registry_publish`'s docstring).
 
-    Two proof shapes, matching domain/bond.py's own asymmetry (see its
-    module docstring): an "equivocation" is self-contained and goes through
-    `EvmLedgerSink.submit_fraud_proof`. A "non_extension" challenge needs
-    the DEPLOYED contract's positive divergent-leaf evidence, which F3
-    explicitly left untranslatable from `domain.bond.NonExtensionProof`
-    (that dataclass's consistency-proof shape predates what the deployed
-    contract actually takes — see `EvmLedgerSink.submit_fraud_proof`'s own
-    docstring) — so this path builds `adapters.evm.LeafClaim` pairs and
-    calls `EvmLedgerSink.submit_non_extension` directly, exactly as that
-    docstring instructs.
+    Two proof shapes, ONE entry point. Both are domain proof objects and both
+    go through `EvmLedgerSink.submit_fraud_proof`, which validates each
+    before spending gas. Through 0.1.5 the non-extension half could not:
+    `domain.bond.NonExtensionProof` then modelled a consistency-proof
+    challenge the deployed contract does not accept, so this path assembled
+    adapter-level leaf claims and called a second, unvalidated entry point.
+    The asymmetry domain/bond.py describes is between the two KINDS of
+    evidence, not between two ways out of this file.
     """
     import json
 
     from waxseal.adapters.evm import EvmContracts
-    from waxseal.domain.bond import EquivocationProof
+    from waxseal.domain.bond import EquivocationProof, NonExtensionProof
     from waxseal.ports.ledger import LedgerError
 
     try:
@@ -3802,17 +3799,17 @@ def _bond_prove(
                 checkpoint_b=_checkpoint_from_json(raw["checkpoint_b"]),
                 signature_b=bytes.fromhex(_strip_0x(raw["signature_b"])),
             )
-            non_extension_args = None
+            non_extension: NonExtensionProof | None = None
         else:
             equivocation = None
-            non_extension_args = (
-                raw["chain_id"],
-                _checkpoint_from_json(raw["older"]),
-                bytes.fromhex(_strip_0x(raw["older_signature"])),
-                _checkpoint_from_json(raw["newer"]),
-                bytes.fromhex(_strip_0x(raw["newer_signature"])),
-                _leaf_claim_from_json(raw["in_older"]),
-                _leaf_claim_from_json(raw["in_newer"]),
+            non_extension = NonExtensionProof(
+                chain_id=raw["chain_id"],
+                older=_checkpoint_from_json(raw["older"]),
+                newer=_checkpoint_from_json(raw["newer"]),
+                older_signature=bytes.fromhex(_strip_0x(raw["older_signature"])),
+                newer_signature=bytes.fromhex(_strip_0x(raw["newer_signature"])),
+                in_older=_divergent_leaf_from_json(raw["in_older"]),
+                in_newer=_divergent_leaf_from_json(raw["in_newer"]),
             )
     except (KeyError, TypeError, ValueError) as e:
         print(f"error: {proof_path}: malformed {kind} proof: {e}", file=sys.stderr)
@@ -3830,9 +3827,9 @@ def _bond_prove(
             _describe_write(rpc_url=write_url, contract=bond_addr, action="proveEquivocation")
             tx_hash = sink.submit_fraud_proof(equivocation)
         else:
-            assert non_extension_args is not None
+            assert non_extension is not None
             _describe_write(rpc_url=write_url, contract=bond_addr, action="proveNonExtension")
-            tx_hash = sink.submit_non_extension(*non_extension_args)
+            tx_hash = sink.submit_fraud_proof(non_extension)
     except (KeyError, TypeError, ValueError, OSError, LedgerError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

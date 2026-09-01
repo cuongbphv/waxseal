@@ -43,8 +43,6 @@ If Foundry is absent every test here SKIPS WITH A LABEL, matching
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -57,9 +55,15 @@ from typing import Any
 
 import pytest
 
+from tests import _foundry
 from waxseal import AuditLog
 from waxseal.adapters.evm import EvmContracts, EvmLedgerSink
-from waxseal.domain.anchoring import batch_root, consistency_proof, verify_consistency
+from waxseal.domain.anchoring import (
+    batch_root,
+    consistency_proof,
+    membership_proof,
+    verify_consistency,
+)
 from waxseal.domain.bond import checkpoint_signing_digest
 from waxseal.domain.checkpoint import Checkpoint
 from waxseal.domain.fingerprint import HEADER_FIELDS, fingerprint_for
@@ -76,6 +80,11 @@ WRITER1_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690
 WRITER1_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 WRITER2_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
 WRITER2_ADDRESS = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+#: A THIRD writer, because the `chain` fixture is module-scoped and a slashed
+#: bond does not come back: the equivocation test spends WRITER2 permanently,
+#: so a second slashing test needs its own stake or it depends on test order.
+WRITER3_KEY = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
+WRITER3_ADDRESS = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
 
 WITHDRAW_DELAY_S = 3600
 LONG_DEADLINE_S = 3600
@@ -84,33 +93,22 @@ SHORT_DEADLINE_S = 25
 PT = "application/vnd.test.e2e+json"
 
 
-def _foundry_bin() -> str | None:
-    if shutil.which("anvil") and shutil.which("forge") and shutil.which("cast"):
-        return os.path.dirname(str(shutil.which("anvil")))
-    default = Path.home() / ".foundry" / "bin"
-    if all((default / tool).exists() for tool in ("anvil", "forge", "cast")):
-        return str(default)
-    return None
+FOUNDRY_BIN = _foundry.FOUNDRY_BIN
 
-
-FOUNDRY_BIN = _foundry_bin()
-
-pytestmark = pytest.mark.skipif(
-    FOUNDRY_BIN is None,
+pytestmark = _foundry.skip_without_foundry(
     reason=(
-        "SKIPPED WITH LABEL: Foundry (anvil/forge/cast 1.8.x) is not on PATH and not in "
-        "~/.foundry/bin, so the CLI-subprocess-against-real-anvil evidence for the ledger "
-        "layer was NOT collected on this run. Install with `foundryup`. "
-        "tests/adapters/test_evm_anvil.py and tests/test_cli_ledger_status.py still cover "
-        "the adapter and the CLI's own plumbing independently of this file."
+        "SKIPPED WITH LABEL: Foundry (anvil/forge/cast 1.8.x) was found neither on PATH "
+        "nor in foundryup's install directory (tests/_foundry.py looked in both), so the "
+        "CLI-subprocess-against-real-anvil evidence for the ledger layer was NOT collected "
+        "on this run. Install with `foundryup`. tests/adapters/test_evm_anvil.py and "
+        "tests/test_cli_ledger_status.py still cover the adapter and the CLI's own "
+        "plumbing independently of this file."
     ),
 )
 
 
 def _base_env() -> dict[str, str]:
-    env = dict(os.environ)
-    env["PATH"] = f"{env.get('PATH', '')}:{FOUNDRY_BIN}"
-    return env
+    return _foundry.env()
 
 
 def _run(*args: str, cwd: Path | None = None) -> str:
@@ -827,6 +825,178 @@ class TestBondViaCli:
         assert status.returncode == 1, status.stdout + status.stderr
         assert "bond: slashed" in status.stdout
         assert "bond_slashed" in status.stdout
+
+
+    def test_deposit_then_prove_non_extension_slashes_the_bond(
+        self, chain: Deployment, signer_script: Path
+    ) -> None:
+        """The FIRST on-chain evidence for `proveNonExtension`, at any layer.
+
+        Until the two non-extension shapes were reconciled there was nothing
+        to drive: `domain/bond.NonExtensionProof` carried a consistency proof
+        the deployed contract does not accept, `submit_fraud_proof` raised on
+        it, and the divergent-leaf path that DID work existed only as an
+        adapter method with a hand-assembled argument list. So this entry
+        point had unit coverage against a fake transport and zero evidence
+        that the calldata it builds is calldata the contract accepts.
+
+        Everything below is produced by this repository's own RFC 9162 code
+        (`domain/anchoring.membership_proof`) and verified by the contract's
+        `Rfc9162.verifyInclusion` inside revm. A wrong leaf-claim tail, a
+        wrong tuple offset or a wrong tree size reverts with
+        `InclusionProofFailed` instead of slashing, so a pass here is
+        evidence about the encoding and not only about the plumbing.
+        """
+        import hashlib
+
+        trail_id = "waxseal-f5-e2e-non-extension"
+        amount_wei = 2_000_000_000_000_000_000
+
+        deposit_env = _cli_env(
+            signer_script, key=WRITER3_KEY, address=WRITER3_ADDRESS, write_url=chain.urls[0]
+        )
+        for url in chain.urls:
+            deposit = _waxseal(
+                "bond", "deposit",
+                "--bond", str(chain.contracts.bond),
+                "--rpc", chain.urls[0], "--rpc", chain.urls[1],
+                "--write-rpc", url,
+                "--amount-wei", str(amount_wei),
+                env={**deposit_env, "WAXSEAL_E2E_SIGNER_RPC_URL": url},
+            )
+            assert deposit.returncode == 0, deposit.stderr
+
+        # The fraud: a writer whose newer tree REWROTE index 2, then signed a
+        # head over it. Both trees contain that index, and each root proves a
+        # different entry there — the contradiction is exhibited, not argued.
+        hashes = tuple(hashlib.sha256(str(i).encode()).hexdigest() for i in range(8))
+        forked = hashes[:2] + ("aa" * 32,) + hashes[3:]
+        older = Checkpoint(seq=3, entry_hash=hashes[3], root=batch_root(hashes[:4]))
+        newer = Checkpoint(seq=7, entry_hash=forked[7], root=batch_root(forked))
+
+        signatures = [
+            _run(
+                f"{FOUNDRY_BIN}/cast", "wallet", "sign", "--no-hash",
+                "--private-key", WRITER3_KEY,
+                "0x" + checkpoint_signing_digest(trail_id, checkpoint).hex(),
+            )
+            for checkpoint in (older, newer)
+        ]
+
+        proof = {
+            "kind": "non_extension",
+            "chain_id": trail_id,
+            "older": {"seq": older.seq, "entry_hash": older.entry_hash, "root": older.root},
+            "older_signature": signatures[0],
+            "newer": {"seq": newer.seq, "entry_hash": newer.entry_hash, "root": newer.root},
+            "newer_signature": signatures[1],
+            "in_older": {
+                "index": 2,
+                "entry_hash": hashes[2],
+                "proof": list(membership_proof(hashes[:4], 2)),
+            },
+            "in_newer": {
+                "index": 2,
+                "entry_hash": forked[2],
+                "proof": list(membership_proof(forked, 2)),
+            },
+        }
+
+        before = _run(
+            f"{FOUNDRY_BIN}/cast", "call", "--rpc-url", chain.urls[0],
+            str(chain.contracts.bond), "bondOf(address)(uint256,uint64,bool,bool)",
+            WRITER3_ADDRESS,
+        ).splitlines()
+        assert before[0].split()[0] == str(amount_wei)
+        assert before[3].strip() == "false"
+
+        prove_env = _cli_env(
+            signer_script, key=RELAYER_KEY, address=RELAYER_ADDRESS, write_url=chain.urls[0]
+        )
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            proof_path = Path(tmp) / "non-extension.json"
+            proof_path.write_text(json.dumps(proof))
+            prove = _waxseal(
+                "bond", "prove", str(proof_path),
+                "--bond", str(chain.contracts.bond),
+                "--rpc", chain.urls[0], "--rpc", chain.urls[1],
+                "--write-rpc", chain.urls[0],
+                env={**prove_env, "WAXSEAL_E2E_SIGNER_RPC_URL": chain.urls[0]},
+            )
+            assert prove.returncode == 0, prove.stderr
+            assert "tx=0x" in prove.stdout, prove.stdout
+            assert "proveNonExtension" in prove.stdout
+
+        after = _run(
+            f"{FOUNDRY_BIN}/cast", "call", "--rpc-url", chain.urls[0],
+            str(chain.contracts.bond), "bondOf(address)(uint256,uint64,bool,bool)",
+            WRITER3_ADDRESS,
+        ).splitlines()
+        assert after[3].strip() == "true"  # slashed
+        assert after[0].split()[0] == "0"
+
+    def test_an_agreeing_leaf_pair_never_reaches_the_chain(
+        self, chain: Deployment, signer_script: Path
+    ) -> None:
+        """The structural guard, measured against a live node.
+
+        Two claims naming the SAME entry hash are not a contradiction, and
+        the contract reverts on them (`LeavesAgree`). `submit_fraud_proof`
+        now validates the non-extension shape the way it already validated
+        an equivocation, so the operator gets the reason and keeps the gas.
+        """
+        import hashlib
+
+        trail_id = "waxseal-f5-e2e-non-extension-agree"
+        hashes = tuple(hashlib.sha256(str(i).encode()).hexdigest() for i in range(8))
+        older = Checkpoint(seq=3, entry_hash=hashes[3], root=batch_root(hashes[:4]))
+        newer = Checkpoint(seq=7, entry_hash=hashes[7], root=batch_root(hashes))
+        leaf = {
+            "index": 2,
+            "entry_hash": hashes[2],
+            "proof": list(membership_proof(hashes[:4], 2)),
+        }
+        signatures = [
+            _run(
+                f"{FOUNDRY_BIN}/cast", "wallet", "sign", "--no-hash",
+                "--private-key", WRITER3_KEY,
+                "0x" + checkpoint_signing_digest(trail_id, checkpoint).hex(),
+            )
+            for checkpoint in (older, newer)
+        ]
+        proof = {
+            "kind": "non_extension",
+            "chain_id": trail_id,
+            "older": {"seq": older.seq, "entry_hash": older.entry_hash, "root": older.root},
+            "older_signature": signatures[0],
+            "newer": {"seq": newer.seq, "entry_hash": newer.entry_hash, "root": newer.root},
+            "newer_signature": signatures[1],
+            "in_older": leaf,
+            "in_newer": leaf,
+        }
+        prove_env = _cli_env(
+            signer_script, key=RELAYER_KEY, address=RELAYER_ADDRESS, write_url=chain.urls[0]
+        )
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            proof_path = Path(tmp) / "agree.json"
+            proof_path.write_text(json.dumps(proof))
+            prove = _waxseal(
+                "bond", "prove", str(proof_path),
+                "--bond", str(chain.contracts.bond),
+                "--rpc", chain.urls[0], "--rpc", chain.urls[1],
+                "--write-rpc", chain.urls[0],
+                env={**prove_env, "WAXSEAL_E2E_SIGNER_RPC_URL": chain.urls[0]},
+            )
+        assert prove.returncode == 1, prove.stdout
+        assert "not a non-extension: leaves_agree" in prove.stderr
+        # No transaction was sent, so no gas was spent learning it.
+        assert "tx=" not in prove.stdout
 
 
 class TestConsistencyProofCrossCheck:

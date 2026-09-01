@@ -30,8 +30,6 @@ fake-transport suite covers adapters/evm.py on its own.
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import socket
 import subprocess
 import time
@@ -44,14 +42,20 @@ from typing import Any
 
 import pytest
 
+from tests import _foundry
 from waxseal.adapters.evm import (
-    SELECTOR_REGISTER_TRAIL,
     EvmAnchorSink,
     EvmContracts,
     EvmLedgerReader,
     EvmLedgerSink,
 )
-from waxseal.domain.abi import encode_address, encode_bytes32, encode_call, encode_uint
+from waxseal.domain.abi import (
+    SELECTOR_REGISTER_TRAIL,
+    encode_address,
+    encode_bytes32,
+    encode_call,
+    encode_uint,
+)
 from waxseal.domain.bond import (
     BONDED,
     UNBONDED,
@@ -84,38 +88,21 @@ DEADLINE_S = 3600
 TRAIL = "waxseal-f3-e2e"
 
 
-def _foundry_bin() -> str | None:
-    """Foundry's directory, from PATH or from its default install location.
+FOUNDRY_BIN = _foundry.FOUNDRY_BIN
 
-    The installer does not always edit the shell profile, so `shutil.which`
-    alone reports Foundry missing on a machine that has it — and this file
-    would skip while the evidence it exists to collect was available.
-    """
-    if shutil.which("anvil") and shutil.which("forge") and shutil.which("cast"):
-        return os.path.dirname(str(shutil.which("anvil")))
-    default = Path.home() / ".foundry" / "bin"
-    if all((default / tool).exists() for tool in ("anvil", "forge", "cast")):
-        return str(default)
-    return None
-
-
-FOUNDRY_BIN = _foundry_bin()
-
-pytestmark = pytest.mark.skipif(
-    FOUNDRY_BIN is None,
+pytestmark = _foundry.skip_without_foundry(
     reason=(
-        "SKIPPED WITH LABEL: Foundry (anvil/forge/cast 1.8.x) is not on PATH and not in "
-        "~/.foundry/bin, so the on-chain end-to-end evidence for adapters/evm.py was NOT "
-        "collected on this run. Install with `foundryup`. The fake-transport suite in "
-        "tests/adapters/test_evm.py still ran and still covers the adapter."
+        "SKIPPED WITH LABEL: Foundry (anvil/forge/cast 1.8.x) was found neither on PATH "
+        "nor in foundryup's install directory (tests/_foundry.py looked in both), so the "
+        "on-chain end-to-end evidence for adapters/evm.py was NOT collected on this run. "
+        "Install with `foundryup`. The fake-transport suite in tests/adapters/test_evm.py "
+        "still ran and still covers the adapter."
     ),
 )
 
 
 def _env() -> dict[str, str]:
-    env = dict(os.environ)
-    env["PATH"] = f"{env.get('PATH', '')}:{FOUNDRY_BIN}"
-    return env
+    return _foundry.env()
 
 
 def _run(*args: str, cwd: Path | None = None) -> str:

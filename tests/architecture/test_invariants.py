@@ -217,6 +217,43 @@ class TestVersionIsStatedOnce:
         assert f"## [{declared}]" in changelog
 
 
+class TestCoverageFloorIsStatedOnce:
+    """The coverage floor is a ratchet (CLAUDE.md), and it is written down in
+    four places outside `pyproject.toml`. It was ratcheted 90 -> 100 on
+    2026-08-23 and three of those copies were left saying 90, so a
+    contributor reading CONTRIBUTING.md was told a gate that would fail them.
+    A ratchet nobody can read the current notch of is not a ratchet.
+    """
+
+    #: Every file that quotes the floor to a human, and must therefore move
+    #: with it. `CHANGELOG.md` is excluded on purpose: its "ratcheted from 90%
+    #: to 100%" line is release history, and history is not a stale copy.
+    QUOTING_THE_FLOOR = (
+        "CONTRIBUTING.md",
+        ".github/PULL_REQUEST_TEMPLATE.md",
+        ".github/workflows/release.yml",
+        "CLAUDE.md",
+    )
+
+    def test_every_documented_floor_matches_pyproject(self) -> None:
+        config = tomllib.loads((REPO / "pyproject.toml").read_text())
+        floor = str(config["tool"]["coverage"]["report"]["fail_under"])
+        quoted = re.compile(r"(?i)coverage[^\n]*?(\d{2,3})\s*%")
+        stale = []
+        for name in self.QUOTING_THE_FLOOR:
+            for number, line in (
+                (match.group(1), match.string)
+                for match in map(
+                    quoted.search,
+                    (REPO / name).read_text(encoding="utf-8").splitlines(),
+                )
+                if match is not None
+            ):
+                if number != floor:
+                    stale.append(f"{name} says {number}%, pyproject says {floor}%: {line.strip()}")
+        assert stale == []
+
+
 class TestDocumentationLinks:
     """A README link to a file that never ships is a dead link for everyone
     but the author.
@@ -517,3 +554,71 @@ class TestTestSuiteIsAPackage:
             if list(d.glob("test_*.py")) and not (d / "__init__.py").exists()
         )
         assert missing == []
+
+
+class TestFoundryIsResolvedInOnePlace:
+    """One question — "is Foundry on this machine?" — had three answers.
+
+    `tests/adapters/test_evm_anvil.py` and `tests/test_cli_ledger_e2e_anvil.py`
+    both fell back to foundryup's own install directory under `$HOME` when
+    `PATH` did not carry the tools;
+    `tests/domain/test_abi.py` asked `shutil.which` for `cast` and nothing
+    else.
+    On a machine with Foundry installed by `foundryup` but not sourced into
+    the shell — the default state of a fresh install — the first two MEASURED
+    and the third reported 5x UNMEASURED. The skip was labelled and honest
+    about itself, which is exactly why nobody chased it: the label said
+    "install Foundry", and Foundry was installed.
+
+    Rule 5's shape, one level up from the code: "unmeasured" is only an
+    honest verdict when the thing that decides it is not itself the defect.
+    """
+
+    #: The one module allowed to answer it. Everything else imports from here.
+    RESOLVER = "tests/_foundry.py"
+
+    def test_no_test_module_resolves_the_foundry_tools_for_itself(self) -> None:
+        # Assembled from parts so this file is not its own first offender:
+        # the literals it searches for must not appear in it verbatim.
+        tools = "|".join(("anvil", "forge", "cast"))
+        home = "." + "foundry"
+        pattern = re.compile(rf"""which\(\s*["']({tools})["']|{re.escape(home)}""")
+        offenders = sorted(
+            str(path.relative_to(REPO))
+            for path in (REPO / "tests").rglob("*.py")
+            if path.relative_to(REPO).as_posix() != self.RESOLVER
+            and pattern.search(path.read_text(encoding="utf-8"))
+        )
+        assert offenders == []
+
+
+class TestSelectorsAreFrozenInOnePlace:
+    """Every four-byte function selector lives in `domain/abi.py` and nowhere
+    else.
+
+    Python cannot compute one (no keccak256 in the stdlib), so they are frozen
+    constants, and `tests/domain/test_abi.py` cross-checks the whole table
+    against `cast sig` AND against `forge inspect`'s own output. That
+    cross-check iterates `abi.SELECTORS`. `adapters/evm.py` kept its OWN
+    copies of five of them, dated from a period when the domain table
+    described an earlier contract draft — and while the adapter's copies were
+    cross-checked by a second, hand-maintained table in
+    `tests/adapters/test_evm.py`, two hand-maintained tables of the same
+    constants is the shape waxseal-fg4.40 already paid for once: six drifted
+    and every gate stayed green.
+    """
+
+    def test_no_module_outside_domain_abi_freezes_a_selector(self) -> None:
+        # `bytes.fromhex` is the tell: freezing four bytes nobody can
+        # recompute here. An ALIAS of an already-frozen constant is not a
+        # second source of truth, and `adapters/evm.py` keeps one
+        # (`SELECTOR_SUBMIT_HEAD`) to say which `submit` it means.
+        frozen = re.compile(
+            r"^SELECTOR_\w+\s*:\s*Final\s*=\s*bytes\.fromhex", re.MULTILINE
+        )
+        offenders = sorted(
+            str(path.relative_to(REPO))
+            for path in source_files()
+            if path != SRC / "domain" / "abi.py" and frozen.search(path.read_text())
+        )
+        assert offenders == []
