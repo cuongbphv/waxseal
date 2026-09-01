@@ -81,7 +81,6 @@ import pytest
 from tests.adapters.test_segment_archive import FakeLockS3Client
 from tests.integrations.test_project_routing import HOOK_NAMES, event_for
 from waxseal import AuditLog
-from waxseal.adapters.remote import RemoteRequest
 from waxseal.adapters.segment_archive import _MULTIPART_BOUNDARY
 from waxseal.domain.archive import ArchiveState
 from waxseal.integrations._archive import (
@@ -159,21 +158,41 @@ class LiveImportServer:
 
 
 def _parse_multipart(headers: dict[str, str], body: bytes) -> tuple[str, bytes]:
-    """The `file` part, parsed the way `FakeImportServer` does it.
+    """The `file` part, parsed from the multipart frame directly.
 
     Parsed rather than trusted: an encoder that mis-framed the body would
     store the wrong bytes here, and this file's central claim is that the
     segment arrives byte-for-byte.
-    """
-    request = RemoteRequest(
-        method="POST",
-        url="/v1/imports",
-        headers={"Content-Type": headers["Content-Type"]},
-        body=body,
-    )
-    from tests.adapters.test_segment_archive import FakeImportServer
 
-    return FakeImportServer.parse(request)
+    NOT delegated to `FakeImportServer.parse` (stdlib `email`) the way it
+    was before 0.1.5's CI run went red: `email`'s feedparser walks the body
+    LINE BY LINE, and the production-threshold case below ships a segment
+    that is ~16.7 million one-byte lines (`rotate` pads with b"\\n"), which
+    this handler parsed BEFORE sending its response — ~2.5s on a fast
+    machine, past the client's 10s timeout on a two-core CI runner, so
+    every matrix job failed with `archive_failed ... TimeoutError` while
+    the suite stayed green locally. Splitting on the boundary is O(n) in
+    bytes, not lines, and still checks the frame: the leading delimiter,
+    the header/payload separator, the closing delimiter, and the exact
+    part name all have to be where the encoder claims they are.
+    """
+    content_type = headers["Content-Type"]
+    _, _, boundary_param = content_type.partition("boundary=")
+    assert boundary_param, f"no boundary in Content-Type: {content_type!r}"
+    delimiter = b"--" + boundary_param.split(";")[0].strip().encode("ascii")
+    assert body.startswith(delimiter + b"\r\n"), "body does not open with the boundary"
+    part = body[len(delimiter) + 2 :]
+    part_headers, separator, after = part.partition(b"\r\n\r\n")
+    assert separator, "no header/payload separator in the first part"
+    closing = b"\r\n" + delimiter + b"--"
+    end = after.rfind(closing)
+    assert end != -1, "no closing boundary"
+    header_text = part_headers.decode("latin-1")
+    assert 'name="file"' in header_text, f"part is not named 'file': {header_text!r}"
+    marker = 'filename="'
+    start = header_text.index(marker) + len(marker)
+    filename = header_text[start : header_text.index('"', start)]
+    return filename, after[:end]
 
 
 @pytest.fixture
