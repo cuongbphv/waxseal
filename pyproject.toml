@@ -101,6 +101,12 @@ exclude = [
   # consumer downloading the waxseal sdist has no use for a FastAPI app and a
   # Vue project, and every byte of it would be dead weight in the tarball.
   "server",
+  # contracts/ is the on-chain layer: Solidity sources, a Foundry toolchain and
+  # 21 generated cross-vector files. The line above had NAMED it since 0.1.5
+  # while the list did not exclude it, which was harmless only for as long as
+  # the directory did not exist. It does now, and it was landing 69 files in
+  # the sdist of a pure-Python library.
+  "contracts",
 ]
 
 [tool.pytest.ini_options]

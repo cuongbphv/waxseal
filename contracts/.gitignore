@@ -1,0 +1,8 @@
+# Foundry build output and caches. `out/` is compiler output, `cache/` is
+# forge's incremental state, `broadcast/` is deployment logs, `lib/` is
+# vendored dependencies. None is a source file; all are reproducible from
+# src/ + foundry.toml by `forge build`.
+out/
+cache/
+broadcast/
+lib/

@@ -78,6 +78,43 @@ jobs:
       - run: uv run mypy
         working-directory: server
 
+  # The on-chain contracts (docs/plans/waxseal-0.1.5-contract.md, Workstream F2).
+  # A separate application like server/: its own toolchain, never packaged into
+  # the wheel, its own job so neither gate can move the other.
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.13"
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: "1.8.1"
+      # The cross vectors are generated FROM the Python side, so they are
+      # regenerated here and compared. A change to domain/anchoring.py,
+      # domain/checkpoint.py, domain/hashing.py or the descriptor frame that
+      # moved a hash would otherwise leave the contracts agreeing with a Python
+      # implementation that no longer exists. --check writes nothing: a
+      # difference is a frozen-hash failure, and a frozen-hash failure means
+      # STOP, not "regenerate and commit" (CLAUDE.md rule 3).
+      - run: uv run --extra dev python tools/gen_contract_vectors.py --check
+      # forge test is the whole point of the job: 213 consistency vectors, 37
+      # inclusion vectors and 15 tree roots checked against the Python side --
+      # comparing the intermediate accumulator hashes, not just the verdicts,
+      # and on negatives as well as positives.
+      - run: forge test -vv
+        working-directory: contracts
+      - run: forge fmt --check
+        working-directory: contracts
+      # Selectors are keccak256 of the signature and Python's stdlib has no
+      # keccak256, so domain/abi.py carries them as frozen constants. This
+      # compares the frozen file against the compiler's own answer. It is also
+      # the append-only receipt for FingerprintRegistry: adding an update() or
+      # a pause() changes this file and fails here.
+      - run: ./script/selectors.sh --check
+        working-directory: contracts
+
   # The web UI is a build artifact, not a checked-in one: if it stops building,
   # the image stops carrying a UI, and nothing else in CI would notice.
   web:
