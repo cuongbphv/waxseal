@@ -128,6 +128,14 @@ pip install waxseal
 Đã phát hành trên [PyPI](https://pypi.org/project/waxseal/). Cài từ source:
 `pip install git+https://github.com/cuongbphv/waxseal`
 
+> **Đang tìm WaxSeal SDK?** `waxseal` trên PyPI là thư viện này, một audit hash
+> chain. **WaxSeal SDK** trên npm (`@waxseal/verify`, `@waxseal/mcp`, và dịch vụ tại
+> waxseal.id) là một sản phẩm định danh Ed25519 không liên quan, của một tác giả khác:
+> khác ngôn ngữ, khác bài toán, không có liên hệ nào với dự án này. Nếu bạn tới đây vì
+> muốn ký và kiểm chứng định danh của agent thì đó mới là thứ bạn cần.
+> [docs/research/landscape.vi.md](docs/research/landscape.vi.md) §3 phân biệt đầy đủ
+> hai bên.
+
 ## Sử dụng
 
 ```python

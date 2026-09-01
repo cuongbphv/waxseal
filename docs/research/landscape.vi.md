@@ -171,10 +171,8 @@ không tích hợp dịch vụ của họ.
 | Một audit hash chain: trail chỉ ghi thêm, kiểm chứng tamper-evident, anchoring, phán quyết ba giá trị | `waxseal` trên **PyPI** (Python), chính repository này | — |
 | Định danh mật mã: keypair Ed25519, fingerprint, profile on-chain, server ký MCP | **WaxSeal SDK** trên npm (`@waxseal/verify`, `@waxseal/mcp`), waxseal.id | repository này |
 
-Cùng lưu ý đó, gói trong một câu, nằm ở [README.md](../../README.md) trong phần
-Install, nơi người đã cài sai package sẽ thấy nó. ([README.vi.md](../../README.vi.md)
-hiện chưa có lưu ý này — nêu ra ở đây chứ không tự sửa, vì README không thuộc phạm vi
-tài liệu này.)
+Cùng lưu ý đó, gói trong một câu, nằm ở [README.vi.md](../../README.vi.md) trong phần
+Cài đặt, nơi người đã cài sai package sẽ thấy nó.
 
 ---
 
