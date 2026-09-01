@@ -65,6 +65,17 @@ s3 = [
 postgres = [
     "psycopg[binary]>=3.1",
 ]
+# The on-chain ledger layer (adapters/evm.py). DELIBERATELY EMPTY, and that is
+# the design rather than an omission: the read path is `eth_call` over the same
+# stdlib Transport adapters/remote.py already ships, and the write path hands a
+# transaction field dict to a `Signer` the operator constructs and injects
+# (ports/ledger.py). There is no client for pip to fetch, so there is nothing
+# to list. The extra exists so `pip install waxseal[evm]` is a valid thing to
+# type and so the capability has a name in the metadata; it never becomes a
+# route by which a crypto library reaches the core (CLAUDE.md rule 1 —
+# `dependencies` stays []). An operator who wants `eth-account` or Foundry's
+# `cast wallet` behind that Signer installs it themselves.
+evm = []
 # Optional CMS/X.509 verification of an RFC 3161 token (adapters/rfc3161_verify.py).
 # The structural check in domain/rfc3161.py stays dependency-free and unchanged;
 # this extra only adds the signature dimension, and only when the operator names
