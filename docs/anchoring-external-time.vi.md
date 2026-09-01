@@ -135,13 +135,13 @@ ots upgrade receipts/seq-240.ots     # sau khi block Bitcoin xác nhận
 ots verify  receipts/seq-240.ots -f receipts/seq-240.frame
 ```
 
-> **`[Chưa xác minh]`** Bộ byte chính xác mà một calendar trả về từ `/digest` ở đây được coi là
+> **`[Unverified]`** Bộ byte chính xác mà một calendar trả về từ `/digest` ở đây được coi là
 > một tệp `.ots` tách rời. Điều này chưa được xác nhận đối chiếu với
 > `python-opentimestamps`, và ngữ nghĩa upgrade của `GET /timestamp/<hex>` cũng chưa được
 > xác nhận. Hãy kiểm chứng cả hai với client OpenTimestamps trước khi dựa vào công thức này
 > trong môi trường sản xuất.
 
-> **`[Chưa xác minh]`** Những calendar công khai nào còn sống thì thay đổi theo thời gian. Chính
+> **`[Unverified]`** Những calendar công khai nào còn sống thì thay đổi theo thời gian. Chính
 > vì vậy waxseal không cung cấp URL calendar mặc định nào — hãy truyền vào tường minh, và
 > xác nhận rằng nó còn hiệu lực. Các calendar thường được nhắc tới trong tài liệu
 > OpenTimestamps gồm `alice.btc.calendar.opentimestamps.org`,
