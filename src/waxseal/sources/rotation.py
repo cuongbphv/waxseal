@@ -32,7 +32,8 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Final
 
@@ -89,6 +90,26 @@ def _stderr_notice(message: str) -> None:
     print(f"[waxseal-audit] {message}", file=sys.stderr)
 
 
+@contextmanager
+def segments_lock(base: Path | str) -> Iterator[None]:
+    """The rotation critical section for the trail ``base`` names.
+
+    Exported because a caller that appends to ``active_segment(base)`` ITSELF
+    has to hold the same lock rotation holds. The chain server is that caller:
+    its compare-and-set precondition is the client's own ``(seq, prev_hash)``
+    checked inside the backend's write lock (REMOTE.md section 4), so it
+    stores an entry someone else built and cannot go through ``AuditLog``.
+    Without this lock a rotation can seal a segment between that caller's
+    resolve and its append, and the entry lands in a file that was already
+    bound as finished.
+
+    One spelling, in one module: a call site that re-derived
+    ``<dir>/segments.lock`` would be a SECOND lock, and two locks are no lock.
+    """
+    with file_lock(Path(base).expanduser().parent / _LOCK_BASE):
+        yield
+
+
 def open_segmented(
     base: Path | str,
     *,
@@ -127,7 +148,7 @@ def open_segmented(
     if _size(active) < max_segment_bytes:
         return AuditLog.open(active, **open_kwargs)
 
-    with file_lock(directory / _LOCK_BASE):
+    with segments_lock(path):
         # Re-resolve and re-stat INSIDE the lock: another process may have
         # rotated while this one waited, in which case the active segment is
         # a different file and is under threshold again.

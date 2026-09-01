@@ -34,6 +34,7 @@ from waxseal.sources.rotation import (
     active_segment,
     discover_segments,
     open_segmented,
+    segments_lock,
 )
 
 PT = "application/vnd.test.event+json"
@@ -473,7 +474,9 @@ class TestConcurrentRotation:
     """N writers racing one over-threshold segment.
 
     FALSIFIABILITY RECEIPT — measured 31/08/2026, not argued from theory.
-    The `with file_lock(directory / _LOCK_BASE):` line in `open_segmented`
+    The rotation critical section in `open_segmented` (measured while it
+    was still spelled `with file_lock(directory / _LOCK_BASE):` inline; it is
+    now `with segments_lock(path):`, the same lock through its exported name)
     was replaced by `contextlib.nullcontext()` (the only change) and these
     two tests were run:
 
@@ -793,3 +796,64 @@ class TestRestoreFromTheArchive:
         restored = AuditLog.open(base).verify(measure_drops=False)
         assert restored.ok
         assert restored.checked == sealed_entries
+
+
+class TestSegmentsLockIsExported:
+    """`segments_lock` is the SAME lock `open_segmented` takes, spelled once.
+
+    A caller that appends to `active_segment(base)` itself — the chain server
+    does, because its compare-and-set precondition is the client's own
+    `(seq, prev_hash)` checked under the backend's write lock (REMOTE.md
+    section 4), so it stores an entry someone else built rather than building
+    one — has to hold the rotation critical section across its own append or a
+    rotation can seal the segment that append is landing in. Re-spelling the
+    lock's path at that call site would be a SECOND lock, and two locks are no
+    lock at all; these tests are what pins the one path.
+    """
+
+    def test_it_locks_the_same_file_rotation_locks(self, tmp_path: Path) -> None:
+        base = tmp_path / "trail.00000.jsonl"
+        with segments_lock(base):
+            pass
+        held = tmp_path / "segments.lock"
+        assert held.exists()
+
+        rotated = tmp_path / "other"
+        rotated.mkdir()
+        other = rotated / "trail.00000.jsonl"
+        fill_over(other)
+        open_segmented(other, max_segment_bytes=TINY, notice=lambda _m: None)
+        # Same name, same directory, derived independently on both sides.
+        assert (rotated / "segments.lock").exists()
+        assert (rotated / "segments.lock").name == held.name
+
+    def test_an_unnumbered_base_locks_the_same_directory(self, tmp_path: Path) -> None:
+        # `base` may be the logical name or an already-numbered segment
+        # (open_segmented's own contract); both must reach one lock.
+        with segments_lock(tmp_path / "trail.jsonl"):
+            first = sorted(p.name for p in tmp_path.iterdir())
+        with segments_lock(tmp_path / "trail.00007.jsonl"):
+            pass
+        assert first == sorted(p.name for p in tmp_path.iterdir()) == ["segments.lock"]
+
+    def test_it_excludes_a_second_holder(self, tmp_path: Path) -> None:
+        # Exclusion, not just a file name: a lock that never blocks would pass
+        # both tests above and still close no window at all.
+        entered = threading.Event()
+        blocked = threading.Event()
+
+        def second() -> None:
+            entered.set()
+            with segments_lock(tmp_path / "trail.jsonl"):
+                blocked.set()
+
+        with segments_lock(tmp_path / "trail.jsonl"):
+            thread = threading.Thread(target=second)
+            thread.start()
+            assert entered.wait(timeout=10)
+            # Bounded wait, not a sleep-to-pass: the assertion is that the
+            # second holder is STILL waiting, and a longer bound would only
+            # make a broken lock take longer to be caught.
+            assert not blocked.wait(timeout=0.5)
+        thread.join(timeout=10)
+        assert blocked.is_set()

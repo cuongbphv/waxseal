@@ -8,6 +8,33 @@ builder happens under the same lock that decided the tail. CLAUDE.md rule 7 is
 the library-side statement of the same requirement, and a server that lets two
 POSTs win the same `seq` has forked the chain.
 
+A hosted chain ROTATES (waxseal-fg4.17, owner decision 01/09/2026). Workstream B
+built rotation for the hook path; the deployment path — the one trail that grows
+for months unattended — was still one file without bound, which also left the
+Segments screen correct and permanently useless. So `append` reaches
+`sources.rotation`, and every read here resolves the segment it is actually
+about instead of a fixed file name.
+
+TWO NESTED CRITICAL SECTIONS, and the order is the safety argument:
+
+    segments.lock   (per chain directory, `rotation.segments_lock`)
+      -> trail.<n>.jsonl.lock   (per segment file, the backend's own)
+
+`open_segmented` takes them in that order and so does `append` below, so there
+is no cycle to deadlock on. `append` holds the OUTER one across resolving the
+active segment AND appending to it, because the window rotation opens is not the
+CAS — that still runs under the same per-file lock that decided the tail — but
+the segment the CAS lands in: a rotation slipping between "which file is active"
+and "append to it" seals a segment an entry is still about to extend, leaving a
+sealed segment whose tail is not the tail its successor's binding names. Rotation
+itself runs BEFORE that block, never inside it, so J3's archive step keeps the
+placement `rotation._archive_sealed` argues for — outside every lock, because it
+is a network call and a stalled endpoint holding a writer lock is the unbounded
+growth J3 exists to prevent, arriving by J3's own hand.
+
+The receipt log's lock is still taken after the chain's is released, never
+nested inside it: the ordering note on `append` is unchanged by any of this.
+
 One import reaches past the library's public API on purpose. `_read_last_line`
 is format-critical: a second implementation of an O(1) JSONL tail read in this
 repository is a second thing that can drift, and it lives in the same repository,
@@ -18,12 +45,23 @@ commit.
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
 from waxseal import Entry, Verdict
 from waxseal.adapters.filelock import file_lock
 from waxseal.adapters.jsonl import JSONLBackend, _read_last_line
+from waxseal.domain.archive import ArchiveDestination
+from waxseal.domain.segments import SEGMENT_SUFFIX, segment_identity
+from waxseal.sources.rotation import (
+    DEFAULT_MAX_SEGMENT_BYTES,
+    active_segment,
+    discover_segments,
+    open_segmented,
+    segments_lock,
+)
 from waxseal_server.domain.envelope import parse_envelope
 from waxseal_server.domain.errors import DamagedReceiptLog, PreconditionFailed
 from waxseal_server.domain.identifiers import require_chain_id
@@ -38,20 +76,63 @@ from waxseal_server.domain.results import (
 TRAIL_NAME: Final = "trail.jsonl"
 RECEIPT_LOG_NAME: Final = "receipts.jsonl"
 
+#: The segment stem every chain's trail rotates under. Segment zero of a chain
+#: is the unnumbered `trail.jsonl` itself: rotation never renames, so the file
+#: an existing deployment already has stays exactly where it is and becomes the
+#: segment "before 0" (`sources/rotation.py`).
+_TRAIL_STEM: Final = TRAIL_NAME.removesuffix(SEGMENT_SUFFIX)
+
 #: Opaque to clients (REMOTE.md section 4). The prefix exists so a cursor from
 #: some other server, or a hand-typed integer, is rejected rather than silently
 #: interpreted as an offset into this one.
 _CURSOR_PREFIX: Final = "e"
 
+#: A cursor names the SEGMENT it was issued against as well as the offset into
+#: it. Without that, a reader whose chain rotated mid-page would resume at its
+#: offset in a file it never saw the start of and get a short page with nothing
+#: to say so — silent incompleteness, which is the failure this project treats
+#: as worse than a loud one.
+_CURSOR_SEGMENT_SEPARATOR: Final = "~"
+
 #: The receipt record shape this build writes and can read back (SPEC.md §19).
 _RECEIPT_VERSION: Final = 1
+
+
+def _log_notice(message: str) -> None:
+    """Where rotation's labelled degradations land on the server.
+
+    `rotation.py` defaults to stderr because a hook's stdout is read by its
+    host; here the destination is the log an operator actually reads. A
+    rotation, a failed archive and an unreadable closing segment are all facts
+    about the deployment, and rule 6 forbids the only alternative — dropping
+    them on the floor.
+    """
+    logging.getLogger(__name__).warning("%s", message)
 
 
 class ChainStore:
     """One directory per `chain_id` under `root`, each a fully separate chain."""
 
-    def __init__(self, root: Path | str) -> None:
+    def __init__(
+        self,
+        root: Path | str,
+        *,
+        max_segment_bytes: int = DEFAULT_MAX_SEGMENT_BYTES,
+        notice: Callable[[str], None] = _log_notice,
+        archive: ArchiveDestination | None = None,
+    ) -> None:
         self._root = Path(root).expanduser()
+        # A CONSTRUCTOR ARGUMENT and deliberately not an environment variable.
+        # The owner's 31/08/2026 decision on DEFAULT_MAX_SEGMENT_BYTES was that
+        # a threshold an operator can raise is one that gets raised the first
+        # time rotation is inconvenient, and the file it bounds is the one an
+        # incident review has to read. A programmatic embedder owns its own
+        # storage budget; a deployment does not get to opt out.
+        self._max_segment_bytes = max_segment_bytes
+        self._notice = notice
+        # J3, off by default: an absent destination is reported as "not
+        # attempted" on every rotation rather than passing silently.
+        self._archive = archive
 
     # ---------------------------------------------------------------- paths
 
@@ -59,7 +140,18 @@ class ChainStore:
         return self._root / require_chain_id(chain_id)
 
     def trail_path(self, chain_id: str) -> Path:
+        """The chain's BASE segment — the unnumbered file every chain starts
+        as, and the one a first rotation seals. NOT necessarily the file being
+        written now: see `active_trail_path`."""
         return self.chain_dir(chain_id) / TRAIL_NAME
+
+    def active_trail_path(self, chain_id: str) -> Path:
+        """The segment a writer would extend right now. Creates nothing."""
+        return active_segment(self.trail_path(chain_id))
+
+    def segment_paths(self, chain_id: str) -> list[Path]:
+        """Every segment of this chain, oldest first."""
+        return self._segments_in(self.chain_dir(chain_id))
 
     def receipt_log_path(self, chain_id: str) -> Path:
         return self.chain_dir(chain_id) / RECEIPT_LOG_NAME
@@ -70,8 +162,27 @@ class ChainStore:
         return sorted(
             child.name
             for child in self._root.iterdir()
-            if child.is_dir() and (child / TRAIL_NAME).exists()
+            if child.is_dir() and self._segments_in(child)
         )
+
+    @staticmethod
+    def _segments_in(directory: Path) -> list[Path]:
+        """This trail's segments in `directory`, oldest first.
+
+        `discover_segments` reports nothing for a stem with no NUMBERED
+        segment, which is every chain that has not rotated yet — so the
+        unrotated single file is the fallback, never a special case elsewhere.
+        The filter keeps the receipt log and any other stem out.
+        """
+        found = [
+            path
+            for path in discover_segments(directory)
+            if segment_identity(path.name).partition(".")[0] == _TRAIL_STEM
+        ]
+        if found:
+            return found
+        base = directory / TRAIL_NAME
+        return [base] if base.exists() else []
 
     # ----------------------------------------------------------------- read
 
@@ -81,7 +192,7 @@ class ChainStore:
         None is REMOTE.md section 4's 404: "no entries yet", which a fresh
         writer reads as `(seq=-1, GENESIS)`. It is never an error.
         """
-        last = _read_last_line(self.trail_path(chain_id))
+        last = _read_last_line(self.active_trail_path(chain_id))
         if last is None:
             return None
         obj = json.loads(last)
@@ -90,14 +201,34 @@ class ChainStore:
     def page(
         self, chain_id: str, *, cursor: str | None, limit: int
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """One page of stored envelopes, in append order — never re-sorted.
+        """One page of stored envelopes from ONE segment, in append order —
+        never re-sorted.
 
         Sorting by `seq` would hide a storage-order reorder from the client's
         own verifier, which is exactly the failure `ReaderBackend.entries()`
         forbids for every other backend.
+
+        Paging never crosses a segment boundary, and that is not a shortcut.
+        Each segment is its OWN chain — seq 0, genesis `prev_hash`, linked to
+        its predecessor by a binding and never by `prev_hash` across a file
+        (SPEC.md section 20) — so concatenating two would hand `verify_chain`
+        on the client a seq that restarts at 0. That is fork-shaped: a false
+        tamper alarm the server manufactured out of its own housekeeping. A
+        cursorless read is about the ACTIVE segment; a cursor names the segment
+        it was issued against and finishes reading that one.
         """
-        start = decode_cursor(cursor)
-        trail = self.trail_path(chain_id)
+        start, identity = decode_cursor(cursor)
+        if identity is None:
+            trail = self.active_trail_path(chain_id)
+        else:
+            wanted = f"{identity}{SEGMENT_SUFFIX}"
+            # Resolved by matching a segment that is actually here, never by
+            # joining the cursor's text onto a path: the cursor is client
+            # input, and `../` in it must reach nothing.
+            named = [path for path in self.segment_paths(chain_id) if path.name == wanted]
+            if not named:
+                raise ValueError(f"cursor names a segment this chain does not have: {cursor!r}")
+            trail = named[0]
         if not trail.exists():
             return [], None
         page: list[dict[str, Any]] = []
@@ -113,7 +244,9 @@ class ChainStore:
                         break
                     page.append(json.loads(line))
                 index += 1
-        return page, encode_cursor(start + len(page)) if more else None
+        if not more:
+            return page, None
+        return page, encode_cursor(start + len(page), segment_identity(trail.name))
 
     def summary(self, chain_id: str) -> ChainSummary:
         """Counts and identities for one chain, without a verdict.
@@ -122,13 +255,15 @@ class ChainStore:
         chain is still readable, and a broken sidecar is a finding about the
         sidecar, not a reason to blank the row that would have shown it.
         """
-        trail = self.trail_path(chain_id)
+        # Across EVERY segment, not just the live one: the question a chain row
+        # answers is how much history this chain holds and what it costs, and
+        # rotation must not make either number appear to fall.
         entries = 0
         size = 0
-        if trail.exists():
-            size = trail.stat().st_size
+        for trail in self.segment_paths(chain_id):
+            size += trail.stat().st_size
             with open(trail, encoding="utf-8", newline="") as handle:
-                entries = sum(1 for line in handle if line.strip())
+                entries += sum(1 for line in handle if line.strip())
         try:
             receipt = self.receipt_head(chain_id)
         except (json.JSONDecodeError, KeyError, ValueError):
@@ -159,7 +294,7 @@ class ChainStore:
         acknowledged to anyone, and inventing a receipt afterwards would be the
         server claiming to remember something it did not say.
         """
-        trail = self.trail_path(chain_id)
+        base = self.trail_path(chain_id)
         entry = parse_envelope(envelope)
 
         def build(next_seq: int, prev_hash: str) -> Entry:
@@ -173,7 +308,25 @@ class ChainStore:
                 )
             return entry
 
-        stored = JSONLBackend(trail).append(build)
+        # Rotation first and OUTSIDE the block below, because `open_segmented`
+        # takes `segments.lock` itself and J3's archive step runs after it
+        # releases. Nesting the two would deadlock; wrapping them would drag a
+        # network call under a writer lock, which is exactly the placement
+        # `rotation._archive_sealed` argues against.
+        open_segmented(
+            base,
+            max_segment_bytes=self._max_segment_bytes,
+            notice=self._notice,
+            archive=self._archive,
+        )
+        # Resolve the active segment and append to it under ONE hold of the
+        # rotation lock. The CAS is already atomic with the append — the
+        # builder runs under the backend's own per-file lock — but without this
+        # hold a rotation can seal the segment between the resolve and the
+        # write, and the entry lands in a file whose successor has already
+        # bound it as finished.
+        with segments_lock(base):
+            stored = JSONLBackend(self.active_trail_path(chain_id)).append(build)
         receipt_seq, receipt_head = self._acknowledge(chain_id, stored)
         return AppendResult(
             seq=stored.header.seq,
@@ -290,10 +443,16 @@ class ChainStore:
         if records is None:
             return ReceiptCrossCheck(Verdict.OK, checked=None, reason="not_recorded")
 
-        by_seq = {
-            int(obj["header"]["seq"]): str(obj["entry_hash"])
-            for obj in self._stored_envelopes(chain_id)
-        }
+        # seq -> the hashes stored at that seq, across every segment. A LIST
+        # rather than one hash because seq restarts at 0 in each segment
+        # (SPEC.md section 20), so a rotated chain holds several entries at seq
+        # 3 and a receipt for any of them is satisfied by any of them. Nothing
+        # is given up: an edited or deleted entry changes or removes its hash,
+        # so it is absent from the list either way. On an unrotated chain every
+        # list has exactly one element and this is the check it always was.
+        by_seq: dict[int, list[str]] = {}
+        for obj in self._stored_envelopes(chain_id):
+            by_seq.setdefault(int(obj["header"]["seq"]), []).append(str(obj["entry_hash"]))
         checked = 0
         for record in records:
             if not isinstance(record, dict) or "v" not in record:
@@ -320,7 +479,7 @@ class ChainStore:
                     reason="receipt_beyond_head",
                     broken_seq=seq,
                 )
-            if by_seq[seq] != acknowledged:
+            if acknowledged not in by_seq[seq]:
                 return ReceiptCrossCheck(
                     Verdict.BROKEN, checked=checked, reason="receipt_mismatch", broken_seq=seq
                 )
@@ -330,11 +489,9 @@ class ChainStore:
     # -------------------------------------------------------------- private
 
     def _stored_envelopes(self, chain_id: str) -> list[dict[str, Any]]:
-        trail = self.trail_path(chain_id)
-        if not trail.exists():
-            return []
         return [
             json.loads(line)
+            for trail in self.segment_paths(chain_id)
             for line in trail.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
@@ -368,13 +525,24 @@ class ChainStore:
         return receipt_seq, receipt_head
 
 
-def encode_cursor(index: int) -> str:
-    return f"{_CURSOR_PREFIX}{index}"
+def encode_cursor(index: int, identity: str) -> str:
+    return f"{_CURSOR_PREFIX}{index}{_CURSOR_SEGMENT_SEPARATOR}{identity}"
 
 
-def decode_cursor(cursor: str | None) -> int:
+def decode_cursor(cursor: str | None) -> tuple[int, str | None]:
+    """`(offset, segment identity)`.
+
+    The identity is `None` only for "no cursor at all" — the first page, which
+    is about whatever segment is active when it is asked for. It is never a
+    guessed segment: a cursor that carries no identity is refused rather than
+    aimed at the active file, because the one thing a resumed read must not do
+    is silently continue in a different file.
+    """
     if cursor is None:
-        return 0
-    if not cursor.startswith(_CURSOR_PREFIX) or not cursor[len(_CURSOR_PREFIX) :].isdigit():
+        return 0, None
+    if not cursor.startswith(_CURSOR_PREFIX):
         raise ValueError(f"unrecognized cursor {cursor!r}")
-    return int(cursor[len(_CURSOR_PREFIX) :])
+    offset, _, identity = cursor[len(_CURSOR_PREFIX) :].partition(_CURSOR_SEGMENT_SEPARATOR)
+    if not offset.isdigit() or not identity:
+        raise ValueError(f"unrecognized cursor {cursor!r}")
+    return int(offset), identity

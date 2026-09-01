@@ -50,7 +50,12 @@ def router(services: Services, authz: Authorizer) -> APIRouter:
     api = APIRouter(prefix="/v1", tags=["chain"])
 
     def trail_for(chain_id: str) -> str:
-        return str(services.chains.trail_path(chain_id))
+        # The ACTIVE segment, not the base file name: a rotated chain's live
+        # history is the newest segment, and `verify`/`inspect`/`export-proof`
+        # asked about a sealed one would answer truthfully about the wrong
+        # chain. `segments` is the read that speaks about the whole group, and
+        # `read_target` already hands it this path's directory.
+        return str(services.chains.active_trail_path(chain_id))
 
     @api.get("/chains/{chain_id}/head")
     def get_head(chain_id: str, authorization: str | None = Header(default=None)) -> JSONResponse:
