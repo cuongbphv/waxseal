@@ -232,9 +232,12 @@ class TestDocumentationLinks:
     Until 0.1.5 this family globbed `REPO/*.md` only, so it could not have
     caught its own motivating incident from the `docs/` side: the linked file
     was a `docs/` path, and every `.vi.md` cross-reference lives there too.
-    The glob now reaches `docs/**` as well.
+    The glob reached `docs/**` in 065679d, and now reaches every remaining tree
+    of shipped prose: `integrations/*/README*.md`, `examples/**`, `server/**`
+    (waxseal-fg4.33) and `CHANGELOG.md` (waxseal-fg4.22). 32 files / 206 links
+    before, 46 / 218 after; no pre-existing break was found in the new trees.
 
-    Falsifiability receipts (both run 01/09/2026, on the widened glob):
+    Falsifiability receipts (all run 01/09/2026, on the widened glob):
     - `test_every_linked_path_exists`: appending `[x](nope/gone.md)` to
       `docs/paper/outline.md` fails with
       `docs/paper/outline.md -> nope/gone.md` in the diff.
@@ -244,21 +247,37 @@ class TestDocumentationLinks:
       original incident exactly, reproduced from a `docs/` file. Re-ignoring
       `docs/security/` does NOT reproduce it, because those files are now
       tracked; see `test_no_linked_path_is_gitignored`.
+    - the widened trees: `[x](gone.md)` appended to
+      `integrations/openclaw/README.md` fails naming that file, and again from
+      `server/README.md` and `examples/banking-poc/README.md`.
+    - `CHANGELOG.md`: rewriting its `docs/research/landscape.md` link to
+      `docs/research/landscape-moved.md` fails naming `CHANGELOG.md`.
     """
 
     # Skip rules for the doc set. Each is a property of the globs below rather
     # than a filter list, because a filter list is how this test lost `docs/`
     # in the first place.
-    #   - CHANGELOG.md: a pre-existing carve-out with its own open bead
-    #     (waxseal-fg4.23). Left exactly as it was; this test does not settle it.
-    #   - tools/pm/*.md: vendored PM tooling, already carved out of lint
-    #     (`[tool.ruff] extend-exclude = ["tools/pm"]`). Not authored here.
-    #   - node_modules/, server/waxseal_server/static/, .venv/: gitignored
-    #     dependency trees and build output. Nothing there is hand-written prose.
-    # Not yet covered, and deliberately not folded into this change:
-    # `integrations/*/README.md`, `examples/banking-poc/README*.md`,
-    # `server/**/*.md`. They are shipped prose with relative links and belong in
-    # this family; widening to them is a separate, reviewable step.
+    #   - tools/pm/*.md and .claude/commands/*.md: vendored tooling installed by
+    #     a skill and rewritten on every reinstall. tools/pm is already carved
+    #     out of lint for that reason (`[tool.ruff] extend-exclude`); .claude/
+    #     commands are the same property one directory over. Not authored here,
+    #     so a link rotting in one is not this repo's to fix.
+    #   - .github/**: issue and PR templates, consumed by GitHub's form
+    #     renderer rather than read as documentation. Neither carries a
+    #     relative link today, so covering them would assert nothing.
+    #   - the NOT_PROSE_SEGMENTS trees below.
+    #
+    # CHANGELOG.md is NOT skipped (waxseal-fg4.22 settles the carve-out it
+    # inherited). It is the root file most likely to accumulate links to docs
+    # that later move — the `docs/security/` incident above is recorded in its
+    # own 0.1.3 entry — and it was the only root `.md` nothing checked. All six
+    # of its relative links resolve, so including it costs nothing today.
+    # The argument for the old exclusion was that a released entry is history
+    # and must not be edited when a path moves. That argument survives
+    # inclusion: when this test goes red on CHANGELOG.md it is reporting that
+    # a move orphaned a link recorded in the release history, and the fix is to
+    # restore or redirect the target, never to rewrite the entry and never to
+    # delete the link to go green. Reporting is the whole point (rule 4).
 
     def linked_repo_paths(self, doc: Path) -> list[str]:
         text = doc.read_text(encoding="utf-8")
@@ -282,10 +301,34 @@ class TestDocumentationLinks:
         # would encode one renderer's rules as truth. Out of scope, on purpose.
         return doc.parent / target.split("#")[0]
 
+    # Named rather than inlined so the non-emptiness test can assert every
+    # tree still contributes. A total-only lower bound cannot do that: a glob
+    # that silently stops matching `server/**` hides behind the forty-odd files
+    # the other trees supply, which is exactly how `docs/` went unchecked.
+    DOC_GLOBS = (
+        "*.md",
+        "docs/**/*.md",
+        "integrations/*/README*.md",
+        "examples/**/*.md",
+        "server/**/*.md",
+    )
+
+    # Path segments whose subtree is not hand-written prose: gitignored
+    # dependency trees (node_modules, .venv) and build output
+    # (server/waxseal_server/static, the compiled portal bundle). Matched as a
+    # path segment, so a second copy of any of them — a node_modules under
+    # server/web, say — is excluded by the same property rather than by a new
+    # entry in a list someone has to remember to extend.
+    NOT_PROSE_SEGMENTS = frozenset({"node_modules", ".venv", "static"})
+
     def docs(self) -> list[Path]:
         return sorted(
-            [p for p in REPO.glob("*.md") if p.name != "CHANGELOG.md"]
-            + list(REPO.glob("docs/**/*.md"))
+            {
+                path
+                for pattern in self.DOC_GLOBS
+                for path in REPO.glob(pattern)
+                if self.NOT_PROSE_SEGMENTS.isdisjoint(path.parts)
+            }
         )
 
     def test_the_doc_set_and_link_set_are_not_empty(self) -> None:
@@ -294,10 +337,14 @@ class TestDocumentationLinks:
         # coverage is asserted rather than assumed. Lower bounds, not exact
         # counts: docs may be added freely, only a collapse is a bug.
         docs = self.docs()
-        assert len(docs) >= 25, docs
-        assert [d for d in docs if d.parent != REPO] != []
+        # Raised from 25/150 with the glob (waxseal-fg4.33): a bound left at
+        # the old set's size stops protecting the trees that widened it.
+        assert len(docs) >= 40, docs
+        chosen = set(docs)
+        for pattern in self.DOC_GLOBS:
+            assert chosen.intersection(REPO.glob(pattern)) != set(), pattern
         links = [t for d in docs for t in self.linked_repo_paths(d)]
-        assert len(links) >= 150, len(links)
+        assert len(links) >= 200, len(links)
 
     def test_every_linked_path_exists(self) -> None:
         missing = [
@@ -336,3 +383,105 @@ class TestDocumentationLinks:
         if proc.returncode not in (0, 1):  # pragma: no cover - not a git checkout
             return
         assert proc.stdout.split() == []
+
+
+# CLAUDE.md's "Named principle" section carries its instance count in three
+# hand-written places that must agree: the lead-in ("in (at least) N places"),
+# the highest ordinal in the numbered list, and the closing challenge ("find a
+# (N+1)-th place"). Spelled as English words, in prose, updated by hand.
+#
+# Written as a function over text rather than over the file, so the historical
+# defect below can be replayed as a literal without any test mutating a frozen
+# path. The numbers are PARSED, never hardcoded: a test that pins "nine" is the
+# fourth copy of the number and the next thing to go stale.
+_CARDINALS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+}
+_ORDINALS = {
+    "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
+    "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11,
+    "twelfth": 12, "thirteenth": 13, "fourteenth": 14, "fifteenth": 15,
+    "sixteenth": 16, "seventeenth": 17, "eighteenth": 18, "nineteenth": 19,
+    "twentieth": 20, "twenty-first": 21,
+}
+
+
+def ternary_instance_counts(text: str) -> tuple[int, int, int]:
+    """Return (lead-in, highest list ordinal, challenge) from CLAUDE.md's text.
+
+    Raises rather than guessing if any of the three cannot be read: a section
+    this test cannot parse is unmeasured, and returning a number for it would
+    be the collapse the principle itself forbids (rule 5).
+    """
+    start = text.index("## Named principle")
+    section = text[start : text.index("\n## ", start + 1)]
+
+    lead_in = re.search(r"in \(at least\) ([a-z]+) places", section)
+    challenge = re.search(r"find (?:a|an|the) ([a-z-]+) place", section)
+    ordinals = [int(n) for n in re.findall(r"^(\d+)\. \*\*", section, re.M)]
+    assert lead_in is not None, "no 'in (at least) N places' lead-in"
+    assert challenge is not None, "no 'find a Nth place' challenge"
+    assert ordinals != [], "no numbered instance list"
+    assert lead_in[1] in _CARDINALS, lead_in[1]
+    assert challenge[1] in _ORDINALS, challenge[1]
+    return _CARDINALS[lead_in[1]], max(ordinals), _ORDINALS[challenge[1]]
+
+
+class TestTernaryInstanceCount:
+    # This is a test ABOUT a frozen path, not an edit to one: it reads
+    # CLAUDE.md and never writes it.
+    def test_claude_md_states_one_consistent_instance_count(self) -> None:
+        lead_in, highest, challenge = ternary_instance_counts(
+            (REPO / "CLAUDE.md").read_text(encoding="utf-8")
+        )
+        assert (lead_in, challenge) == (highest, highest + 1)
+
+    # The defect is proven, not hypothetical. 841326f added instance 7 and
+    # advanced the challenge to "an eighth" but left the lead-in reading "six"
+    # over a seven-item list; it shipped that way and survived until d6c2170
+    # overwrote the word as a side effect of an unrelated bead. The lead-in is
+    # the part that rots, because it is the one the author is not editing.
+    #
+    # Reconstructed to that commit's exact shape (6 / 7 / 8) rather than pulled
+    # from `git show`, so the receipt survives a shallow clone. The real
+    # 841326f text was run through this parser while writing the test and
+    # yields the same (6, 7, 8).
+    HISTORICAL_841326F = (
+        "## Named principle: the Ternary Evidence Principle\n\n"
+        "This codebase already applies the principle, by name or not, "
+        "in (at least) six places:\n\n"
+        + "".join(f"{i}. **instance {i}**: prose.\n" for i in range(1, 8))
+        + "\nRule 5 below is the SPECIFIC instance of this general principle. An "
+        "implementer\nshould be able to find an eighth place it applies without "
+        "being told.\n\n"
+        "## Architecture (layer DAG)\n"
+    )
+
+    def test_the_shipped_841326f_inconsistency_is_caught(self) -> None:
+        lead_in, highest, challenge = ternary_instance_counts(self.HISTORICAL_841326F)
+        assert (lead_in, highest, challenge) == (6, 7, 8)
+        # What the live test asserts, failing on the wording that shipped.
+        assert (lead_in, challenge) != (highest, highest + 1)
+
+
+class TestTestSuiteIsAPackage:
+    def test_every_test_directory_holding_modules_is_a_package(self) -> None:
+        # `tests/domain/` was reported as missing its `__init__.py`
+        # (waxseal-fg4.25); it has carried one since 8aa2e23, and so does every
+        # other directory here. Nothing was broken — which is the reason to
+        # pin it. pytest's rootdir discovery collects a directory without an
+        # `__init__.py` perfectly well, so the day one goes missing nothing
+        # goes red; the cost lands later, on whoever adds a module whose
+        # basename already exists elsewhere in the tree, as an import error
+        # naming a file they never touched.
+        tests_root = REPO / "tests"
+        directories = [tests_root, *(d for d in tests_root.rglob("*") if d.is_dir())]
+        missing = sorted(
+            str(d.relative_to(REPO))
+            for d in directories
+            if list(d.glob("test_*.py")) and not (d / "__init__.py").exists()
+        )
+        assert missing == []
