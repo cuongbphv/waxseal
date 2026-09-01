@@ -76,7 +76,7 @@ class TestUint:
         # bool is a subclass of int in Python; encoding True as uint 1 would
         # let a type confusion at a call site produce valid-looking calldata.
         with pytest.raises(abi.AbiError, match="not an int"):
-            abi.encode_uint(True)  # type: ignore[arg-type]
+            abi.encode_uint(True)
 
     def test_a_width_that_is_not_a_legal_abi_width_is_refused(self) -> None:
         with pytest.raises(abi.AbiError, match="bits"):
@@ -268,7 +268,7 @@ class TestNoKeccakSmuggledIn:
         # (CLAUDE.md rule 9 — comments carry the incident), so a text scan
         # would fail on the warning rather than on the mistake.
         tree = ast.parse(Path(abi.__file__).read_text(encoding="utf-8"))
-        imported = set()
+        imported: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 imported.update(alias.name.split(".")[0] for alias in node.names)

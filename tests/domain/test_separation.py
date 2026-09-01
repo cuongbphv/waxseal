@@ -93,21 +93,29 @@ class TestMonotonicity:
                 # Flip seal_escrow False -> True (skip if already True).
                 if not seal_escrow:
                     bumped = dataclasses.replace(base, seal_escrow=True)
-                    assert separation_degree(bumped) >= base_degree
+                    bumped_degree = separation_degree(bumped)
+                    assert bumped_degree is not None
+                    assert bumped_degree >= base_degree
 
                 # Flip witness False -> True.
                 if not witness:
                     bumped = dataclasses.replace(base, witness=True)
-                    assert separation_degree(bumped) >= base_degree
+                    bumped_degree = separation_degree(bumped)
+                    assert bumped_degree is not None
+                    assert bumped_degree >= base_degree
 
                 # Flip pin_separate False -> True.
                 if not pin_separate:
                     bumped = dataclasses.replace(base, pin_separate=True)
-                    assert separation_degree(bumped) >= base_degree
+                    bumped_degree = separation_degree(bumped)
+                    assert bumped_degree is not None
+                    assert bumped_degree >= base_degree
 
                 # Increment anchor_sinks by one more external sink.
                 bumped = dataclasses.replace(base, anchor_sinks=anchor_sinks + 1)
-                assert separation_degree(bumped) >= base_degree
+                bumped_degree = separation_degree(bumped)
+                assert bumped_degree is not None
+                assert bumped_degree >= base_degree
 
 
 class TestRenderSeparationDegree:

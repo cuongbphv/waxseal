@@ -200,4 +200,4 @@ class TestTypes:
         # thing an operator reads cannot be mutated between computing it and
         # printing it.
         for cls in (LadderReading, Observed, PreflightObservation, Rung):
-            assert cls.__dataclass_params__.frozen  # type: ignore[attr-defined]
+            assert cls.__dataclass_params__.frozen  # type: ignore[union-attr]

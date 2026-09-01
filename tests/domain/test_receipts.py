@@ -193,7 +193,8 @@ class TestParseClassification:
         # be "a version a newer build understands" — treating it as one would
         # hand an attacker a lever to downgrade any break to exit 2 just by
         # scribbling on the version field.
-        for bad in ([], {}, "1", None, True):
+        bad_values: tuple[object, ...] = ([], {}, "1", None, True)
+        for bad in bad_values:
             obj = json.loads(record_line())
             obj["v"] = bad
             parsed = parse_receipt_line(json.dumps(obj), line_no=1)

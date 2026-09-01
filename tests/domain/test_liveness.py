@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from waxseal.domain import liveness
+from waxseal.domain.pinning import ANCHOR_TIMESTAMP_UNPARSEABLE
 from waxseal.domain.verdict import Verdict
 
 NOW = datetime(2026, 9, 1, 12, 0, 0, tzinfo=UTC)
@@ -88,7 +89,7 @@ class TestUnreachable:
         naive = NOW.replace(tzinfo=None)
         verdict = liveness.delinquency(at(600), HOUR, now=naive)
         assert verdict.status == liveness.UNREACHABLE
-        assert verdict.reason == liveness.ANCHOR_TIMESTAMP_UNPARSEABLE
+        assert verdict.reason == ANCHOR_TIMESTAMP_UNPARSEABLE
         assert verdict.age_s is None
 
 
