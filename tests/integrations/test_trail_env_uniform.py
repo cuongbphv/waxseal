@@ -427,12 +427,18 @@ class TestEveryIntegrationHonoursTheVariable:
         # the absent entries are indistinguishable from a truncated chain.
         # Matched on the parsed CALL, not the source text, so prose naming
         # the rule stays legal and a real lookup does not; the divergence is
-        # DETECTED next time rather than merely unlikely. _install.py is out
-        # of scope here because it places shim files, not trails.
+        # DETECTED next time rather than merely unlikely.
+        #
+        # waxseal-fg4.19 widened this to the private modules too. _install.py
+        # was excluded on the grounds that it places shim files rather than
+        # trails; that ground is gone, because a shim placed in the profile
+        # the host does not read never loads and produces no trail at all.
+        # _trail.py stays out because it IS the owner: home_base() is the one
+        # place Path.home() is allowed to be called.
         src = Path(_trail.__file__).parent
         offenders = []
         for path in sorted(src.glob("*.py")):
-            if path.stem.startswith("_"):
+            if path.name == "_trail.py":
                 continue
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):

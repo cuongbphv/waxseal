@@ -17,6 +17,8 @@ import os
 import sys
 from pathlib import Path
 
+from waxseal.integrations._trail import home_base
+
 TARGETS = (
     "hermes",
     "hermes-gateway",
@@ -112,11 +114,20 @@ def _note_home_unused(target: str, home: Path | None) -> None:
 
 
 def _default_home(target: str) -> Path:
+    """Where a target's shim files go when `--home` names nothing.
+
+    `home_base()`, not ``Path.home()``: install placement has to agree with
+    the trail resolvers, which all read `HOME` first (the ntpath split is
+    documented on `home_base` itself). Placing a shim under the USERPROFILE
+    profile while the host that loads it was launched with `HOME` set means
+    the shim is never loaded and there is no trail at all — no short chain to
+    misread, no evidence of any kind (waxseal-fg4.19).
+    """
     if target.startswith("hermes"):
         env = os.environ.get("HERMES_HOME")
-        return Path(env) if env else Path.home() / ".hermes"
+        return Path(env) if env else home_base() / ".hermes"
     host_dir = {"claude-code": ".claude", "codex": ".codex", "cursor": ".cursor"}[target]
-    return Path.home() / host_dir
+    return home_base() / host_dir
 
 
 def _write(path: Path, content: str, force: bool) -> bool:
