@@ -119,7 +119,7 @@ def make_unverifiable(path: Path, seq: int) -> None:
 
 class TestReport:
     def test_intact_trail_exits_0_and_prints_markdown(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_decision_trail(path)
@@ -129,7 +129,7 @@ class TestReport:
         assert "transaction_approval" in out
 
     def test_json_flag_emits_parseable_json(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_decision_trail(path)
@@ -138,7 +138,7 @@ class TestReport:
         assert obj["decisions"]["total"] == 2
         assert obj["decisions"]["oversight_unrecorded"] == 1
 
-    def test_broken_trail_exits_1(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_broken_trail_exits_1(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 4)
         break_row(path, 1)
@@ -146,7 +146,7 @@ class TestReport:
         assert "BROKEN" in capsys.readouterr().out
 
     def test_unverifiable_rows_exit_2_not_1(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
@@ -166,7 +166,7 @@ class TestReport:
         assert path.read_bytes() == before
 
     def test_report_reports_drops_as_unmeasured_when_no_sidecar(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # A CLI process observed no writes, so it must not claim zero.
         path = tmp_path / "trail.jsonl"
@@ -175,7 +175,7 @@ class TestReport:
         assert json.loads(capsys.readouterr().out)["completeness"]["dropped_writes"] is None
 
     def test_anchors_flag_includes_the_anchor_check(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         from waxseal.adapters.anchors import FileAnchorSink
 
@@ -188,7 +188,7 @@ class TestReport:
         }
 
     def test_without_the_flag_anchors_are_reported_unchecked_not_ok(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 2)
@@ -196,7 +196,7 @@ class TestReport:
         assert json.loads(capsys.readouterr().out)["anchors"] is None
 
     def test_a_broken_anchor_makes_the_report_exit_1(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         from waxseal.adapters.anchors import FileAnchorSink
 
@@ -210,7 +210,7 @@ class TestReport:
         assert "anchor_beyond_head" in capsys.readouterr().out
 
     def test_malformed_anchor_sidecar_is_a_verdict_not_a_crash(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 2)
@@ -220,7 +220,7 @@ class TestReport:
 
 
     def test_a_measured_drop_count_reaches_the_report(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # The sidecar's count survives the writing process; a fresh CLI run
         # must read it rather than reporting its own unmeasured None.
@@ -235,7 +235,7 @@ class TestReport:
         assert completeness["drops_source"] == "sidecar"
 
     def test_anchors_flag_is_labelled_as_a_no_op_for_a_url_target(
-        self, capsys: pytest.CaptureFixture
+        self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # rule 6: a guard that cannot run must say so. A remote target has no
         # local .anchors sidecar, so --anchors would silently do nothing.
@@ -261,7 +261,7 @@ class TestReportSeparationDegree:
     assert on stdout, not just `build_report()` directly."""
 
     def test_no_pin_at_all_reports_tau_not_declared(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 2)
@@ -276,7 +276,7 @@ class TestReportSeparationDegree:
         assert "not declared" in line
 
     def test_pin_without_declared_topology_still_reports_not_declared(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         pin = tmp_path / "pin.json"
@@ -286,7 +286,7 @@ class TestReportSeparationDegree:
         assert obj["separation"]["tau"] is None
 
     def test_declared_topology_reports_the_number_and_the_enumeration(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         pin = tmp_path / "pin.json"
@@ -320,7 +320,7 @@ class TestReportSeparationDegree:
 
 class TestExportProof:
     def test_prints_a_bundle_for_the_named_seq(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 5)
@@ -331,7 +331,7 @@ class TestExportProof:
         assert obj["batch_size"] == 5
 
     def test_seq_outside_the_trail_exits_1(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
@@ -360,7 +360,7 @@ class TestExportProof:
 
 
 class TestVerifyProof:
-    def export(self, tmp_path: Path, capsys: pytest.CaptureFixture, seq: int = 1) -> Path:
+    def export(self, tmp_path: Path, capsys: pytest.CaptureFixture[str], seq: int = 1) -> Path:
         trail = tmp_path / "trail.jsonl"
         if not trail.exists():
             make_trail(trail, 4)
@@ -370,14 +370,14 @@ class TestVerifyProof:
         return bundle
 
     def test_a_freshly_exported_bundle_verifies(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         bundle = self.export(tmp_path, capsys)
         assert main(["verify-proof", str(bundle)]) == 0
         assert "ok" in capsys.readouterr().out
 
     def test_round_trip_works_for_every_row(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         make_trail(tmp_path / "trail.jsonl", 6)
         for seq in range(6):
@@ -386,7 +386,7 @@ class TestVerifyProof:
             capsys.readouterr()
 
     def test_a_tampered_payload_exits_1(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         import base64
 
@@ -398,7 +398,7 @@ class TestVerifyProof:
         assert "payload_hash_mismatch" in capsys.readouterr().out
 
     def test_a_bundle_that_is_not_in_the_anchored_batch_exits_1(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         bundle = self.export(tmp_path, capsys)
         obj = json.loads(bundle.read_text())
@@ -408,7 +408,7 @@ class TestVerifyProof:
         assert "membership_not_proven" in capsys.readouterr().out
 
     def test_an_unknown_fingerprint_exits_2_not_1(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # The library's central promise, at the single-row export level.
         trail = tmp_path / "trail.jsonl"
@@ -420,7 +420,7 @@ class TestVerifyProof:
         assert "NOT" in out and "tampering" in out.lower()
 
     def test_malformed_json_is_a_verdict_not_a_traceback(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         bad = tmp_path / "bad.json"
         bad.write_text("{ not json at all")
@@ -431,7 +431,7 @@ class TestVerifyProof:
         assert "tamper" not in err.lower()
 
     def test_an_unknown_bundle_format_is_refused_not_called_tampered(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         bundle = self.export(tmp_path, capsys)
         obj = json.loads(bundle.read_text())
@@ -446,7 +446,7 @@ class TestVerifyProof:
         assert main(["verify-proof", str(tmp_path / "nope.json")]) == 3
 
     def test_verify_proof_needs_no_trail_at_all(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # The point of a bundle: the auditor holds this file and nothing else.
         bundle = self.export(tmp_path, capsys)

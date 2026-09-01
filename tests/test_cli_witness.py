@@ -20,6 +20,7 @@ from __future__ import annotations
 import http.server
 import json
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -54,7 +55,9 @@ class WitnessService:
         return 200, json.dumps({"checkpoints": self.records}).encode()
 
 
-def start_witness(service: WitnessService):  # type: ignore[no-untyped-def]
+def start_witness(
+    service: WitnessService,
+) -> tuple[http.server.HTTPServer, threading.Thread, str]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def _dispatch(self, method: str) -> None:
             length = int(self.headers.get("Content-Length", 0))
@@ -89,7 +92,7 @@ def make_trail(path: Path, n: int = 3, *, start: int = 0) -> None:
 
 
 @pytest.fixture
-def witness():  # type: ignore[no-untyped-def]
+def witness() -> Iterator[tuple[WitnessService, str]]:
     service = WitnessService()
     httpd, thread, url = start_witness(service)
     try:
@@ -102,7 +105,7 @@ def witness():  # type: ignore[no-untyped-def]
 
 class TestAnchorPublishes:
     def test_checkpoint_reaches_the_witness(
-        self, tmp_path: Path, witness, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, witness: tuple[WitnessService, str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         service, url = witness
         trail = tmp_path / "trail.jsonl"
@@ -112,7 +115,7 @@ class TestAnchorPublishes:
         assert service.records[0]["seq"] == 2
         assert "published to" in capsys.readouterr().out
 
-    def test_local_sidecar_is_still_written(self, tmp_path: Path, witness) -> None:
+    def test_local_sidecar_is_still_written(self, tmp_path: Path, witness: tuple[WitnessService, str]) -> None:
         # The witness is an addition, not a replacement: the local queue is
         # what `verify --anchors` reads when no witness is configured.
         _, url = witness
@@ -122,7 +125,7 @@ class TestAnchorPublishes:
         assert Path(str(trail) + ".anchors").exists()
 
     def test_a_failing_witness_publish_exits_1(
-        self, tmp_path: Path, witness, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, witness: tuple[WitnessService, str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         service, url = witness
         service.status_override = 503
@@ -150,7 +153,7 @@ class TestAnchorPublishes:
 
 class TestVerifyCrossChecks:
     def test_consistent_witness_passes(
-        self, tmp_path: Path, witness, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, witness: tuple[WitnessService, str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         _, url = witness
         trail = tmp_path / "trail.jsonl"
@@ -162,7 +165,7 @@ class TestVerifyCrossChecks:
         assert "consistent" in capsys.readouterr().out
 
     def test_trail_that_grew_since_the_witness_saw_it_is_consistent(
-        self, tmp_path: Path, witness
+        self, tmp_path: Path, witness: tuple[WitnessService, str]
     ) -> None:
         _, url = witness
         trail = tmp_path / "trail.jsonl"
@@ -172,7 +175,7 @@ class TestVerifyCrossChecks:
         assert main(["verify", str(trail), "--witness", url]) == 0
 
     def test_rewritten_history_is_a_break(
-        self, tmp_path: Path, witness, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, witness: tuple[WitnessService, str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         _, url = witness
         trail = tmp_path / "trail.jsonl"
@@ -193,7 +196,7 @@ class TestVerifyCrossChecks:
         assert "split-view" in out
 
     def test_truncation_below_the_witnessed_head_is_a_break(
-        self, tmp_path: Path, witness, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, witness: tuple[WitnessService, str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         _, url = witness
         trail = tmp_path / "trail.jsonl"
@@ -225,7 +228,7 @@ class TestVerifyCrossChecks:
         assert "NOT checked" in out
 
     def test_an_inconsistent_witness_beats_an_unreachable_one(
-        self, tmp_path: Path, witness
+        self, tmp_path: Path, witness: tuple[WitnessService, str]
     ) -> None:
         # _combine's ordering: 1 is the stronger finding. A run that found a
         # split view must never soften to "unverifiable" because another
@@ -244,7 +247,7 @@ class TestVerifyCrossChecks:
         assert main(["verify", str(trail), "--witness", url, "--witness", down_url]) == 1
 
     def test_a_witness_holding_nothing_reports_no_coverage(
-        self, tmp_path: Path, witness, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, witness: tuple[WitnessService, str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         _, url = witness
         trail = tmp_path / "trail.jsonl"
@@ -280,7 +283,7 @@ class TestVerifyCrossChecks:
                 httpd.server_close()
 
     def test_unreadable_witness_records_are_reported_as_uncovered(
-        self, tmp_path: Path, witness, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, witness: tuple[WitnessService, str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         service, url = witness
         trail = tmp_path / "trail.jsonl"
@@ -293,7 +296,7 @@ class TestVerifyCrossChecks:
         assert "1 record(s) this build could not read" in capsys.readouterr().out
 
     def test_an_unusable_witness_response_is_unreachable_not_consistent(
-        self, tmp_path: Path, witness, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, witness: tuple[WitnessService, str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         # A proxy error page answering 200 must never read as "no
         # disagreement found" — it is coverage the run did not get (exit 2).
@@ -315,7 +318,7 @@ class TestWitnessCredentialSeparation:
     WAXSEAL_WITNESS_API_KEY and nothing else."""
 
     def test_the_chain_server_key_never_reaches_a_witness(
-        self, tmp_path: Path, witness, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, witness: tuple[WitnessService, str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         service, url = witness
         monkeypatch.setenv("WAXSEAL_API_KEY", "chain-write-credential")
@@ -330,7 +333,7 @@ class TestWitnessCredentialSeparation:
         assert service.auth == [None, None]
 
     def test_the_witness_key_is_sent_as_a_bearer(
-        self, tmp_path: Path, witness, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, witness: tuple[WitnessService, str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         service, url = witness
         monkeypatch.delenv("WAXSEAL_API_KEY", raising=False)
@@ -345,7 +348,7 @@ class TestWitnessCredentialSeparation:
 
 class TestRemoteTrailWithWitness:
     def test_witness_works_for_a_url_target(
-        self, tmp_path: Path, witness, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, witness: tuple[WitnessService, str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         # The combination the whole feature exists for: an untrusted chain
         # server, checked against a witness under a different authority.
@@ -379,7 +382,7 @@ class TestRemoteTrailWithWitness:
 
 class TestReportSurface:
     def test_report_json_lists_each_witness(
-        self, tmp_path: Path, witness, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, witness: tuple[WitnessService, str], capsys: pytest.CaptureFixture[str]
     ) -> None:
         _, url = witness
         trail = tmp_path / "trail.jsonl"
@@ -421,7 +424,7 @@ class TestReportSurface:
 
 class TestReadOnly:
     def test_witness_verification_does_not_touch_the_trail(
-        self, tmp_path: Path, witness
+        self, tmp_path: Path, witness: tuple[WitnessService, str]
     ) -> None:
         _, url = witness
         trail = tmp_path / "trail.jsonl"
