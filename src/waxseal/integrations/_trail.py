@@ -50,6 +50,13 @@ def env_trail() -> str | None:
     SERVER has to keep its URL scheme intact: ``Path("http://host")``
     collapses the ``//`` and the target silently becomes a local file called
     ``http:``.
+
+    RAW on purpose: this is the reader, not the policy. `resolve_trail` is
+    where the value becomes a filesystem path and is therefore where a
+    leading ``~`` is refused (waxseal-fg4.4); a caller that only asks whether
+    the value names a chain SERVER — `claude_code._trail_target` — needs the
+    string as the operator wrote it and must not be made to pay for, or print,
+    a path-shaped refusal twice.
     """
     return os.environ.get(ENV_VAR) or None
 
@@ -68,9 +75,9 @@ def resolve_trail(
        the shared one behind the caller's back.
     2. `WAXSEAL_TRAIL`.
     3. ``default()`` — the host's own location, called ONLY if the first two
-       are absent, because those defaults reach into a host's config module
-       or ``Path.home()`` and may raise or cost real work an operator had
-       already overridden.
+       are absent (or the env value is refused, below), because those defaults
+       reach into a host's config module or ``Path.home()`` and may raise or
+       cost real work an operator had already overridden.
 
     The env value is taken verbatim while ``explicit`` gets ``expanduser()``.
     That asymmetry is deliberate, not an oversight: the four modules that
@@ -78,11 +85,40 @@ def resolve_trail(
     who reads a variable must not change what a value already deployed
     means. (A shell expands ``~`` before the process is started, so an
     operator setting it from a shell sees no difference either way.)
+
+    QUALIFIED, owner decision 01/09/2026 (waxseal-fg4.4). Verbatim is still
+    the rule — nothing here expands anything — but a value whose path BEGINS
+    with ``~`` is refused rather than used, because verbatim is exactly what
+    makes it wrong: no shell runs between a systemd unit, a compose file or a
+    config template and this process, so the tilde survives and the writer
+    creates a directory literally named ``~`` under its cwd. The refusal
+    falls back to ``default()`` and says so on stderr (rule 6: a degraded
+    resolution is labelled, never silent). Falling back rather than raising is
+    deliberate: a trail that stops writing is the failure this library exists
+    to make visible, and the host default is a location `waxseal verify`
+    already knows how to find, whereas a ``~`` directory is not. Expanding the
+    env value instead was rejected: a deployment already running with a
+    literal ``~`` directory would have its old trail stay put while new
+    appends went elsewhere, which looks exactly like a truncated chain.
     """
     if explicit is not None:
         return Path(explicit).expanduser()
     env = env_trail()
     if env is not None:
+        if env.startswith("~"):
+            fallback = default()
+            print(
+                f"[waxseal-audit] {ENV_VAR}={env!r} is REFUSED: the value "
+                "starts with '~' and is never expanded, so it would write to "
+                "a directory literally named '~' under the current working "
+                "directory instead of a home directory. Fix: set "
+                f"{ENV_VAR} to an absolute path — there is no shell to expand "
+                "a tilde in a systemd unit, a compose file or a config "
+                f"template. Writing to the host default {fallback} instead; "
+                "no existing trail was moved or migrated.",
+                file=sys.stderr,
+            )
+            return fallback
         return Path(env)
     return default()
 

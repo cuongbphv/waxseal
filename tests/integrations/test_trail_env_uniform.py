@@ -97,7 +97,7 @@ class TestSharedResolver:
         assert resolved == Path.home() / "x.jsonl"
 
     def test_the_env_value_is_taken_verbatim(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
     ) -> None:
         # Deliberately NOT expanded, because that is what the four modules
         # which already honoured this variable have always done, and this
@@ -105,10 +105,95 @@ class TestSharedResolver:
         # already in production means. (A shell expands "~" before the
         # process ever sees it, so the verbatim path is what an operator
         # setting it from a shell gets either way.)
+        #
+        # waxseal-fg4.4 (owner decision 01/09/2026) QUALIFIES this without
+        # weakening it. The value is still never expanded — env_trail() hands
+        # back the operator's bytes — but resolve_trail now REFUSES a value
+        # whose path begins with "~" rather than writing to a directory
+        # literally named "~". So the property is asserted twice here: the
+        # reader is verbatim, and the resolver's answer is neither the
+        # verbatim "~/from-env.jsonl" nor the expanded Path.home() form.
         monkeypatch.setenv("WAXSEAL_TRAIL", "~/from-env.jsonl")
-        assert _trail.resolve_trail(default=lambda: tmp_path / "f.jsonl") == Path(
-            "~/from-env.jsonl"
-        )
+        assert _trail.env_trail() == "~/from-env.jsonl"
+
+        fallback = tmp_path / "f.jsonl"
+        resolved = _trail.resolve_trail(default=lambda: fallback)
+        assert resolved == fallback
+        assert resolved != Path("~/from-env.jsonl")
+        assert resolved != Path.home() / "from-env.jsonl"
+        assert "REFUSED" in capsys.readouterr().err
+
+    def test_a_leading_tilde_is_refused_with_a_label_naming_var_value_and_fix(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    ) -> None:
+        # waxseal-fg4.4. WAXSEAL_TRAIL=~/x.jsonl set by a NON-SHELL setter (a
+        # systemd unit, a compose file, a config template) reaches the process
+        # with the tilde intact, and a verbatim Path("~/x.jsonl") creates a
+        # directory literally named "~" under the writer's cwd — a trail no
+        # operator will ever run `waxseal verify` against. Rule 6: the
+        # degradation is labelled, never swallowed, and the label has to carry
+        # all three things an operator needs to act.
+        monkeypatch.setenv("WAXSEAL_TRAIL", "~/x.jsonl")
+        fallback = tmp_path / "fallback.jsonl"
+        assert _trail.resolve_trail(default=lambda: fallback) == fallback
+
+        err = capsys.readouterr().err
+        assert "[waxseal-audit]" in err
+        assert "WAXSEAL_TRAIL" in err          # the variable
+        assert "~/x.jsonl" in err              # the offending value
+        assert "absolute path" in err          # the fix
+        assert "systemd unit" in err and "compose file" in err
+        assert str(fallback) in err            # where writes actually go
+
+    def test_a_bare_tilde_is_refused_too(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    ) -> None:
+        # "~" and "~operator/trail.jsonl" are the same bug as "~/x.jsonl":
+        # the refusal is on the leading character, not on a "~/" prefix.
+        fallback = tmp_path / "fallback.jsonl"
+        for value in ("~", "~operator/trail.jsonl"):
+            monkeypatch.setenv("WAXSEAL_TRAIL", value)
+            assert _trail.resolve_trail(default=lambda: fallback) == fallback
+            assert "REFUSED" in capsys.readouterr().err
+
+    def test_a_tilde_elsewhere_in_the_path_is_a_legitimate_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    ) -> None:
+        # "~" is a legal character in a POSIX file name. Only a LEADING one
+        # is the shell-expansion bug; refusing the rest would break a
+        # perfectly valid deployment for no reason.
+        named = tmp_path / "~odd" / "trail.jsonl"
+        monkeypatch.setenv("WAXSEAL_TRAIL", str(named))
+        assert _trail.resolve_trail(default=lambda: tmp_path / "f.jsonl") == named
+        assert capsys.readouterr().err == ""
+
+    def test_the_refusal_does_not_raise_and_keeps_the_writer_writing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    ) -> None:
+        # Fall back, do not refuse to write. A trail that silently stops is
+        # the failure this library exists to make visible, and the host
+        # default is a location `waxseal verify` already knows how to find,
+        # which a directory named "~" is not. The label is what makes the
+        # fallback honest rather than silent.
+        monkeypatch.setenv("WAXSEAL_TRAIL", "~/x.jsonl")
+        default = tmp_path / "host" / "trail.jsonl"
+        resolved = _trail.resolve_trail(default=lambda: default)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text("appended\n", encoding="utf-8")
+        assert resolved.read_text(encoding="utf-8") == "appended\n"
+        assert "REFUSED" in capsys.readouterr().err
+
+    def test_an_explicit_argument_is_unaffected_by_the_refusal(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    ) -> None:
+        # The refusal is scoped to the env rung. An explicit "~" argument is
+        # a caller writing Python, where expanduser() is the documented
+        # behaviour of the library defaults and no config file is involved.
+        monkeypatch.setenv("WAXSEAL_TRAIL", "~/from-env.jsonl")
+        assert _trail.resolve_trail(
+            "~/explicit.jsonl", default=lambda: tmp_path / "f.jsonl"
+        ) == (Path.home() / "explicit.jsonl")
+        assert capsys.readouterr().err == ""
 
     def test_the_default_is_not_computed_when_it_is_not_needed(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -516,3 +601,78 @@ class TestEveryIntegrationHonoursTheVariable:
             if not p.stem.startswith("_")
         }
         assert modules == set(self.MODULES)
+
+
+# --------------------------------------------------------------------------
+# waxseal-fg4.4: the refusal lands in _trail.resolve_trail, so all 9 inherit
+# --------------------------------------------------------------------------
+
+
+class TestEveryIntegrationRefusesALeadingTilde:
+    """The refusal is one branch in one function; these prove it reaches all 9.
+
+    `test_no_integration_reads_the_variable_for_itself` already pins that
+    `_trail` is the only reader, but "nobody else reads it" is not the same
+    claim as "everybody else gets the new answer" — a module could resolve
+    through some other rung entirely. Between the three fixtures below every
+    module in `TestEveryIntegrationHonoursTheVariable.MODULES` is exercised:
+    3 library-style + 2 hermes + 4 originally-honouring = 9.
+    """
+
+    TILDE = "~/set-by-a-compose-file.jsonl"
+
+    def test_library_integrations_fall_back_to_their_documented_default(
+        self, library_integration, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    ) -> None:
+        cls, default = library_integration
+        monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
+        monkeypatch.setenv("WAXSEAL_TRAIL", self.TILDE)
+        tail = PurePosixPath(default).relative_to("~")
+        assert cls()._trail == tmp_path / "posix-home" / tail
+        assert "REFUSED" in capsys.readouterr().err
+
+    def test_hermes_modules_fall_back_to_hermes_home(
+        self, hermes_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    ) -> None:
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+        monkeypatch.setenv("WAXSEAL_TRAIL", self.TILDE)
+        assert hermes_module._trail_path() == (
+            tmp_path / "hermes-home" / "audit" / "trail.jsonl"
+        )
+        assert "REFUSED" in capsys.readouterr().err
+
+    def test_the_originally_honouring_four_fall_back_to_the_host_default(
+        self, already_honouring, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    ) -> None:
+        resolve, (host_dir, sub), tail = already_honouring
+        monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
+        monkeypatch.setenv("WAXSEAL_TRAIL", self.TILDE)
+        assert resolve() == tmp_path / "posix-home" / host_dir / sub / tail
+        assert "REFUSED" in capsys.readouterr().err
+
+    def test_the_claude_code_remote_probe_does_not_double_print(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    ) -> None:
+        # claude_code is the one module that reads env_trail() a second time,
+        # to ask whether the value names a chain SERVER. A "~" value is not a
+        # URL, so it falls through to the path rung — and the operator must
+        # see the refusal ONCE, not twice, or a duplicated warning teaches
+        # them to filter it out.
+        claude_code = importlib.import_module("waxseal.integrations.claude_code")
+        monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
+        monkeypatch.setenv("WAXSEAL_TRAIL", self.TILDE)
+        target = claude_code._trail_target(_ROUTING_EVENT)
+        assert isinstance(target, Path)
+        assert capsys.readouterr().err.count("REFUSED") == 1
+
+    def test_a_chain_server_url_is_still_honoured(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    ) -> None:
+        # The refusal must not touch the remote rung: a URL cannot begin with
+        # "~", and env_trail() stays the raw reader precisely so the scheme
+        # survives (Path("http://host") collapses the "//").
+        claude_code = importlib.import_module("waxseal.integrations.claude_code")
+        monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
+        monkeypatch.setenv("WAXSEAL_TRAIL", "https://chain.example/api")
+        assert claude_code._trail_target(_ROUTING_EVENT) == "https://chain.example/api"
+        assert "REFUSED" not in capsys.readouterr().err
