@@ -67,7 +67,7 @@ confidence) — collapsing to two values leaves no third option. "Migration 060"
 clothing: an unknown/unmeasured state got forced into a binary and came out on the wrong
 side.
 
-This codebase already applies the principle, by name or not, in (at least) six places:
+This codebase already applies the principle, by name or not, in (at least) nine places:
 
 1. **Verdict chain**: `ok` / `broken` / `unverifiable` (`domain/verify.py`), now also
    formalized as the `Verdict` type (`src/waxseal/domain/verdict.py`) — a new instance
@@ -87,10 +87,27 @@ This codebase already applies the principle, by name or not, in (at least) six p
    `reconcile-tickets` in the CLI contract) — exit 2 means "unmeasured: issuer data
    unavailable this run", never rendered as "0 drops detected". Found without being
    told, exactly as the paragraph below used to challenge; recorded here 31/08/2026.
+8. **WORM retention on an archived segment** (`src/waxseal/adapters/s3.py`) —
+   `worm_locked` / `worm_unlocked` / `worm_unknown`: an Object Lock reply this build
+   cannot interpret is unmeasured, never "not locked", so a wrong guess costs an honest
+   "could not tell" and never a false guarantee. The first instance where the SUBJECT of
+   the question had to become part of the state's identity — S3 protects only the object
+   version named in the request, so the same three values asked about a bucket and asked
+   about an object version are different claims. `_WORM_LABEL` is keyed on the
+   `(subject, state)` PAIR for that reason: keyed on state alone, bucket evidence printed
+   the object-level guarantee. A ternary can be correct in every value and still lie in
+   its renderer; that renderer never reached `develop`.
+9. **Segment archiving** (`src/waxseal/domain/archive.py`) — `archive_stored` /
+   `archive_failed` / `archive_not_attempted`. No destination configured is not a failed
+   upload: calling it success invents an off-box copy that does not exist, calling it
+   failure alarms an operator who never opted in. Distinctive because it is invisible to
+   chain integrity — under a mutation that broke archiving entirely, the chain, the
+   rotation binding and the new segment all still verified `ok`. A defect no verdict can
+   see is why the third value has to be asserted directly, never inferred from one.
 
 Rule 5 below is the SPECIFIC instance of this general principle that the chain-integrity
 metric needed. An implementer who has internalized the general principle, not just rule
-5's wording, should be able to find an eighth place it applies without being told.
+5's wording, should be able to find a tenth place it applies without being told.
 
 ## Architecture (layer DAG, enforced by tests/architecture/)
 
@@ -196,7 +213,19 @@ operator-supplied parameters (`--lam`/`--c`/`--w`/`--rho`/`--delta`/`--t-max` re
 technology, not the cadence, is wrong — `delta > t_max`), exit 2 = an invalid measurement
 or a missing required flag. `receipt` is read-only against the trail and its sidecar; it
 writes extracted
-receipt/frame files only into the operator-named `--out` directory. Two spec'd
+receipt/frame files only into the operator-named `--out` directory. `waxseal segments
+<dir>` takes the DIRECTORY holding a project's sealed segments, not a trail file:
+read-only over every segment in it, appending nothing. Exit 0/1/2 come from
+`Verdict.to_exit_code`, so an unknown fingerprint in one segment never masks a real break
+in another; exit 3 = the directory does not exist or holds no segment (an unrotated trail
+was not checked here at all — that one is `verify <trail>`). `segment_missing` aggregates
+as BROKEN, exit 1 (owner decision, 31/08/2026): a surviving rotation binding is positive
+evidence the segment existed. `waxseal preflight <trail>` is read-only against the trail,
+its sidecars and — with `--pin` — the pin state file, which it only READS: it is the one
+command that names `--pin` and neither writes nor advances it. Exit 0 ALWAYS, because it
+reports a reading and not a verdict an operator would then have to reconcile against
+`verify`; the single exception is exit 3, the named local trail does not exist. No
+URL/remote target. Two spec'd
 verifier-state carve-outs, neither of which touches the log: `--pin` writes the pin state
 file (SPEC §13 — exit 2 advances the pin because unverifiable ≠ tampered; exit 1 freezes
 it), and `anchor` appends to the `.anchors` sidecar. Credentials come only from env:
