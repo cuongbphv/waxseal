@@ -178,8 +178,8 @@ pip install waxseal
 
 <!-- 翻译决定（waxseal-fg4.32，2026-09-01）：本节翻译正文，而把具体的 specifier
      指回英文表格，不把表格复制到三个 README 里。理由：那张表是活内容 ——
-     `rfc3161` 已在 c57a7b7 从 Planned 变为已发布，`evm` 会在 Workstream F3 落地时
-     跟着变 —— 一张漏更新的译版表格会印出错误的安装指令（过时的包名或版本
+     `rfc3161` 已在 c57a7b7 从 Planned 变为已发布，`evm` 也已随 Workstream F3 落地
+     跟着变为已发布 —— 一张漏更新的译版表格会印出错误的安装指令（过时的包名或版本
      specifier），而一个指针最多只是多点一次。对新增 extra 的人的影响：只需改
      README.md 里的表格；三个 README 只有在“已发布 extra 的名字清单”变化时才需要
      动，因为这里仍用正文列出了 extra 的名字。 -->
@@ -203,10 +203,17 @@ extra 缺失）是 exit 2 并附上说明是哪一种的标签，绝不会是一
 
 （`dev` 也存在，用于运行测试套件。它不是一个能力 extra。）
 
-`evm`（链上 ledger 层）已在 0.1.5 contract 中被命名，但**尚未发布** —— 不要针对它写
-代码。它不在 `pyproject.toml` 里，所以请求它不会多装任何东西。本仓库不会把未发布的
-extra 描述成可用：written-but-unwired 不等于 shipped，
-[docs/paper/conformance.md](docs/paper/conformance.md) 逐行记着这本账。
+`evm`（链上 ledger 层）已经发布：`ports/ledger.py`、`domain/bond.py`、
+`domain/liveness.py`、`domain/abi.py`、`domain/registry.py`、`adapters/evm.py`，
+以及 CLI 命令 `ledger-status`、`registry publish`、`bond deposit`/`bond prove`、
+`verify`/`report --rpc/--liveness/--registry`、`anchor --evm-*`。
+`pyproject.toml` 里 `evm = []` 为空，**不代表"尚未发布"**——它的意思是：读路径纯用
+`eth_call`（走 `adapters/remote.py` 已有的那套 stdlib Transport），写路径把交易
+字段交给运维方自己构造并注入的 `Signer`，所以没有任何客户端需要 `pip` 去装；这个
+extra 存在只是为了让 `pip install waxseal[evm]` 是一条合法命令、让这项能力在
+metadata 里有名字，而不是因为代码没写。
+[docs/paper/conformance.md](docs/paper/conformance.md) 逐行记着这一层哪些部分
+已发布、还剩下哪些已知缺口。
 
 增加一个**硬**依赖是另一个问题，答案是不。extras 才是被许可的那条路。
 
@@ -571,7 +578,8 @@ CLI 自身的契约就是绝不向 chain 追加 entry（这和上文 `record_fil
 
 ## 集成
 
-为七个 agent 框架与编码工具提供审计 hook，另有一个面向自带账本的宿主（OpenClaw）的导出器。每个集成都针对目标当前的
+为七个 agent 框架与编码工具提供审计 hook，另有一个面向自带账本的宿主（OpenClaw）的导出器，
+以及一个面向自带日志系统的治理层（Microsoft AGT）的 AuditSink Protocol 实现。每个集成都针对目标当前的
 hook 契约做过验证（版本记录在各自 README 中），在执行*之前*记录 dispatch，在哈希前
 完成密钥脱敏，超大输出做可见截断，并且**绝不阻塞或否决宿主的工作** —— 任何失败都
 退化为带标注、有计数的 dropped write。
@@ -585,8 +593,8 @@ waxseal install hermes        # 或 claude-code / codex / cursor / hermes-gatewa
 
 `install` 会把轻量 shim 写入宿主的配置目录（shim 只 import
 `waxseal.integrations.*`，因此 `pip install -U waxseal` 即可原地升级 hook 行为），
-并打印宿主仍需添加的 settings 片段。LangChain、CrewAI、OpenAI Agents 集成无需
-install 步骤 —— 直接 import，例如
+并打印宿主仍需添加的 settings 片段。LangChain、CrewAI、OpenAI Agents、Microsoft AGT
+集成无需 install 步骤 —— 直接 import，例如
 `from waxseal.integrations.langchain import WaxsealCallbackHandler`。
 
 | 目标 | 机制 | 目录 |
@@ -599,6 +607,7 @@ install 步骤 —— 直接 import，例如
 | OpenAI Agents SDK | `RunHooks` | [integrations/openai-agents/](integrations/openai-agents/) |
 | hermes-agent | plugin + gateway hook | [integrations/hermes/](integrations/hermes/) |
 | OpenClaw | 审计账本导出器（`openclaw audit --json`，非 hook） | [integrations/openclaw/](integrations/openclaw/) |
+| Microsoft AGT | AuditSink Protocol（挂接到 AGT 自己的 `AuditLog`） | [`waxseal.integrations.agt`](src/waxseal/integrations/agt.py) |
 
 对编码工具类集成的范围说明：这些 hook 给你一份并行的、篡改可检测（tamper-evident）的、**不含密钥**的
 行动记录。它们不会（也无法）改写工具自身的 transcript 文件 —— 如果密钥已经落入
