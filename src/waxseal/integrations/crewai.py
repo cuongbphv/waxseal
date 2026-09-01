@@ -7,6 +7,10 @@ and keep the reference alive, because construction IS the registration:
     from waxseal.integrations.crewai import WaxsealEventListener
     audit = WaxsealEventListener("~/.waxseal/crewai-trail.jsonl")
 
+The trail argument is optional: with none given, `WAXSEAL_TRAIL` is honoured,
+and `DEFAULT_TRAIL` is the last resort. An argument passed here always wins
+over the environment.
+
 Contract verified against crewai 1.15.17 (PyPI wheel source, 2026-08-21):
 
 - Everything imports from crewai.events (the pre-1.0 crewai.utilities.events
@@ -46,6 +50,7 @@ from crewai.events import (
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations._trail import home_default, resolve_trail
 
 # _sanitize redacts BEFORE clipping: a clip can split a secret across the
 # boundary (a PEM losing its END marker stops matching) and land it on disk.
@@ -56,6 +61,10 @@ PAYLOAD_TYPE = "application/vnd.crewai.event+json"
 # Tool outputs can be megabytes (scraped pages, file reads). Clip stored
 # fields, visibly, because silent truncation would read as "the full output".
 MAX_FIELD_CHARS = 4096
+
+#: Where this integration writes when the caller names no path and
+#: `WAXSEAL_TRAIL` is unset.
+DEFAULT_TRAIL = "~/.waxseal/crewai-trail.jsonl"
 
 # Attributes copied off each event when present. Deliberately curated:
 # events also carry live agent/task/crew objects, which are neither
@@ -87,10 +96,21 @@ def _sanitize(value: Any) -> Any:
 
 
 class WaxsealEventListener(BaseEventListener):
-    def __init__(self, trail: Path | str = "~/.waxseal/crewai-trail.jsonl") -> None:
+    def __init__(self, trail: Path | str | None = None) -> None:
+        """``trail`` wins over `WAXSEAL_TRAIL`, which wins over
+        `DEFAULT_TRAIL`. The default is a None sentinel rather than the path
+        itself so "the caller passed nothing" stays distinguishable from
+        "the caller passed the default path" — without that distinction
+        there is nowhere for the environment rung to sit, and an operator's
+        `WAXSEAL_TRAIL` would be silently ignored by this integration while
+        the stdin hooks honoured it.
+        """
         # Set state BEFORE super().__init__: the base class registers (and
         # may fire) setup_listeners during construction.
-        self._trail = Path(trail).expanduser()
+        # home_default(), not Path(...).expanduser(): the last rung has to
+        # honour HOME, which ntpath.expanduser ignores in favour of USERPROFILE
+        # (waxseal-fg4.20; the profile split is documented on home_default).
+        self._trail = resolve_trail(trail, default=lambda: home_default(DEFAULT_TRAIL))
         self._log: AuditLog | None = None
         super().__init__()
 

@@ -5,6 +5,7 @@ as the CLI's remote `--anchors` note (CLAUDE.md rule 6): a flag that does
 nothing must say so in the output, or the operator has no way to notice it was
 ignored."""
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -42,3 +43,39 @@ class TestHomeNoteForNoInstallTargets:
         captured = capsys.readouterr()
         # The note supplements the guidance, never replaces it.
         assert "nothing to install" in captured.out
+
+
+class TestConfigSnippetNamesThisInterpreter:
+    """`python3` on PATH is not necessarily the interpreter that has waxseal.
+
+    This is 0.1.5 Workstream D1, and it is written from a real incident on the
+    repository owner's machine: the snippet said `python3`, that interpreter
+    could not import waxseal, every hook event was dropped with a label nobody
+    was reading, and the trail stayed empty while the hooks looked installed.
+
+    The shim keeps its `#!/usr/bin/env python3` shebang — that is a fail-open
+    the host may override. The snippet an operator PASTES must name the
+    interpreter that just ran `waxseal install`, because that one demonstrably
+    has waxseal.
+    """
+
+    def test_the_snippet_uses_the_running_interpreter(self, tmp_path: Path) -> None:
+        from waxseal.integrations._install import _config_snippet
+
+        snippet = _config_snippet("claude-code", tmp_path / "hook.py")
+        assert sys.executable in snippet
+
+    def test_the_snippet_does_not_say_bare_python3(self, tmp_path: Path) -> None:
+        from waxseal.integrations._install import _config_snippet
+
+        snippet = _config_snippet("claude-code", tmp_path / "hook.py")
+        assert '"command": "python3 ' not in snippet
+
+    def test_the_openclaw_cron_line_also_names_it(self) -> None:
+        # openclaw is a timer target, not a hook shim, so its guidance is a
+        # crontab line rather than a settings.json snippet — and it had the
+        # same bare-interpreter bug.
+        from waxseal.integrations._install import _RUNNER_USAGE
+
+        assert sys.executable in _RUNNER_USAGE["openclaw"]
+        assert "* * * * * python -m waxseal" not in _RUNNER_USAGE["openclaw"]

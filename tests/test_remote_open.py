@@ -5,6 +5,8 @@ choice, the same class of bug M0's suffix-dispatch guards against."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from waxseal import AuditLog
@@ -20,7 +22,7 @@ class TestURLDispatch:
         log = AuditLog.open("https://example.com/v1/chains/default")
         assert isinstance(log._backend, RemoteBackend)
 
-    def test_local_jsonl_path_is_unaffected(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    def test_local_jsonl_path_is_unaffected(self, tmp_path: Path) -> None:
         from waxseal.adapters.jsonl import JSONLBackend
 
         log = AuditLog.open(tmp_path / "trail.jsonl")
@@ -33,11 +35,13 @@ class TestAPIKeyFromEnv:
     ) -> None:
         monkeypatch.setenv("WAXSEAL_API_KEY", "tok-from-env")
         log = AuditLog.open("http://example.com/v1/chains/default")
+        assert isinstance(log._backend, RemoteBackend)
         assert log._backend._api_key == "tok-from-env"
 
     def test_no_env_var_means_no_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("WAXSEAL_API_KEY", raising=False)
         log = AuditLog.open("http://example.com/v1/chains/default")
+        assert isinstance(log._backend, RemoteBackend)
         assert log._backend._api_key is None
 
 

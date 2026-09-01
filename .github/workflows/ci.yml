@@ -19,6 +19,17 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: ${{ matrix.python-version }}
+      # tests/domain/test_abi.py cross-checks the frozen ABI selectors against
+      # `cast sig`/`cast calldata` (Python's stdlib has no keccak256, so the
+      # selectors are frozen constants — see domain/abi.py's docstring). Without
+      # `cast` on PATH those tests self-label UNMEASURED and skip rather than
+      # fail, which is correct behaviour but leaves the cross-check unrun here.
+      # Installed on both matrix OSes for the same reason the job runs on both:
+      # a claimed check nobody performs is the one thing this project must
+      # never ship.
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: "1.8.1"
       # CLAUDE.md: all green + coverage floor (100%) before any "done" claim.
       # Both operating systems, because filelock.py's two lock branches each
       # carry a `# pragma: no cover` naming the CI that runs the other one. A
@@ -26,6 +37,21 @@ jobs:
       # performs — the one thing this project must never ship.
       - run: uv run --extra dev pytest --cov=waxseal
       - run: uv run --extra dev mypy
+      # pyproject.toml's `files = ["src/waxseal"]` comment promises tests/ is
+      # covered by naming it explicitly on its own line — a bare `mypy`
+      # above never touches it. Without this step that promise was a claimed
+      # check nobody performs (fg4.47): fg4.45's TestLedgerField landed 4
+      # real int|None/tuple|None errors straight through CI green.
+      - run: uv run --extra dev mypy tests/
+      # The other platform's mypy view, from every runner: fcntl/msvcrt
+      # attribute gating in typeshed differs per --platform, and the 0.1.5 MR
+      # only surfaced 6 win32-only errors after three OTHER masked failures
+      # were peeled off Windows runs one by one. ~5s buys the cross-check on
+      # the first, cheapest job instead of the last, slowest one.
+      - run: uv run --extra dev mypy --platform win32
+      - run: uv run --extra dev mypy --platform win32 tests/
+      - run: uv run --extra dev mypy --platform linux
+      - run: uv run --extra dev mypy --platform linux tests/
       - run: uv run --extra dev ruff check .
       # CLAUDE.md: golden vectors are cross-checked by scripts that implement
       # SPEC.md prose directly instead of importing waxseal. A vector suite
@@ -36,3 +62,97 @@ jobs:
       - run: uv run --extra dev python tools/gen_rfc3161_vectors.py
       - run: uv run --extra dev python tools/gen_consistency_vectors.py
       - run: uv run --extra dev python tools/gen_checkpoint_vectors.py
+
+  # The self-hosted server (0.1.5, Workstream I).
+  # A separate job with its own coverage floor: it is a separate application with
+  # its own dependencies, and mixing it into the wheel's gate would let one
+  # move the other.
+  server:
+    runs-on: ubuntu-latest
+    # The operator-store contract runs against BOTH adapters. Without a real
+    # database the Postgres half skips with a label, which is honest but means
+    # nobody ever runs it — so CI provides one.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: waxseal
+          POSTGRES_PASSWORD: waxseal-dev
+          POSTGRES_DB: waxseal
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U waxseal"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      WAXSEAL_TEST_DATABASE_URL: postgresql://waxseal:waxseal-dev@127.0.0.1:55432/waxseal
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.13"
+      # The load-bearing test in here runs the LIBRARY's own backend-conformance
+      # contract against the real server over TCP, using the shipped
+      # RemoteBackend unmodified. If that passes, a real waxseal client cannot
+      # tell this server apart from the backends waxseal ships with.
+      - run: uv sync --extra dev
+        working-directory: server
+      - run: uv run pytest --cov=waxseal_server
+        working-directory: server
+      - run: uv run mypy
+        working-directory: server
+
+  # The on-chain contracts (0.1.5, Workstream F2).
+  # A separate application like server/: its own toolchain, never packaged into
+  # the wheel, its own job so neither gate can move the other.
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.13"
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: "1.8.1"
+      # The cross vectors are generated FROM the Python side, so they are
+      # regenerated here and compared. A change to domain/anchoring.py,
+      # domain/checkpoint.py, domain/hashing.py or the descriptor frame that
+      # moved a hash would otherwise leave the contracts agreeing with a Python
+      # implementation that no longer exists. --check writes nothing: a
+      # difference is a frozen-hash failure, and a frozen-hash failure means
+      # STOP, not "regenerate and commit" (CLAUDE.md rule 3).
+      - run: uv run --extra dev python tools/gen_contract_vectors.py --check
+      # forge test is the whole point of the job: 213 consistency vectors, 37
+      # inclusion vectors and 15 tree roots checked against the Python side --
+      # comparing the intermediate accumulator hashes, not just the verdicts,
+      # and on negatives as well as positives.
+      - run: forge test -vv
+        working-directory: contracts
+      - run: forge fmt --check
+        working-directory: contracts
+      # Selectors are keccak256 of the signature and Python's stdlib has no
+      # keccak256, so domain/abi.py carries them as frozen constants. This
+      # compares the frozen file against the compiler's own answer. It is also
+      # the append-only receipt for FingerprintRegistry: adding an update() or
+      # a pause() changes this file and fails here.
+      - run: ./script/selectors.sh --check
+        working-directory: contracts
+
+  # The web UI is a build artifact, not a checked-in one: if it stops building,
+  # the image stops carrying a UI, and nothing else in CI would notice.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: npm ci || npm install
+        working-directory: server/web
+      - run: npx vue-tsc --noEmit
+        working-directory: server/web
+      - run: npm run build
+        working-directory: server/web

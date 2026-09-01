@@ -1,0 +1,70 @@
+# Sample deployment: PostgreSQL for the server's own records, a Docker volume
+# for the trails. Read server/docs/deployment.md before running it anywhere that
+# matters — in particular the paragraph on why a witness hosted next to the
+# chain it witnesses proves nothing.
+#
+#   docker compose -f server/docker-compose.yml up --build -d
+#   docker compose -f server/docker-compose.yml exec server waxseal-server-admin seed
+#
+# WHY TRAILS ARE NOT IN POSTGRES. The database holds operators and API keys —
+# this server's own records. A trail stays a JSONL file on the volume, because
+# the product's promise is that a third party can verify one with the stock
+# `waxseal verify` on their own machine. Put a trail in this database and this
+# server becomes the only thing that can read it, which is exactly the trust
+# concentration the public read point exists to remove. The waxseal library and
+# its CLI know nothing about PostgreSQL and must not learn.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-waxseal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-waxseal-dev}
+      POSTGRES_DB: ${POSTGRES_DB:-waxseal}
+    volumes:
+      - waxseal-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The server's first act is a CREATE TABLE, so "container started" is not
+      # enough — it has to be accepting connections.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-waxseal} -d ${POSTGRES_DB:-waxseal}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  server:
+    build:
+      # The repository root, so the image installs waxseal from this tree and
+      # the server is never verifying with a different commit's library.
+      context: ..
+      dockerfile: server/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Operators and API keys. NOT trails.
+      WAXSEAL_SERVER_DATABASE_URL: >-
+        postgresql://${POSTGRES_USER:-waxseal}:${POSTGRES_PASSWORD:-waxseal-dev}@postgres:5432/${POSTGRES_DB:-waxseal}
+      WAXSEAL_SERVER_DATA_DIR: /var/lib/waxseal
+      # The bootstrap credential, used once to mint the first real key. Leave it
+      # unset and the server is OPEN until the first key is seeded — it says so
+      # at GET /v1/meta and the portal shows the notice, because a fail-open
+      # that describes itself as secured is the failure this project exists to
+      # prevent.
+      WAXSEAL_API_KEY: ${WAXSEAL_API_KEY:-}
+      # A DIFFERENT credential on purpose (REMOTE.md section 8). The chain's
+      # write key must never reach a witness: a witness holding it could append
+      # forged entries to the very chain it exists to cross-check. Operator keys
+      # do not open it either — the witness guard never receives them.
+      WAXSEAL_WITNESS_API_KEY: ${WAXSEAL_WITNESS_API_KEY:-}
+    ports:
+      # Plain HTTP. TLS terminates at a reverse proxy in front of this — the
+      # deployment doc says which, and this file does not invent a PKI.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - waxseal-data:/var/lib/waxseal
+    restart: unless-stopped
+
+volumes:
+  waxseal-pgdata:
+  waxseal-data:

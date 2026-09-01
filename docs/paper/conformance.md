@@ -56,7 +56,7 @@ executably, which is a different and weaker question than whether they are true.
 | Tightness, and the cost of "absolute" | τ is computed and reported (`waxseal verify`, `waxseal report`) | **[Shipped]** — gap G1 closed |
 | Truncation and the aggregate residual | Sealing and anchored-aggregate tests | **[Shipped]** |
 | Coverage impossibility | `dropped_writes: int \| None` and the `.drops` sidecar | **[Shipped]**; the positive-detection construction (admission tickets) is now **[Shipped]** too — see section 3 |
-| Liveness separation of a contract from a timestamp | `anchor_stale` gives the verifier-side half; the publicly-checkable half needs a contract | **[Partial]** — see section 3 |
+| Liveness separation of a contract from a timestamp | `anchor_stale` gives the verifier-side half; `AnchoringLiveness.sol` + `waxseal ledger-status` give the publicly-checkable half | **[Shipped]** — see section 3 |
 | Optimal cadence, flatness, fleet dividend | `domain/cadence.py`'s closed form, wired into `waxseal cadence` | **[Shipped]** — see section 3 |
 
 ## 3. Constructions
@@ -64,19 +64,25 @@ executably, which is a different and weaker question than whether they are true.
 | Construction | Paper section | Status | Note |
 |---|---|---|---|
 | Exogenous admission tickets | Coverage | **[Shipped]** | The only mechanism in the paper that turns a dropped write into a *positively detected* one. [`domain/tickets.py`](../../src/waxseal/domain/tickets.py) (`Ticket`, `scan_tickets`, `reconcile_tickets`, `render_reconciliation`) is wired read-only into `waxseal reconcile-tickets <trail> --issuer NAME --lease-size L [--issued SPEC]` (waxseal-sv1): a missing issued ticket is reported *positively detected*, never a measured minimum; the still-open lease window's blind-spot bound (`L-1`) is always stated, never silently read as "clean"; an unreachable issuer (`--issued` omitted) reports `measured=False`, distinct from "0 drops" (rule 5). The issuer itself is the operator's to run — waxseal only carries and reconciles tickets, never mints them |
-| Anchoring liveness contract | Contract layer | **[Partial]** | `anchor_stale` lets a verifier holding the deadline in its own trust domain call a trail stale. It does **not** let an uninvolved third party evaluate delinquency without the operator's cooperation — that half is the contract's, and is not built |
-| Bonded equivocation contract | Contract layer | **[Out of scope]** | Needs an on-chain component and a bond. Detection is what this library produces; deterrence prices an adversary's payoff before the fact and is a different good |
-| On-chain append-only fingerprint registry | Contract layer | **[Out of scope]** | Would remove the poisoned-registry caveat on structural schema safety. The registry is verifier-side today and its integrity is assumed; the assumption is stated, not hidden |
+| Anchoring liveness contract | Contract layer | **[Shipped]** | `ports/ledger.py` + `domain/liveness.py` (F1, `26b074c`); `contracts/src/AnchoringLiveness.sol` — writer-signed heads only, strictly increasing `seq`, an RFC 9162 consistency proof gating every submit after the first so a rewritten history cannot keep anchoring (F2, `c21e0e6`); `adapters/evm.py::EvmLedgerReader`/`EvmLedgerSink`/`EvmAnchorSink` over stdlib JSON-RPC (F3, `20f2762`); `waxseal ledger-status --liveness`, `verify`/`report --liveness`, `anchor --evm-liveness` (F4, `26e3e91`). An UNINVOLVED third party can now evaluate delinquency without the operator's cooperation, closing exactly the half this row used to name as missing — real end-to-end evidence against two live anvil chains: [`tests/adapters/test_evm_anvil.py`](../../tests/adapters/test_evm_anvil.py) (adapter-level) and, driving the actual `waxseal` CLI as a subprocess, [`tests/test_cli_ledger_e2e_anvil.py`](../../tests/test_cli_ledger_e2e_anvil.py) (F5, this ledger). **Gap stated at ship time, since closed** (waxseal-fg4.45, closed by `b63c461` + `83d51a2`): F4 shipped the ledger dimension as an independent `_Check` — the same shape `_anchor_check`/`_receipts_check` already have, with faithful exit-2 CLI semantics — rather than wiring it into `SeparationTopology`/`declared_topology` as the original plan's prose describes, so a configured `--liveness` check did not, at F4 time, raise τ. Closed: `SeparationTopology.ledger: bool | None` now counts toward τ and `waxseal preflight` reports it, `--declare-topology` accepts a `ledger=` subfield, and SPEC §13.1's grammar was appended for it in `8acffda` |
+| Bonded equivocation contract | Contract layer | **[Shipped]** | `domain/bond.py` (`EquivocationProof`, `NonExtensionProof`, `checkpoint_signing_digest` — F1); `contracts/src/BondedCheckpoints.sol` slashes on two `ecrecover`s for equivocation (self-contained positive evidence) and on a POSITIVE divergent leaf for non-extension, deliberately never on a consistency proof that merely fails to verify — a design departure from the original plan's signature, accepted because slashing on a failing proof would let anyone empty an honest writer's bond for the price of gas (F2, `c21e0e6`); `EvmLedgerSink.submit_fraud_proof`/`submit_non_extension` (F3); `waxseal bond deposit`/`bond prove` (F4). Real end-to-end evidence: [`tests/adapters/test_evm_anvil.py::TestTheBond`](../../tests/adapters/test_evm_anvil.py) and, driving `bond deposit` then `bond prove` on a fabricated equivocation as real CLI subprocesses against two live anvil chains, [`tests/test_cli_ledger_e2e_anvil.py::TestBondViaCli::test_deposit_then_prove_equivocation_slashes_the_bond`](../../tests/test_cli_ledger_e2e_anvil.py) — asserts both the raw on-chain `bondOf` state (slashed, amount zeroed) and the same fact read back through `ledger-status --bond` (exit 1, reason `bond_slashed`). Scope unchanged from the paper: this makes ONE specific dishonesty expensive once caught; it does not make equivocation impossible and does not detect a writer that simply never contradicts itself |
+| On-chain append-only fingerprint registry | Contract layer | **[Shipped]** | `contracts/src/FingerprintRegistry.sol` computes `fp = sha256(descriptor)` ON CHAIN and refuses a duplicate — no owner, no constructor, no update/pause/upgrade path, verified against the DEPLOYED bytecode (an opcode walk for `DELEGATECALL`/`CALLCODE`/`SELFDESTRUCT`), not merely the source (F2, `c21e0e6`); `domain/registry.py::RegistryCrossCheck`/`descriptor_frame`/`decode_descriptor` (F1); `EvmLedgerReader.registry_lookup`/`registry_agreement` (F3); `waxseal registry publish`, `ledger-status --registry`, `verify`/`report --registry` (F4). Real end-to-end evidence: [`tests/adapters/test_evm_anvil.py::TestTheRegistry`](../../tests/adapters/test_evm_anvil.py) and, publishing via a real CLI subprocess and producing a genuine two-endpoint eclipse-shaped disagreement between two live anvil chains, [`tests/test_cli_ledger_e2e_anvil.py::TestRegistryPublishAndCrossCheckViaCli`](../../tests/test_cli_ledger_e2e_anvil.py). Removes exactly the caveat this row used to name: poisoning an entry now needs a SHA-256 collision or control of the chain, not merely local file write access. **Gap stated at ship time, since closed** (waxseal-fg4.44, closed by `081eab3` + `608775c`): `domain/registry.py`'s vocabulary at F-time merged "the fingerprint is absent from the registry" and "the registry was unreachable" into one status (`REGISTRY_UNREACHABLE`, reason `registry_absent_or_unreachable`), so `ledger-status`/`verify --registry` could not report the two as the distinct facts they are — flagged independently by both F3 and F4, who each correctly declined to work around a domain-level vocabulary decision in adapter/CLI code. Closed: the domain now reports four statuses (`agrees`/`disagrees`/`absent`/`unreachable`), with `registry_fingerprint_not_registered` and `registry_could_not_be_read` as distinct reasons, folded into Ternary instance 13 |
 | Cost-optimal anchoring | Cost | **[Shipped]** | Closed form, convexity, the flatness bound, and the √M fleet dividend are arithmetic over operator-supplied parameters in [`domain/cadence.py`](../../src/waxseal/domain/cadence.py) ([`tests/domain/test_cadence.py`](../../tests/domain/test_cadence.py)), wired read-only into `waxseal cadence` — no positional trail argument, opens no trail — which prints `N*`, the clamped `N_opt`, the `[lam*delta, lam*t_max]` clamp bounds, the balance-property terms, a recommended *band* around `N_opt` (not a bare point, per `flatness_bound`), and a labelled "wrong anchor technology, not cadence" message when `delta > t_max` ([`tests/test_cli_cadence.py`](../../tests/test_cli_cadence.py), waxseal-8nw) |
 | Cross-trail handoff binding, transitive anchoring | Multi-agent chains | **[Shipped]** | [`domain/handoff.py`](../../src/waxseal/domain/handoff.py) (`HandoffBinding`, `binding_holds`) and [`sources/handoff.py`](../../src/waxseal/sources/handoff.py) (`record_handoff`) are built and fully tested (waxseal-otj) — see gap G5, now closed by waxseal-9al.2. `record_handoff` calls `log.append`, so per CLAUDE.md's CLI contract ("the CLI never appends chain entries") it can never be CLI-wired — the same convention that already keeps `record_decision`/`record_file`/`generate_key` CLI-unwired; README.md/.vi.md/.zh.md's "Cross-trail handoff binding" section now documents `record_handoff` as a library call the operator's own code imports directly, matching those three's existing treatment. `binding_holds` is pure and read-only, so it CAN be CLI-wired without touching that rule: `waxseal verify-handoff <delegate-trail> --origin <origin-trail>` (`tests/test_cli_verify_handoff.py`) now scans a delegate trail for handoff-binding entries and checks each against an origin trail's current `entry_hashes()`, the same pattern `verify_membership`/`verify_consistency` already established via `waxseal consistency` |
 
-The two [Out of scope] rows and the [Partial] contract-layer row are the ones the 0.1.4 changelog
-already declared. The three remaining rows all shipped after 0.1.4's own release, once this ledger
-already existed to record each gap: cost-optimal anchoring (waxseal-cmk, waxseal-8nw) and admission
-tickets (waxseal-sv1) are fully [Shipped] and reachable from a real CLI command; cross-trail handoff
-binding (waxseal-otj) reached [Shipped] in two different ways for its two halves — `record_handoff`
-via README documentation of a by-design CLI-unreachable library call, `binding_holds` via a new
-read-only CLI command — closing gap G5 (waxseal-9al.2).
+Two of the three [Out of scope] rows the 0.1.4 changelog originally declared, plus the one [Partial]
+contract-layer row, are now [Shipped]: 0.1.5's Workstream F built all three on-chain constructions the
+paper described as "designed and analysed, not implemented" — chain-agnostic behind `ports/ledger.py`,
+EVM the first adapter, read path stdlib-only (`eth_call`), write path through an operator-injected
+`Signer` (CLAUDE.md rule 1 untouched). Real Foundry contracts, real anvil end-to-end evidence at both
+the adapter layer and, new in this release, the actual CLI driven as a subprocess against two live
+chains — see each row's Note above and section 5's G6 for the two deviations this shipped WITH,
+recorded rather than smoothed over. The remaining rows shipped earlier, after 0.1.4's own release,
+once this ledger already existed to record each gap: cost-optimal anchoring (waxseal-cmk,
+waxseal-8nw) and admission tickets (waxseal-sv1) are fully [Shipped] and reachable from a real CLI
+command; cross-trail handoff binding (waxseal-otj) reached [Shipped] in two different ways for its two
+halves — `record_handoff` via README documentation of a by-design CLI-unreachable library call,
+`binding_holds` via a new read-only CLI command — closing gap G5 (waxseal-9al.2).
 
 ## 4. Evaluation protocol
 
@@ -247,6 +253,47 @@ error), a 2-hop multi-agent delegation (A → B → C, both hops checked), a mis
 path (exit 3), and a header-only reader's payload unavailable (skipped, not reported as a
 failure — rule 5's unmeasured-≠-absent, not this command's job to invent a verdict for
 bytes it was never given).
+
+### G6 — the on-chain layer shipped with two known, deliberate deviations [Shipped — both gaps since closed]
+
+Workstream F (F1-F4, `26b074c`/`c21e0e6`/`20f2762`/`26e3e91`) delivered the three contracts section 3
+records as [Shipped]. Two places where the shipped code diverges from the plan's exact prose were
+flagged by the agents who found them rather than silently absorbed, and both were open as
+`needs-human` beads at the time of this entry (both have since been closed — fg4.44 by
+`081eab3`+`608775c`, fg4.45 by `b63c461`+`83d51a2`) — this ledger's discipline is to describe what actually
+shipped, not the plan's unmodified description of what was intended, so both are recorded here plainly
+rather than smoothed into the three [Shipped] rows above.
+
+- **waxseal-fg4.44 — `registry_absent` and `registry_unreachable` are one status, not two.**
+  `domain/registry.py`'s `RegistryCrossCheck` reports `REGISTRY_UNREACHABLE` (reason
+  `registry_absent_or_unreachable`) for BOTH "the registry contract holds nothing under this
+  fingerprint" and "the registry could not be read at all" — two different facts an operator might
+  reasonably want distinguished, collapsed into one because `RegistryFinding` was built around the
+  input it receives (`onchain_descriptor: bytes | None`), which already cannot tell the two apart by
+  the time it reaches that type. Flagged independently by F3 (`waxseal-7yf`'s close-reason) and F4
+  (`waxseal-j7b`'s close-reason), both of which correctly declined to invent a third status in
+  adapter or CLI code — that is a domain-level verdict-vocabulary decision, and `domain/registry.py`
+  is an already-shipped, already-tested module from F1. Open for an owner call: is the distinction
+  worth adding a state to an exhaustive mapping this doc's own row above just finished praising for
+  being exhaustive. **Since closed** (`081eab3` + `608775c`): the owner call was made — the
+  mapping gained the states, and the split was folded into Ternary instance 13.
+- **waxseal-fg4.45 — the ledger dimension does not raise τ.** The plan's Workstream F4 prose describes
+  wiring a configured `--liveness`/`--registry` check into `domain/separation.py`'s
+  `SeparationTopology` (a `ledger: bool` field) so it counts toward τ, the separation-degree number
+  `waxseal preflight`/`verify --pin` report (gap G1, above). F4 shipped the ledger check as an
+  independent `_Check` instead — the same shape `_anchor_check`/`_receipts_check` already have,
+  delivering faithful exit-2 CLI semantics — and stated the scope reduction explicitly rather than
+  silently narrowing it. An operator reading `τ (separation degree): N` today gets a number that does
+  not credit a configured on-chain check, even though `ledger-status`/`verify --liveness` are
+  genuinely checking something real; the gap is in the REPORTED COUNT, not in the underlying check. **Since closed** (`b63c461` + `83d51a2`): τ now credits a
+  declared ledger authority, and `preflight` prints the declared-vs-measured split.
+
+Neither gap makes any of section 3's three [Shipped] rows a false claim: the constructions work as
+described, tested against real anvil chains including through a real CLI subprocess (F5,
+[`tests/test_cli_ledger_e2e_anvil.py`](../../tests/test_cli_ledger_e2e_anvil.py)). Both gaps were about
+the EDGES of the shipped surface — a merged vocabulary state, an uncounted τ contribution — the exact
+shape [Written, unwired] ≠ [Shipped] exists to keep visible rather than let a ledger like this one
+smooth over.
 
 ## 6. What cannot become [Proved] here, and why
 

@@ -38,7 +38,8 @@ def checkpoint_output(path: Path, capsys: pytest.CaptureFixture[str]) -> dict[st
     # The command's inputs are exactly what `waxseal checkpoint` printed —
     # the round-trip is the contract, not an implementation detail.
     assert main(["checkpoint", str(path)]) == 0
-    return json.loads(capsys.readouterr().out)
+    result: dict[str, object] = json.loads(capsys.readouterr().out)
+    return result
 
 
 class TestConsistent:

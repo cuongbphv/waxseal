@@ -8,7 +8,7 @@ import pytest
 from waxseal import AuditLog
 from waxseal.domain.fingerprint import fingerprint
 from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash, header_frame
-from waxseal.domain.header import EntryHeader
+from waxseal.domain.header import Entry, EntryHeader
 from waxseal.domain.registry import VersionRegistry
 from waxseal.domain.verify import verify_chain
 
@@ -176,7 +176,11 @@ class TestDropRecorderSidecar:
         log.append(payload={"i": 0}, payload_type=PT)
         tmp_path.chmod(0o500)
         try:
-            ok = log.try_append(payload=object(), payload_type=PT)  # type: ignore[arg-type]
+            # unused-ignore is listed too: under `mypy --platform win32` the
+            # skip above makes this line unreachable, the arg-type error never
+            # fires, and a bare ignore turns into its own unused-ignore error
+            # (the documented mypy idiom for platform-dependent ignores).
+            ok = log.try_append(payload=object(), payload_type=PT)  # type: ignore[arg-type,unused-ignore]
         finally:
             tmp_path.chmod(0o700)
         assert ok is False  # try_append still fails open, never raises
@@ -264,9 +268,7 @@ class TestLp64v2IsTheWiredDefault:
 
         payload0 = b'{"i":0}'
 
-        def build_v1(seq: int, prev_hash: str) -> object:
-            from waxseal.domain.header import Entry
-
+        def build_v1(seq: int, prev_hash: str) -> Entry:
             header = EntryHeader(
                 seq=seq,
                 ts=TS,

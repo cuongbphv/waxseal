@@ -7,6 +7,7 @@ implementation fails loudly.
 
 import hashlib
 import struct
+from typing import Any
 
 from waxseal.domain.hashing import NULL, compute_entry_hash, header_frame, lp
 from waxseal.domain.header import EntryHeader
@@ -26,7 +27,7 @@ def manual_lp(value: str | None) -> bytes:
 
 
 def make_header(**overrides: object) -> EntryHeader:
-    fields: dict = {
+    fields: dict[str, Any] = {
         "seq": 0,
         "ts": "2026-08-21T06:00:00+00:00",
         "hash_version": "a" * 64,

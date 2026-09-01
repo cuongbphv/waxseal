@@ -183,7 +183,15 @@ class TestVerifyProofBundle:
         self, field: str, value: object
     ) -> None:
         bundle = build_proof_bundle(make_entries(4), 1)
-        result = verify_proof_bundle(replace(bundle, **{field: value}), REGISTRY)
+        # The mismatched types across this parametrize table (e.g. "root"
+        # given a bare str instead of a tuple[str, ...]) ARE the fixture: the
+        # test proves a structurally-wrong field is reported as
+        # "malformed_bundle" rather than crashing, so `field`/`value` cannot
+        # be well-typed for dataclasses.replace()'s per-field signature here.
+        result = verify_proof_bundle(
+            replace(bundle, **{field: value}),  # type: ignore[arg-type]
+            REGISTRY,
+        )
         assert not result.ok
         assert result.reason == "malformed_bundle"
 

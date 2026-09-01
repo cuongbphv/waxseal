@@ -1,0 +1,28 @@
+{
+  "FingerprintRegistry": {
+    "isRegistered(bytes32)": "27258b22",
+    "lookup(bytes32)": "f39ec1f7",
+    "register(bytes)": "82fbdc9c"
+  },
+  "AnchoringLiveness": {
+    "deadlineOf(bytes32)": "4acbede3",
+    "isDelinquent(bytes32)": "f06b6eae",
+    "lastSeen(bytes32)": "1abfe8e2",
+    "registerTrail(bytes32,address,uint64)": "257fb3fd",
+    "submit(bytes32,uint64,bytes32,bytes32,bytes,bytes32[])": "0d0d53d2",
+    "writerOf(bytes32)": "02e6e30d"
+  },
+  "BondedCheckpoints": {
+    "PROVER_SHARE_BPS()": "8dbd8d45",
+    "bondOf(address)": "72d2b6c0",
+    "burnedTotal()": "22fcc530",
+    "checkConsistency(bytes32,uint256,bytes32,uint256,bytes32[])": "734fef76",
+    "deposit()": "d0e30db0",
+    "proveEquivocation(bytes32,uint64,(uint64,bytes32,bytes32,bytes),(uint64,bytes32,bytes32,bytes))": "1698fa64",
+    "proveNonExtension(bytes32,(uint64,bytes32,bytes32,bytes),(uint64,bytes32,bytes32,bytes),(uint256,bytes32,bytes32[]),(uint256,bytes32,bytes32[]))": "d459a73d",
+    "requestWithdraw()": "b3423eec",
+    "traceConsistency(bytes32,uint256,bytes32,uint256,bytes32[])": "0d619ce0",
+    "withdraw()": "3ccfd60b",
+    "withdrawDelay()": "0288a39c"
+  }
+}

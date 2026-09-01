@@ -39,20 +39,51 @@ một chuỗi hash thuần đều tồn tại để tạo ra những bản sao n
 | Witness (SPEC 14) | một host khác | việc viết lại *và* split view |
 | Head đã ghim (SPEC 13) | verifier | việc viết lại phần lịch sử mà verifier này đã thấy |
 | Niêm phong forward-secure (SPEC 11) | keyfile đang tiến hoá | việc chèn và cắt đuôi, chừng nào người giữ khoá còn trung thực |
+| Checkpoint đã finalize trên ledger (0.1.5 Workstream F, mục 7) | các validator của chính chain đó | equivocation trên một prefix đã neo và đã finalize — không bao giờ là một lời nói dối mới, nhất quán nội tại, chỉ ký một lần |
+| Segment đã lưu trữ và khoá WORM (S3 Object Lock, `adapters/s3.py`, Workstream J1) | nhà cung cấp lưu trữ, chỉ ở chế độ COMPLIANCE | việc ghi đè hoặc xoá một segment đã niêm phong và đã lưu trữ — ngăn chặn, không phải phát hiện |
 
 "Proof" trên thực tế là một *tổ hợp*, và tổ hợp chỉ mạnh bằng mức phân tách yếu nhất của
 nó:
 
 1. Neo tới ít nhất hai thẩm quyền không chung một đơn vị vận hành.
 2. Giữ khoá niêm phong dưới một quyền quản trị khác với ứng dụng đang ghi trail.
-3. Đặt kho lưu trữ trên phương tiện write-once ở những nền tảng có hỗ trợ (chẳng hạn S3
-   Object Lock ở chế độ compliance). waxseal không cung cấp code nào cho việc này — đó là
-   cấu hình lưu trữ, và một thư viện không cưỡng chế được.
+3. Đặt kho lưu trữ trên phương tiện write-once ở những nền tảng có hỗ trợ. Kể từ 0.1.5
+   Workstream J1, waxseal cung cấp hỗ trợ trong `adapters/s3.py` cho S3 Object Lock trên
+   các segment đã niêm phong và đã lưu trữ — nhưng NHÀ VẬN HÀNH vẫn là bên cấu hình và khai
+   báo chế độ retention của bucket (COMPLIANCE hay GOVERNANCE); waxseal không đặt sẵn giá
+   trị mặc định nào, cùng kỷ luật mà `--tsa-ca-file` đã tuân theo cho RFC 3161. Chỉ chế độ
+   COMPLIANCE mới là một bảo đảm trước chính nhà vận hành của tài khoản đó (`WormStrength`,
+   `adapters/s3.py`) — GOVERNANCE vẫn có thể bị vượt qua bởi bất kỳ ai nắm quyền
+   `s3:BypassGovernanceRetention`.
 4. Ghim (pin), và giữ tệp pin ở nơi bên ghi trail không với tới được.
 
 Bỏ sót bất kỳ điều nào trong số này thì đòn tấn công tương ứng quay lại. Đó là hình dạng
 trung thực của câu trả lời: không phải một tính năng để bật lên, mà là một tập các phân
 tách phải duy trì.
+
+**Tamper-evident so với tamper-proof, nói cho chính xác.** Hai trong số các mục ở trên
+không còn là khát vọng nữa — Workstream F và Workstream J1 đã đưa chúng vào bản phát hành
+0.1.5 — nên từ vựng nay đã cố định ở khắp codebase này (CLAUDE.md, DESIGN.md §11):
+**Tamper-evident là khẳng định chính; "tamper-proof" chỉ luôn được dùng khi đã GIỚI HẠN
+PHẠM VI: prefix đã neo trên một ledger bên ngoài đã finalize, các segment đã lưu trữ và
+khoá WORM — không bao giờ là phần đuôi còn sống (live tail), không bao giờ là sự trung
+thực tại thời điểm ghi.** Hai giới hạn vẫn tồn tại qua cả hai cơ chế, do cấu trúc chứ không
+phải do ngân sách (DESIGN.md §11):
+
+1. **Sự trung thực tại thời điểm ghi.** Không hash nào ngăn được việc ghi một lời nói dối
+   hay bỏ sót một sự kiện tại thời điểm ghi. Tamper-proof ≠ truth-proof.
+2. **Phần đuôi còn sống (live tail).** Bất cứ thứ gì chưa được đưa ra ngoài — chưa neo,
+   chưa được xác nhận, chưa lưu trữ — đều viết lại được bởi một kẻ tấn công có quyền ghi.
+   Các cơ chế thu hẹp cửa sổ này; không cơ chế nào đóng nó lại hoàn toàn.
+
+Mục 7 nói rõ nửa phần ledger của điều này, theo từng trạng thái kẻ tấn công. Nửa phần WORM
+là `WormReport` của `adapters/s3.py` (`worm_locked` / `worm_unlocked` / `worm_unknown`,
+được `render_worm_state` hiển thị) — đã kiểm tra-và-khoá, đã kiểm tra-và-chưa-khoá, hoặc
+chưa đo — không bao giờ bị gộp lại thành một trong hai giá trị nhị phân (CLAUDE.md quy tắc
+5). `waxseal preflight` in ra, dưới dạng một cách chia prefix/tail có gắn nhãn, cơ chế nào
+trong hai cơ chế trên — nếu có — mà lần chạy này xác nhận được là chặn trên một prefix bất
+biến, và nói rõ điều đó mà không mở bất kỳ kết nối mạng nào để tự mình kiểm tra cơ chế đó
+(mục 5).
 
 ---
 
@@ -167,8 +198,11 @@ Hai trong số đó đáng gọi tên vì bản phát hành trước hoàn toàn
   verifier nào giữ deadline trong trust domain của chính nó: im lặng quá hạn trở thành
   một finding được báo cáo thay vì một sự vắng mặt của finding. Điều này **không** làm
   cho sự im lặng trở nên phân xử được công khai — muốn vậy cần một bên thứ ba giữ
-  deadline, và hợp đồng liveness on-chain phác trong `docs/paper/` vẫn là thiết kế,
-  chưa được xây.
+  deadline. Kể từ 0.1.5, bên thứ ba đó có thể là hợp đồng liveness on-chain mà chính văn
+  bản này từng gọi là "phác trong `docs/paper/`, đã thiết kế, chưa được xây" — nay nó đã
+  được xây (mục 7 bên dưới); một bên thứ ba KHÔNG LIÊN QUAN có thể đọc `waxseal
+  ledger-status` đối chiếu với hợp đồng đó mà không cần sự hợp tác của nhà vận hành, khép
+  lại lỗ hổng mà đoạn này từng gọi là còn để ngỏ.
 
 ### Chứng minh được là bất khả nếu không có kênh bên ngoài
 
@@ -214,28 +248,43 @@ forward-secure giới hạn điều đó, và chỉ khi chúng nằm dưới m�
 | trail + keyfile | có, ở cục bộ | neo: một bản ghi bên ngoài về root cũ |
 | trail + keyfile + `.anchors` | có, ở cục bộ | anchor bên ngoài: TSA / calendar / witness giữ bản sao của riêng nó |
 | trail + keyfile + `.sealagg` | trước đây là có (replay + cắt đuôi) | ràng buộc aggregate trong một checkpoint đã neo (SPEC 15) |
-| toàn bộ tệp cục bộ + anchor sink | có | không gì mà thư viện này đưa ra được |
-| toàn bộ tệp cục bộ + mọi witness | có | không gì — đây là trường hợp thông đồng |
+| toàn bộ tệp cục bộ + anchor sink | có, cho phần đuôi còn sống (live tail) và bất cứ thứ gì chưa từng được neo | không gì mà thư viện này đưa ra được ở đó; ngoại lệ duy nhất là prefix đã neo trên một ledger bên ngoài đã finalize (0.1.5 Workstream F, mục 7) — lịch sử đã được xác nhận trong prefix đó không thể kể lại khác đi mà không tạo ra một bằng chứng equivocation có thể bị slash (DESIGN.md §11) |
+| toàn bộ tệp cục bộ + mọi witness | có, cho phần đuôi còn sống (live tail) và bất cứ thứ gì chưa từng được neo | không gì ở đó — đây là trường hợp thông đồng; ngoại lệ ledger-đã-finalize ở trên vẫn giữ nguyên, vì các validator của chính ledger nằm dưới một quyền quản trị khác với bất kỳ witness nào, nên sự thông đồng của witness không chạm tới được nó |
 
-Dòng thay đổi trong bản phát hành này là dòng thứ tư. SPEC 11 có ghi lại một rủi ro còn
-lại: kẻ tấn công cắt đuôi trail có thể chép một `.sealagg` cũ hơn trở lại chỗ cũ, và mọi
-phép kiểm tra cục bộ — `verify`, `verify_attestations`, kể cả aggregate — đều đồng ý, vì
-tất cả chúng đọc cùng những tệp đã bị viết lại. Việc ràng buộc cam kết aggregate vào bên
-trong checkpoint đã neo đưa tuyên bố đó ra ngoài tầm với của kẻ tấn công: anchor vẫn nói
-năm dòng đã được gấp vào, còn trail bây giờ chỉ giữ hai.
+Ba dòng thay đổi trong bản phát hành này: dòng thứ tư, và hai dòng cuối. SPEC 11 có ghi lại
+một rủi ro còn lại cho dòng thứ tư: kẻ tấn công cắt đuôi trail có thể chép một `.sealagg` cũ
+hơn trở lại chỗ cũ, và mọi phép kiểm tra cục bộ — `verify`, `verify_attestations`, kể cả
+aggregate — đều đồng ý, vì tất cả chúng đọc cùng những tệp đã bị viết lại. Việc ràng buộc
+cam kết aggregate vào bên trong checkpoint đã neo đưa tuyên bố đó ra ngoài tầm với của kẻ
+tấn công: anchor vẫn nói năm dòng đã được gấp vào, còn trail bây giờ chỉ giữ hai.
 (`tests/test_anchored_aggregate_log.py` mang theo falsifiability receipt: bản giả mạo qua
 được `verify()` và `verify_attestations()` và chỉ thất bại khi đối chiếu với anchor.)
+
+Hai dòng cuối mang theo đúng một ngoại lệ mà DESIGN.md §11 ghi lại — không hơn không kém.
+Ngoại lệ đó bị giới hạn phạm vi theo ba cách cùng lúc: giới hạn ở PREFIX đã được neo và đã
+finalize trước khi kẻ tấn công này xuất hiện (không bao giờ là live tail được ghi sau đó);
+giới hạn ở một writer EQUIVOCATE để che giấu việc viết lại (bảng của chính mục 7: một lời
+nói dối mới, nhất quán nội tại, chỉ ký một lần thì không tạo ra mâu thuẫn nào để
+`BondedCheckpoints.proveEquivocation` bắt được); và giới hạn ở việc phát hiện, không bao giờ
+là khôi phục (các byte của chính trail vẫn là bất cứ thứ gì kẻ tấn công đã viết cục bộ —
+ledger chỉ cho phép một bên thứ ba CHỨNG MINH rằng điều đó mâu thuẫn với những gì nó đã
+finalize). `waxseal preflight` (chính cái thang của mục 5, `domain/preflight.py`) in ra
+ngoại lệ này dưới dạng một cách chia prefix/tail có gắn nhãn thay vì gộp nó vào các bậc
+PRESENT/ABSENT của cái thang, chính là để nó không thể bị đọc thành việc nâng bậc 5 hay bậc
+6.
 
 Thứ được cam kết là một *commitment*,
 `sha256(prefix || u64be(2) || lp(epoch) || lp(agg))`, không bao giờ là bản thân accumulator
 — công bố các accumulator trung gian sẽ trao cho kẻ tấn công cắt đuôi đúng giá trị mà lược
 đồ cấm lưu lại.
 
-**Yêu cầu vận hành, nói thẳng:** khoá niêm phong, anchor sink và witness mỗi thứ đều phải
-nằm dưới một quyền quản trị *khác* với tiến trình ghi trail. Nếu cùng một đội, cùng một
-service account, hoặc cùng một host bị chiếm kiểm soát cả hai phía, thì cơ chế ghi lại cuộc
-tấn công chứ không phát hiện ra nó. Không cờ cấu hình nào thay thế được điều này, và
-waxseal không kiểm tra hộ bạn được.
+**Yêu cầu vận hành, nói thẳng:** khoá niêm phong, anchor sink, witness và ledger mỗi thứ
+đều phải nằm dưới một quyền quản trị *khác* với tiến trình ghi trail. Nếu cùng một đội,
+cùng một service account, hoặc cùng một host bị chiếm kiểm soát cả hai phía, thì cơ chế ghi
+lại cuộc tấn công chứ không phát hiện ra nó. Không cờ cấu hình nào thay thế được điều này,
+và waxseal không kiểm tra hộ bạn được (`_OPERATIONAL_REQUIREMENT` trong
+`domain/preflight.py` lặp lại đúng câu này để `waxseal preflight` in ra, nên hai bản sao
+không thể trôi lệch nhau).
 
 ---
 
@@ -287,3 +336,66 @@ Ba câu hỏi quyết định báo cáo đó đáng giá tới đâu, và báo c
 3. **Những kiểm tra không được thực hiện thì phủ những gì?** Một kiểm tra vắng mặt khỏi báo
    cáo là kiểm tra không được thực hiện, và việc vắng mặt một kiểm tra không bao giờ là một
    lần đạt — báo cáo gắn nhãn cho từng cái thay vì bỏ qua chúng.
+
+---
+
+## 7. Lớp ledger on-chain (0.1.5, Workstream F)
+
+**Câu hỏi:** việc neo vào một smart contract có làm thay đổi ranh giới tin cậy mà phần còn
+lại của tài liệu này vạch ra không?
+
+**Trả lời: không. Ba hợp đồng này là một loại bản sao bên ngoài THỨ BA, gia nhập bảng của
+mục 1, và mỗi hợp đồng đều kế thừa CÙNG một khẳng định đã giới hạn phạm vi: chúng phát hiện
+việc viết lại và equivocation trên chính những khẳng định ĐÃ KÝ của writer, không bao giờ
+phát hiện sự thiếu trung thực tại thời điểm ghi.** Học thuyết vẫn là học thuyết của
+DESIGN.md §11, được nhắc lại ở đây cho lớp làm nó trở nên cụ thể: ranh giới trusted-writer
+vẫn áp dụng đầy đủ. Một writer đã bị chiếm vẫn có thể append bất cứ thứ gì vào trail rồi ký
+một checkpoint lên trên đó; một hợp đồng chỉ bao giờ thấy các head đã ký thì chỉ so sánh
+được điều CÙNG một signer đã khẳng định ở hai thời điểm hoặc hai vị trí khác nhau, và không
+gì hơn.
+
+| Hợp đồng | Nó bổ sung gì vào bảng của mục 1 | Nó KHÔNG làm gì |
+|---|---|---|
+| `AnchoringLiveness` | một bản sao trên ledger đã finalize của checkpoint đã ký mới nhất của WRITER, đọc được bởi một bên thứ ba không liên quan mà không cần sự hợp tác của nhà vận hành (khép lại lỗ hổng mà mục 4 từng gọi là còn để ngỏ) | khẳng định rằng mọi entry giữa hai checkpoint là trung thực; phát hiện một writer vẫn tiếp tục anchor trong khi âm thầm sửa thứ nó đang anchor |
+| `FingerprintRegistry` | một bản công bố append-only của một header descriptor, nên một registry CỤC BỘ bị đầu độc giờ cần hoặc một collision SHA-256 hoặc quyền kiểm soát chain thì mới lọt qua mà không bị phát hiện | cấp phép cho build này TÍNH LẠI một dòng dưới một fingerprint mà nó đồng ý là có thật, theo tên gọi; đồng ý về một cái tên không phải là đồng ý về một hasher (RFC 6962 §4.6, chính học thuyết của `domain/registry.py`) |
+| `BondedCheckpoints` | một CÁI GIÁ đặt lên một kiểu bất trung thực cụ thể — ký hai checkpoint khác nhau ở cùng một vị trí (equivocation) | khiến equivocation trở nên bất khả; phát hiện một writer không bao giờ tự mâu thuẫn (bỏ sót, bịa đặt, hay sửa âm thầm mà không bao giờ tạo ra hai head đã ký mâu thuẫn nhau); hoặc bảo vệ một writer có bond đáng giá thấp hơn lời nói dối |
+
+Mở rộng bảng của mục 5 với trạng thái mà lớp này đưa vào:
+
+| Kẻ tấn công nắm giữ | Viết lại có được không? | Thứ chặn lại |
+|---|---|---|
+| khoá ký của writer, chưa đặt bond | có, tự do | không gì ở đây — `AnchoringLiveness` chỉ phát hiện SỰ IM LẶNG (writer ngừng anchor), không bao giờ phát hiện một việc viết lại đang sống, tự nhất quán; các dòng gốc của mục 5 không đổi |
+| khoá ký của writer, đã đặt bond, và nó EQUIVOCATE để che giấu việc viết lại | bị bắt ngay khi có ai đó nắm được cả hai head đã ký | `BondedCheckpoints.proveEquivocation` — bằng chứng tích cực tự đủ, không cần thêm ngữ cảnh nào khác |
+| khoá ký của writer, đã đặt bond, và nó không bao giờ equivocate (một lời nói dối nhất quán, chỉ ký một lần) | có | không gì — hợp đồng không bao giờ thấy một mâu thuẫn để chứng minh, vì không có mâu thuẫn nào cả |
+
+### Những bề mặt phát hiện mới mà lớp này thêm vào
+
+- **`LedgerDisagreement`** (`ports/ledger.py`) là một loại finding mới, trực giao với phán
+  quyết chuỗi `ok`/`broken`/`unverifiable`: hai hay nhiều RPC endpoint trả lời CÙNG một câu
+  hỏi về trạng thái on-chain mà không khớp nhau. Đây là một quan sát có hình dạng eclipse về
+  TRANSPORT, không phải một phán quyết về trail, và client từ chối chọn ra một bên thắng —
+  báo cáo cặp không khớp nhau (quy tắc 6) là toàn bộ phản hồi. Rủi ro còn lại, kế thừa từ
+  phần thảo luận về eclipse ở mục 4: hai RPC endpoint là một ngưỡng sàn do nhà vận hành cấu
+  hình, không phải bằng chứng của tính độc lập. Hai provider cùng proxy về một node upstream
+  chung thì hoàn toàn chưa nâng τ lên chút nào, và waxseal không thể phát hiện điều đó từ
+  phía client cũng như nó không thể kiểm chứng ai đang vận hành một witness.
+- **Revert như một câu trả lời ba chiều.** `AnchoringLiveness.isDelinquent`/`.lastSeen`
+  REVERT đối với một trail chưa đăng ký hoặc chưa từng được neo, thay vì nói dối bằng
+  `false` — `bool` chỉ có hai giá trị còn câu trả lời trung thực thì có ba giá trị. Adapter
+  (`adapters/evm.py`) đọc một revert ĐÃ NHẬN DIỆN ĐƯỢC như một sự vắng mặt đã đo (chain đã
+  trả lời, một cách xác định, rằng nó không giữ gì cả), một revert CHƯA NHẬN DIỆN ĐƯỢC như
+  chưa đo nhưng có GẮN NHÃN bằng selector bốn byte mà nhà vận hành có thể tra cứu, và một
+  lỗi mạng thật sự như không tới được (unreachable) mà không mang nhãn nào cả. Trên đường
+  ghi (WRITE path), hình dạng đó đảo ngược lại: một giao dịch bị hợp đồng từ chối là một sự
+  từ chối TÍCH CỰC — hợp đồng đã trả lời không — không bao giờ bị gộp vào "không hỏi được".
+  Phần Ledger layer của SPEC.md định nghĩa toàn bộ ánh xạ đó; danh sách Named-principle của
+  `CLAUDE.md` ghi lại các trường hợp 11-13 cho ba giá trị ternary do hợp đồng hậu thuẫn mà
+  lớp này tạo ra (liveness, bond, registry), và ghi lại vì sao `LedgerDisagreement` cùng
+  khuôn mẫu revert được tài liệu hoá ở đây và trong SPEC.md thay vì được tính là instance
+  thứ tư/thứ năm của Named-principle: không cái nào trong hai cái đó là một trạng thái
+  chưa-đo bị gộp vào một nhị phân theo cách mà collapse theorem mô tả; cả hai đều là những
+  sự thật đã đo về TRANSPORT hoặc kết quả GHI, nằm bên dưới ba ternary kể trên.
+
+Tham chiếu chéo: ba dòng on-chain ở mục 3 của `docs/paper/conformance.md` ghi lại những gì
+đã ship và trích dẫn các test; phần Ledger layer của SPEC.md là hợp đồng ở mức byte và mã
+exit.

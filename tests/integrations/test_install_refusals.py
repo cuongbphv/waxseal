@@ -21,7 +21,7 @@ from waxseal.integrations._install import install
 
 class TestHermesGatewayRefusal:
     def test_edited_handler_is_kept_and_the_discovery_notice_is_withheld(
-        self, tmp_path: Path, capsys
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         assert install("hermes-gateway", tmp_path, force=False) == 0
         handler = tmp_path / "hooks" / "waxseal-audit" / "handler.py"
@@ -34,7 +34,11 @@ class TestHermesGatewayRefusal:
         assert "--force" in out
         assert "next startup" not in out
 
-    def test_force_completes_what_the_refusal_stopped(self, tmp_path: Path, capsys) -> None:
+    def test_force_completes_what_the_refusal_stopped(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
         install("hermes-gateway", tmp_path, force=False)
         handler = tmp_path / "hooks" / "waxseal-audit" / "handler.py"
         handler.write_text("# locally patched\n")
@@ -48,7 +52,7 @@ class TestHermesGatewayRefusal:
 class TestStdinHookShimRefusal:
     @pytest.mark.parametrize("target", ["claude-code", "codex", "cursor"])
     def test_edited_shim_is_kept_and_no_config_snippet_is_printed(
-        self, target: str, tmp_path: Path, capsys
+        self, target: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         assert install(target, tmp_path, force=False) == 0
         shim = tmp_path / "hooks" / "waxseal_hook.py"

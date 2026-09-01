@@ -1,0 +1,42 @@
+{
+  "tree": {
+    "count": 15,
+    "chunks": 1,
+    "chunkSize": 16
+  },
+  "consistency": {
+    "count": 213,
+    "chunks": 14,
+    "chunkSize": 16
+  },
+  "inclusion": {
+    "count": 37,
+    "chunks": 3,
+    "chunkSize": 16
+  },
+  "checkpoint": {
+    "count": 5,
+    "chunks": 1,
+    "chunkSize": 16
+  },
+  "fingerprint": {
+    "count": 2,
+    "chunks": 1,
+    "chunkSize": 16
+  },
+  "heads": {
+    "count": 5,
+    "chunks": 1,
+    "chunkSize": 16
+  },
+  "fork": {
+    "count": 1,
+    "chunks": 1,
+    "chunkSize": 16
+  },
+  "nonextension": {
+    "count": 1,
+    "chunks": 1,
+    "chunkSize": 16
+  }
+}

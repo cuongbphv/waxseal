@@ -7,6 +7,10 @@ tool runs:
     from waxseal.integrations.langchain import WaxsealCallbackHandler
     agent.invoke(input, config={"callbacks": [WaxsealCallbackHandler(trail)]})
 
+The trail argument is optional: with none given, `WAXSEAL_TRAIL` is honoured,
+and `DEFAULT_TRAIL` is the last resort. An argument passed here always wins
+over the environment.
+
 Contract verified against langchain-core 1.6.0 (installed source, 2026-08-21):
 
 - on_tool_start(serialized, input_str, *, run_id, parent_run_id=None,
@@ -33,6 +37,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations._trail import home_default, resolve_trail
 
 # _sanitize redacts BEFORE clipping: a clip can split a secret across the
 # boundary (a PEM losing its END marker stops matching) and land it on disk.
@@ -43,6 +48,10 @@ PAYLOAD_TYPE = "application/vnd.langchain.tool-event+json"
 # Tool outputs can be megabytes (retrieved documents, SQL dumps). Clip stored
 # fields, visibly, because silent truncation would read as "the full output".
 MAX_FIELD_CHARS = 4096
+
+#: Where this integration writes when the caller names no path and
+#: `WAXSEAL_TRAIL` is unset.
+DEFAULT_TRAIL = "~/.waxseal/langchain-trail.jsonl"
 
 
 def _clip(text: str) -> str:
@@ -69,8 +78,19 @@ class WaxsealCallbackHandler(BaseCallbackHandler):
     # audit observer stays fail-open, and labels its own drops instead.
     raise_error: bool = False
 
-    def __init__(self, trail: Path | str = "~/.waxseal/langchain-trail.jsonl") -> None:
-        self._trail = Path(trail).expanduser()
+    def __init__(self, trail: Path | str | None = None) -> None:
+        """``trail`` wins over `WAXSEAL_TRAIL`, which wins over
+        `DEFAULT_TRAIL`. The default is a None sentinel rather than the path
+        itself so "the caller passed nothing" stays distinguishable from
+        "the caller passed the default path" — without that distinction
+        there is nowhere for the environment rung to sit, and an operator's
+        `WAXSEAL_TRAIL` would be silently ignored by this integration while
+        the stdin hooks honoured it.
+        """
+        # home_default(), not Path(...).expanduser(): the last rung has to
+        # honour HOME, which ntpath.expanduser ignores in favour of USERPROFILE
+        # (waxseal-fg4.20; the profile split is documented on home_default).
+        self._trail = resolve_trail(trail, default=lambda: home_default(DEFAULT_TRAIL))
         self._log: AuditLog | None = None
 
     def _append(self, payload: dict[str, Any]) -> None:

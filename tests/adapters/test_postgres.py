@@ -2,20 +2,33 @@
 
 Unit tests run against a scripted fake DBAPI connection that checks the
 serialization PROTOCOL (advisory xact lock taken before the tail read, insert
-in the same transaction, %s paramstyle). The TestRealPostgres suite runs only
-when WAXSEAL_PG_DSN is set (psycopg ships in the dev extra), e.g. with a
-throwaway server:
+in the same transaction, %s paramstyle). TestRealPostgres runs against a real
+server (psycopg ships in the dev extra), started by
+`docker compose -f server/docker-compose.yml up -d postgres`.
 
-    docker run -d --name waxseal-pg -e POSTGRES_PASSWORD=waxseal \
-      -e POSTGRES_DB=waxseal -p 5433:5432 postgres:16
-    WAXSEAL_PG_DSN="postgresql://postgres:waxseal@localhost:5433/waxseal" \
-      uv run pytest tests/adapters/test_postgres.py
+These eleven tests skipped on every local run for a year not because no
+database was there, but because they looked for WAXSEAL_PG_DSN while the
+server suite next door connected to its own default and passed 42 tests
+against the same live server (waxseal-fg4.2, measured 31/08/2026). A skip
+condition that asks "is an env var set" answers a different question from
+"is a database reachable", and the difference was eleven tamper-detection
+tests reading as green. The default DSN below is the server's, so one
+running database serves both suites; WAXSEAL_PG_DSN still overrides it.
 
-Each real test drops and recreates the table for isolation — point the DSN
-at a disposable database, never a production one.
+Reachability, not configuration, decides. When no database answers, the skip
+names the DSN it tried and calls the count UNMEASURED — tests/conftest.py
+prints that as its own run-summary line, because "11 skipped" among 2400
+passes is exactly the collapse CLAUDE.md rule 5 forbids.
+
+Each test gets a fresh schema and drops it afterwards, so pointing the
+default at a shared development database cannot touch anything in `public`.
 """
 
 import os
+import uuid
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -23,15 +36,15 @@ from tests.adapters.backend_contract import BackendContractTests
 from tests.adapters.test_jsonl import build_entry
 from waxseal import VersionRegistry, verify_chain
 from waxseal.adapters.postgres import ADVISORY_LOCK_KEY, PostgresBackend
-from waxseal.domain.header import GENESIS_PREV_HASH
+from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 
 
 class FakeCursor:
     def __init__(self, conn: "FakeConn"):
         self._conn = conn
-        self._result: list[tuple] = []
+        self._result: list[tuple[object, ...]] = []
 
-    def execute(self, sql: str, params: tuple = ()) -> None:
+    def execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
         self._conn.statements.append((sql.strip(), params))
         norm = " ".join(sql.split()).lower()
         if "pg_advisory_xact_lock" in norm:
@@ -53,10 +66,10 @@ class FakeCursor:
         else:
             raise AssertionError(f"unexpected SQL: {sql}")
 
-    def fetchone(self):
+    def fetchone(self) -> tuple[object, ...] | None:
         return self._result[0] if self._result else None
 
-    def fetchall(self):
+    def fetchall(self) -> list[tuple[object, ...]]:
         return list(self._result)
 
     def close(self) -> None:
@@ -64,15 +77,15 @@ class FakeCursor:
 
 
 class FakeStore:
-    def __init__(self):
-        self.rows: list[tuple] = []
+    def __init__(self) -> None:
+        self.rows: list[tuple[object, ...]] = []
 
 
 class FakeConn:
     def __init__(self, store: FakeStore):
         self.store = store
-        self.statements: list[tuple[str, tuple]] = []
-        self.pending: list[tuple] = []
+        self.statements: list[tuple[str, tuple[object, ...]]] = []
+        self.pending: list[tuple[object, ...]] = []
         self.locked = False
         self.closed = False
 
@@ -90,6 +103,14 @@ class FakeConn:
 
     def close(self) -> None:
         self.closed = True
+
+
+def _conns(backend: PostgresBackend) -> list[FakeConn]:
+    """The `backend`/`store` fixtures below stash their scripted FakeConns
+    here for the protocol assertions in TestProtocol; PostgresBackend itself
+    declares no such attribute (this is test-only introspection, never a
+    production surface)."""
+    return backend._test_conns  # type: ignore[attr-defined,no-any-return]
 
 
 @pytest.fixture()
@@ -136,7 +157,7 @@ class TestProtocol:
     ) -> None:
         # FakeCursor asserts lock-before-read/insert; this drives the flow.
         backend.append(lambda seq, prev: build_entry(seq, prev))
-        stmts = [s for conn in backend._test_conns for s, _ in conn.statements]
+        stmts = [s for conn in _conns(backend) for s, _ in conn.statements]
         lock_idx = next(i for i, s in enumerate(stmts) if "pg_advisory_xact_lock" in s)
         tail_idx = next(i for i, s in enumerate(stmts) if "ORDER BY seq DESC" in s)
         assert lock_idx < tail_idx
@@ -144,7 +165,7 @@ class TestProtocol:
     def test_advisory_lock_uses_the_documented_key(self, backend: PostgresBackend) -> None:
         backend.append(lambda seq, prev: build_entry(seq, prev))
         lock_params = [
-            p for conn in backend._test_conns
+            p for conn in _conns(backend)
             for s, p in conn.statements if "pg_advisory_xact_lock" in s
         ]
         assert lock_params == [(ADVISORY_LOCK_KEY,)]
@@ -152,7 +173,7 @@ class TestProtocol:
     def test_first_append_gets_seq_0_and_genesis_prev(self, backend: PostgresBackend) -> None:
         seen: list[tuple[int, str]] = []
 
-        def build(seq: int, prev: str):
+        def build(seq: int, prev: str) -> Entry:
             seen.append((seq, prev))
             return build_entry(seq, prev)
 
@@ -167,10 +188,10 @@ class TestProtocol:
     def test_connections_are_closed(self, backend: PostgresBackend) -> None:
         backend.append(lambda seq, prev: build_entry(seq, prev))
         list(backend.entries())
-        assert all(c.closed for c in backend._test_conns)
+        assert all(c.closed for c in _conns(backend))
 
     def test_failed_append_rolls_back(self, backend: PostgresBackend, store: FakeStore) -> None:
-        def bad_build(seq: int, prev: str):
+        def bad_build(seq: int, prev: str) -> Entry:
             raise RuntimeError("builder exploded")
 
         with pytest.raises(RuntimeError, match="builder exploded"):
@@ -178,33 +199,85 @@ class TestProtocol:
         assert store.rows == []
 
 
+# The server's own default (server/tests/test_operators_postgres.py and
+# server/docker-compose.yml). Shared on purpose: one `docker compose up`
+# measures both suites, which is what the wheel's env-var-only condition
+# silently opted out of.
+DEFAULT_DSN = "postgresql://waxseal:waxseal-dev@127.0.0.1:55432/waxseal"
+DSN = os.environ.get("WAXSEAL_PG_DSN", DEFAULT_DSN)
+
+# tests/conftest.py keys its run-summary line on this word. A skip that only
+# says "skipped" is indistinguishable from a pass in the totals line.
+UNMEASURED = "UNMEASURED"
+
+
+def _postgres_reachable(dsn: str) -> bool:
+    """Whether a server answers at `dsn`. Never raises: any failure means
+    "not available", which is a labelled absence and never a pass."""
+    try:
+        import psycopg
+    except ImportError:
+        return False
+    try:
+        with psycopg.connect(dsn, connect_timeout=3) as conn:
+            conn.execute("SELECT 1")
+    except Exception:  # noqa: BLE001 - every failure is the same answer here
+        return False
+    return True
+
+
+PG_REACHABLE = _postgres_reachable(DSN)
+PG_SKIP_REASON = (
+    f"{UNMEASURED}: no PostgreSQL answered at {DSN}, so the real-backend "
+    "tamper-detection tests did not run and made no claim either way — start one with "
+    "`docker compose -f server/docker-compose.yml up -d postgres`, or set WAXSEAL_PG_DSN"
+)
+
+_active_schema: str | None = None
+
+
 @pytest.fixture()
-def pg_backend() -> "PostgresBackend":
-    """Fresh backend against the real server; drops the table for isolation."""
+def pg_backend() -> Iterator[PostgresBackend]:
+    """Fresh backend in a schema of its own, dropped afterwards.
+
+    A schema per test rather than a DROP TABLE in a shared one: the default
+    DSN now points at a database the server also uses, and a test suite must
+    not be able to delete anything an operator put there.
+    """
+    global _active_schema
     psycopg = pytest.importorskip("psycopg")
-    dsn = os.environ["WAXSEAL_PG_DSN"]
+    schema = f"waxseal_wheel_test_{uuid.uuid4().hex[:12]}"
 
-    def connect():
-        return psycopg.connect(dsn)
+    def connect() -> Any:
+        conn = psycopg.connect(DSN)
+        conn.execute(f'SET search_path TO "{schema}"')
+        return conn
 
-    with connect() as conn:
-        conn.execute("DROP TABLE IF EXISTS waxseal_entries")
-        conn.commit()
-    return PostgresBackend(connect)
+    with psycopg.connect(DSN) as admin:
+        admin.execute(f'CREATE SCHEMA "{schema}"')
+        admin.commit()
+    _active_schema = schema
+    try:
+        yield PostgresBackend(connect)
+    finally:
+        _active_schema = None
+        with psycopg.connect(DSN) as admin:
+            admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+            admin.commit()
 
 
-def pg_execute(sql: str, params: tuple = ()) -> None:
+def pg_execute(sql: str, params: tuple[object, ...] = ()) -> None:
+    """Tamper with the table out of band, in the schema the active fixture made."""
     import psycopg
 
-    with psycopg.connect(os.environ["WAXSEAL_PG_DSN"]) as conn:
+    assert _active_schema is not None, "pg_execute needs the pg_backend fixture"
+    with psycopg.connect(DSN) as conn:
+        conn.execute(f'SET search_path TO "{_active_schema}"')
         conn.execute(sql, params)
         conn.commit()
 
 
-@pytest.mark.skipif(
-    not os.environ.get("WAXSEAL_PG_DSN"),
-    reason="set WAXSEAL_PG_DSN to run against a real Postgres",
-)
+@pytest.mark.skipif(not PG_REACHABLE, reason=PG_SKIP_REASON)
 class TestRealPostgres:
     # -- happy path -----------------------------------------------------------
     def test_append_and_verify(self, pg_backend: PostgresBackend) -> None:
@@ -220,13 +293,20 @@ class TestRealPostgres:
         # high bytes, and the empty payload included (b"" is a payload; only
         # None is refused).
         payloads = [b"", b"\x00", b"\x00binary\xff\xfe", bytes(range(256))]
-        for p in payloads:
-            pg_backend.append(lambda seq, prev, p=p: build_entry(seq, prev, p))
+        for payload_bytes in payloads:
+            # A plain lambda's default-arg params can't be annotated, and
+            # mypy cannot infer them positionally against the two-arg
+            # Callable[[int, str], Entry] PostgresBackend.append() expects
+            # (misc: "Cannot infer type of lambda").
+            def build(seq: int, prev: str, p: bytes = payload_bytes) -> Entry:
+                return build_entry(seq, prev, p)
+
+            pg_backend.append(build)
         assert [e.payload for e in pg_backend.entries()] == payloads
         assert verify_chain(pg_backend.entries(), VersionRegistry()).ok
 
     def test_parity_with_jsonl_and_sqlite(
-        self, pg_backend: PostgresBackend, tmp_path
+        self, pg_backend: PostgresBackend, tmp_path: Path
     ) -> None:
         # Same payload must yield the same entry_hash byte-for-byte on every
         # backend — the chain must not depend on where it is stored.
@@ -357,9 +437,11 @@ class TestRealPostgres:
         def worker(worker_id: int) -> None:
             for i in range(per_thread):
                 payload = f'{{"w": {worker_id}, "i": {i}}}'.encode()
-                pg_backend.append(
-                    lambda seq, prev, p=payload: build_entry(seq, prev, p)
-                )
+
+                def build(seq: int, prev: str, p: bytes = payload) -> Entry:
+                    return build_entry(seq, prev, p)
+
+                pg_backend.append(build)
 
         with ThreadPoolExecutor(max_workers=threads) as pool:
             list(pool.map(worker, range(threads)))
@@ -374,7 +456,7 @@ class TestRealPostgres:
     def test_failed_append_rolls_back_and_releases_lock(
         self, pg_backend: PostgresBackend
     ) -> None:
-        def bad_build(seq: int, prev: str):
+        def bad_build(seq: int, prev: str) -> Entry:
             raise RuntimeError("builder exploded")
 
         with pytest.raises(RuntimeError, match="builder exploded"):

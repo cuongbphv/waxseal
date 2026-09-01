@@ -5,6 +5,706 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-09-01
+
+### Added
+
+- **Sealed segments joined the frozen public API**: `open_segmented`, `verify_segments`,
+  `project_slug`, and the types a caller needs to use them (`SegmentRead`, `SegmentState`,
+  `SegmentsResult`) are now importable from `waxseal` directly. Promoted by owner decision
+  once the shape had two real consumers (the hook integrations and the chain server) —
+  the same "stays behind its module until something actually needs it here" bar the
+  decision-schema exports were held to. `TestPublicApiFrozen` updated in the same commit,
+  with the rationale in the test.
+
+- **`server/`: a self-hosted chain server, witness, and public read point, with a
+  read-only web portal** (0.1.5 plan, Workstream I). It is a separate application, not
+  part of the wheel: CLAUDE.md rule 1 constrains the wheel's `[project] dependencies`,
+  and `server/` carries its own stack (FastAPI + uvicorn) on the same footing as
+  `contracts/`. Nothing in it is packaged into `waxseal`.
+
+  The split inside it is the load-bearing decision. The **write** path uses waxseal as a
+  library: a posted envelope goes to `JSONLBackend.append`, whose builder runs while the
+  backend's own file lock is held, so REMOTE.md section 4's compare-and-set is atomic
+  with the append rather than a check racing beside it. Every **read/verify** surface
+  shells out to `python -m waxseal.cli` and reports its exit code, because the CLI is the
+  stable contract and a server computing verdicts of its own would be a second opinion
+  for operators to reconcile. The server never re-derives an `entry_hash`, and no route
+  edits, deletes, reorders or repairs anything — a test enumerates every mutating route in
+  the OpenAPI schema and fails if a third one appears.
+
+  Three authorities are kept apart: the chain API (`WAXSEAL_API_KEY`), the witness
+  (`WAXSEAL_WITNESS_API_KEY`, and the chain key is refused there — REMOTE.md section 8),
+  and a credential-free public read point with no write route on it at all. That last one
+  is the mirror-node pattern from Workstream G4, adopted as architecture rather than as a
+  permission bit.
+
+- **The server maintains its own receipt chain** (REMOTE.md section 10, frame from
+  SPEC.md section 19): a running hash over what it has acknowledged, durable across
+  restarts, returned as `receipt_seq`/`receipt_head` on every `201`. It is published for
+  anyone to check without a credential — the raw records, the server's own
+  recomputation, and a **cross-check against the stored trail** — because a receipt chain
+  only the server can evaluate is a promise rather than evidence.
+
+  The cross-check is the half that earns the feature. Recomputing the log asks whether the
+  acknowledgments are internally consistent, and stays `ok` after an edit to the *trail*
+  because the log was not touched. The cross-check asks whether entry `seq` still carries
+  the hash that was acknowledged for it, which is what catches a **self-consistent** local
+  rewrite — one that recomputes `entry_hash` so plain `verify` passes. The receipt is the
+  memory the rewriter does not hold. Reasons are SPEC.md section 19's `receipt_mismatch`
+  and `receipt_beyond_head`, and the honest limit is section 19's too: a rewrite that
+  curates both sides passes both checks.
+
+- **Imported trails.** Upload a foreign `.jsonl`/`.db`/`.sqlite` trail and the server
+  verifies it and shows the verdict. The stored copy is `chmod 0400` and lives in its own
+  id namespace, so no chain route can address it and no append path can reach it.
+
+- **Vue 3 + Vite web portal** in `server/web/`, built to `waxseal_server/static`, styled
+  to the delivered design. (The design sources — the `.dc.html` mockup, its reference
+  screenshots, and `DESIGN-apple.md` — live in the repository owner's untracked `.docs/`
+  and are deliberately not committed.) Read-only
+  throughout: there is no control that edits,
+  deletes or repairs anything, every verdict panel prints the `argv` that produced it,
+  and the frozen scope statement is printed verbatim rather than paraphrased. If the UI
+  was never built the API is unaffected and `/` says so in as many words, with
+  `GET /v1/meta` reporting `"web_ui": "not_built"` — a labelled absence, not a missing
+  page.
+
+- **Operators, roles and API keys, on PostgreSQL.** The server keeps its own records
+  in a real database (`WAXSEAL_SERVER_DATABASE_URL`); the trails do not, and that line is
+  deliberate. A trail stays a JSONL file so a third party can verify it with the stock
+  `waxseal verify` on their own machine — put it in the database and this server becomes
+  the only thing that can read it, which is exactly the trust concentration the public
+  read point exists to remove. The library and its CLI know nothing about PostgreSQL, and
+  the wheel's `dependencies` is still `[]`.
+
+  Authorisation is a scope check rather than a boolean. Two properties are enforced, not
+  merely intended: **no role can edit an entry**, because no such scope exists to grant
+  (a test walks every scope of every role), and **a writer cannot read the trail it
+  writes to** — the machine account an agent hook carries can extend the chain and
+  discover the tail it is extending, and nothing else, so a leaked hook key is not a
+  leaked audit history.
+
+  Seeding is what secures a deployment: a server with no credential anywhere is open and
+  says so at `GET /v1/meta`, and the moment the first key is minted it stops being open.
+  There is no separate "turn auth on" switch to forget. `WAXSEAL_API_KEY` survives as a
+  bootstrap credential and is reported as `is_operator: false`, so the portal never lists
+  it as a person.
+
+  A key's plaintext exists once, at mint. Only its SHA-256 is stored, so the server
+  cannot show a key twice — and cannot leak every key at once.
+
+- **`waxseal-server-admin`**, the deployment's admin entrypoint: `seed`, `operator-add`,
+  `operator-list`, `key-mint`, `key-list`, `key-revoke`. `seed` is idempotent so a deploy
+  script may re-run it; `key-mint` is deliberately not, because a second mint is a second
+  credential.
+
+- **An agent hook can write to the server.** `WAXSEAL_TRAIL` has always chosen where a
+  hook writes; an `http(s)://` value now makes it a chain server over REMOTE.md, so there
+  is no second configuration mechanism. Three things change for a URL target and each has
+  a reason: the value stays a `str` (`Path("http://host")` collapses the `//` and drops
+  the scheme, so the target would silently become a local file named `http:`);
+  `record_drops` is off, because a drop record is a sidecar NEXT TO the trail and a URL
+  has no next-to; and the chain gets an id derived from the event's own `cwd`, because
+  one server holds many projects' trails. The observer contract is unchanged — an
+  unreachable server costs a labelled notice on stderr and exit 0, never a vetoed tool
+  call.
+
+- **`GET /public/v1/scope`**, serving the frozen `waxseal-scope-v1` statement from
+  `waxseal.domain.report` itself. The portal prints it beside every verdict, so it must
+  not be retyped in JavaScript where it could drift, and it must not depend on a chain
+  existing: a qualification that disappears when there is nothing to qualify is not a
+  qualification.
+
+- **`server/Dockerfile` and `docker-compose.yml`**, plus `server/docs/deployment.md`
+  covering configuration, data layout, TLS termination at a reverse proxy, and what
+  self-hosting does and does not buy.
+
+- **Per-project trail routing and sealed-segment rotation** (0.1.5 plan, Workstream B). One
+  hook trail grew without bound and braided every project a developer touched into a single
+  chain. Both are now structurally impossible. Routing and rotation are on by default for
+  the three hook integrations that receive a `cwd` (Claude Code, Codex, Cursor); the
+  library-style integrations route and rotate nothing, because nothing hands them a project
+  key.
+
+  The project key is the hook event's own `cwd`, and the slug is
+  `sanitize(basename(cwd))[:32] + "-" + sha256(cwd)[:12]` over the **literal** cwd.
+  `session_id` was rejected because it changes every session and would spawn thousands of
+  trails nobody verifies; `resolve()` was rejected because it is host-dependent, so a host
+  that disagreed would split one project into two slugs, and a split trail is
+  indistinguishable from a truncated one. A 48-bit collision merely merges two projects into
+  one trail — weaker privacy separation, never a broken chain. Routing goes through the
+  shared `integrations/_trail.py` resolver, so precedence is unchanged: explicit argument >
+  `WAXSEAL_TRAIL` > the routed default. No new environment variable and no flag. The legacy
+  shared trail is neither migrated nor force-sealed; routed appends simply stop arriving and
+  it keeps verifying with plain `waxseal verify`.
+
+  Rotation triggers on one `stat` at open against 16 MiB — a constant in code with no
+  environment variable, because a threshold an operator can raise is one that gets raised
+  the first time rotation is inconvenient, and the file it bounds is the one an incident
+  review has to read. Measured stored hook entries span 650 B to 6,374 B
+  (`tests/test_entry_size_receipt.py`), roughly 2.6k-25.8k entries per segment. Triggering
+  by entry count was rejected: stored line sizes differ by roughly an order of magnitude (a prompt line versus a clipped terminal dump), so a count
+  says almost nothing about bytes. The notice prints value *and* provenance — `rotated at
+  16777216 bytes (built-in default)` — because a bare number reads as something an operator
+  configured (rule 6 applied to a threshold).
+
+  Segments are linked by a binding entry only, **never by `prev_hash`**: a chain extended
+  across files would make verifying the newest segment cost every byte of every older one,
+  which is the growth problem rotation exists to solve. The binding reuses
+  `domain/handoff.py`'s `HandoffBinding` verbatim under a new payload type
+  (`application/vnd.waxseal.rotation-binding+json`) rather than the handoff type, so
+  `verify-handoff` does not report rotation bindings and the two obligations stay apart — a
+  rotation binding is mandatory at seq 0 where a handoff binding is optional. Nothing is
+  renamed: `adapters/atomic.py` stays the single owner of the atomic-replace syscall and the
+  active segment is simply the highest ordinal present. Sidecars needed zero code change,
+  proven rather than assumed, because every sidecar name already derives as
+  `with_name(name + suffix)`.
+
+  Rule 7 is widened one level. Reading the closing segment's tail and appending the new
+  segment's genesis binding are ONE critical section spanning TWO files, held by
+  `<dir>/segments.lock`, with its own falsifiability receipt: with that lock swapped for
+  `contextlib.nullcontext()`, 8 writers produced 3 or 4 segments and 8 rotation bindings
+  instead of 2 and 1, on 3 of 3 runs. What does *not* break without it is the chain — every
+  segment still verified `ok`, because each append still holds its own per-file lock. What
+  is lost is the one-rotation invariant, which is exactly why this critical section has to
+  span both files instead of trusting the per-file lock underneath it.
+
+- **`waxseal segments <dir>`**: read-only, appends nothing, and takes the DIRECTORY holding
+  the segments rather than a trail file (SPEC.md section 20, appended for this: layout,
+  payload type, binding rules and the full reason vocabulary). It walks each stem in ordinal
+  order, takes each segment's own `verify_chain` verdict, checks each rotation binding
+  against the predecessor's own current entry hashes, and aggregates through `Verdict.join`
+  — never by comparing exit codes, since 2 is the larger code but the weaker finding.
+  `segment_missing` is BROKEN at exit 1 (owner decision, 31/08/2026): a surviving binding is
+  positive evidence the segment existed, and UNVERIFIABLE would let segment deletion pick
+  its own verdict. It is still never printed as "tampered", because a legitimate archival
+  move leaves identical evidence and which one happened is an operator's call (rule 4). Two
+  states the plan's vocabulary did not name are filled rather than crashed:
+  `segment_unreadable` (a segment torn by a crash mid-rotation) and
+  `rotation_binding_unchecked` (predecessor present but unreadable, so nothing to compare),
+  both UNVERIFIABLE. A binding that is *present* is checked wherever the segment sits,
+  including at the lowest ordinal — exempting the lowest unconditionally would make prefix
+  deletion free, since deleting segments 0 and 1 makes segment 2 "the first" and nothing
+  then asks about the binding it still carries. `open_segmented`, `verify_segments` and
+  `project_slug` stay behind their modules and are deliberately not new public exports:
+  widening a frozen surface later is easy where narrowing it is breaking.
+
+- **S3 Object Lock (WORM) for sealed segments, as a ternary** (0.1.5 plan, Workstream J1).
+  Sealed segments can be archived under operator-declared Object Lock retention, so storage
+  *refuses* an overwrite instead of the chain merely detecting one afterwards. That is the
+  scoped half of the tamper-proof claim (DESIGN.md §11) and nothing beyond it: one object
+  version, until its retain-until date, and nothing at all about write-time honesty. It is
+  opt-in and needs both the `s3` extra and a bucket an operator configured for Object Lock;
+  the wheel's `dependencies` stays `[]`, with `boto3` behind one guarded import whose
+  `ImportError` becomes a labelled `worm_unknown` rather than a crash inside a caller's
+  rotation flow.
+
+  This is the **eighth** instance of the Ternary Evidence Principle, and it was found by
+  looking rather than by being told: `worm_locked` / `worm_unlocked` / `worm_unknown`.
+  Deliberately not `domain.verdict.Verdict`, whose values carry severity and exit codes — a
+  bucket without Object Lock mapped to BROKEN would cry tamper (migration 060's collapse)
+  and mapped to OK would claim a guarantee it does not have (beads v1.2.2's collapse).
+  `WormState` reuses `Verdict`'s vocabulary and shape while keeping its own three values.
+
+  Two questions of two different strengths share that vocabulary, so every report records
+  which one was asked. `object_worm_state` answers "is THIS object version retained";
+  `bucket_worm_state` answers "is Object Lock configured on this bucket", and AWS protects
+  "only the version that's specified in the request", so the bucket answer establishes
+  nothing about any particular segment. `WormSubject` is therefore required with no default
+  — a default subject is exactly how a later call site would inherit the wrong claim in
+  silence — and the label map is keyed on the (subject, state) *pair*, exhaustive over all
+  six findings with no silent fallback. Only the object-version/locked pair may print a
+  storage-refusal promise, and a test asserts that across all 18 report constructions in the
+  module rather than leaving it to inspection. Retention is established by ASKING after the
+  PUT, never inferred from the PUT having succeeded: trusting a writer at write time is the
+  one thing this library exists not to do.
+
+  The AWS semantics came out of the plan labelled `[Unverified]` and were re-checked against
+  official documentation before any code was written, with their sources recorded in the
+  module docstring. Two results are kept rather than smoothed over. The plan's claim that
+  Object Lock must be enabled at bucket creation is **wrong**: it can be enabled on an
+  existing bucket, and what is irreversible is disabling it. And the error code for "no
+  Object Lock configuration here" keeps its `[Unverified]` label, because neither the S3 API
+  reference nor botocore's own service model documents one. That uncertainty is safe by
+  construction — an observed-code allowlist is the only path to `worm_unlocked` — so a wrong
+  guess costs an honest "could not tell" and never a false verdict in either direction.
+  Rotation archiving (J3) and `preflight` (J4) are not built here.
+
+- **`WAXSEAL_TRAIL` is now honoured by all nine trail-resolving integrations** (0.1.5 plan,
+  Workstream D3). Four read it (claude_code, codex, cursor, openclaw) and five silently
+  ignored it, which is the worst shape an audit tool can have: the operator aims the
+  variable at a path, restarts the host, runs `waxseal verify` on that path and is shown
+  nothing — an absent trail and a truncated one look identical, and no output says the
+  writer was never pointed there. `integrations/_trail.py` is now the single reader of the
+  variable and all nine modules go through it, with precedence explicit argument >
+  `WAXSEAL_TRAIL` > the host's default. No new variable, no config flag. The three
+  library-style integrations (langchain, crewai, openai_agents) take
+  `trail: Path | str | None = None`; the default moved to a `None` sentinel because "the
+  caller passed nothing" has to be distinguishable from "the caller passed the default path"
+  or the environment rung has nowhere to sit, and the resolved path for a caller who passes
+  nothing is unchanged. `hermes`/`hermes_gateway` have no argument rung at all (the host
+  loads them and passes no path), so theirs is `WAXSEAL_TRAIL` > `HERMES_HOME` > the home
+  fallback, and a dropped write is now filed beside the trail the operator named instead of
+  beside the host default, where nobody looking at their own path would see it. The
+  environment value stays verbatim while an explicit argument gets `expanduser()`: the four
+  modules that already read this variable have always taken it verbatim, and widening who
+  reads a variable must not change what an already-deployed value means.
+
+- **README "Capability extras"**: zero hard dependencies is the core, not a ceiling, and the
+  route out is an extra plus injection. It lists what `pyproject.toml` actually carries
+  today (`s3`, `postgres`) and marks `rfc3161` and `evm` as planned and **not shipped**
+  at the time of this entry, because [Written, unwired] is not [Shipped] — both shipped
+  later this same release (Workstreams C and F, below). No hard dependency was added and
+  rule 1 is untouched.
+
+- **Optional CMS/X.509 signature verification over RFC 3161 receipts, behind the `rfc3161`
+  extra** (0.1.5 plan, Workstream C). SPEC section 17 always stayed structural — PKI status,
+  message imprint, nonce, digest algorithm, no ASN.1 library in the trust path — and said
+  plainly that the CMS signature itself was **not** checked in-library, delegated instead to
+  `openssl ts -verify`. `adapters/rfc3161_verify.py` is a second, independent dimension for
+  operators who cannot shell out to openssl in a container that may not have it:
+  `cryptography` is imported inside `verify_token_signature` alone, so it can be legitimately
+  absent on a correct install, and its `ImportError` becomes a reported state rather than a
+  crash — the same shape `adapters/s3.py::_resolve_client` already uses for boto3.
+
+  This is the tenth instance of the Ternary Evidence Principle (CLAUDE.md), reusing
+  `domain.verdict.Verdict` rather than growing a parallel three-valued type beside it, and
+  the first instance where the third value has three separate causes that each need a
+  different fix: `signature_valid` (checked, and it holds — exit 0), `signature_invalid`
+  (CHECKED, and the answer is a definite no — the signature does not verify, the signed
+  attributes commit to a different TSTInfo, or the signer chains to nobody named — exit 1),
+  and `signature_unchecked` (the question was never actually put — the extra is not
+  installed, no CA bundle was named, or the token's CMS is a shape this build cannot parse —
+  exit 2). Collapsing `unchecked` into `valid` is beads v1.2.2's collapse in a new costume,
+  and every unchecked line names its own cause and its own remedy: install the extra, repoint
+  `--tsa-ca-file`, or fall back to `openssl ts -verify`.
+
+  `verify` and `report` both gain `--tsa-ca-file <bundle.pem>`. waxseal names no default
+  trust anchor for it, the same discipline `domain/cadence.py` already follows for its cost
+  parameters: not the system store, not certifi, not the certificates the token happens to
+  carry as roots. Without the flag, no exit code in SPEC section 17's table changes; the run
+  still prints one `signature_unchecked` line naming the flag, exactly as a pending
+  OpenTimestamps proof is stated without raising its exit code. Unreadable stays unchecked,
+  never invalid, carrying section 17's own asymmetry into the one module that actually can
+  say "false" — only a signature that verifiably fails, or a chain that verifiably does not
+  reach the named anchors, earns exit 1. Deliberately not checked, and said so on the `valid`
+  label itself (rule 6): certificate validity windows, revocation (no network is opened
+  here), and the `timeStamping` extended key usage. SPEC.md gains section 17.1 for this;
+  `pyproject.toml`'s `rfc3161` extra pins `cryptography>=40`, the floor checked against the
+  library's own changelog (`Certificate.verify_directly_issued_by()` landed in 40.0.0,
+  `load_pem_x509_certificates()` in 39.0.0).
+
+- **The on-chain ledger layer: `contracts/`, `ports/ledger.py`,
+  `domain/{bond,liveness,abi,registry}.py`, `adapters/evm.py`, and a matching CLI surface**
+  (0.1.5 plan, Workstream F — the largest single workstream this release). 0.1.4 closed with
+  three items explicitly not built: an Anchoring Liveness Contract, bonded checkpoints with
+  slashable fraud proofs, and an on-chain fingerprint registry, "designed and analysed... and
+  none of them is built." All three are now built.
+
+  **`contracts/`** is a separate Foundry project on the same footing as `server/`
+  (CLAUDE.md rule 1: the wheel's `dependencies` stays `[]`, and neither ships in the sdist —
+  `pyproject.toml`'s exclude list now names both). `FingerprintRegistry.sol`,
+  `AnchoringLiveness.sol` and `BondedCheckpoints.sol` are the three contracts the layer reads
+  and writes against, with `CheckpointCodec.sol` and `Rfc9162.sol` as shared
+  encoding/proof primitives underneath them. Every function and error selector
+  `domain/abi.py` hard-codes is cross-checked against `contracts/abi/selectors.json` — the
+  file `forge inspect` writes — by `tests/adapters/test_evm.py`, plus `cast sig` when
+  Foundry is on PATH, so a Solidity signature cannot drift from the Python constant
+  silently. `contracts/vectors/` holds a large independent cross-check suite (consistency,
+  inclusion, fork, non-extension, tree, heads and fingerprint vectors, plus an index), so the
+  contracts' own Merkle-proof logic is checked against the same construction the library's
+  domain code uses, not merely against each other.
+
+  **`ports/ledger.py`** keeps EVM behind a Protocol on purpose — nothing in
+  `LedgerReader`/`LedgerSink` mentions JSON-RPC, gas, blocks or Solidity, so a second chain is
+  another adapter rather than a second copy of the verifier. Its error contract is the
+  ternary this whole layer is built on: a method returns `None` only for "the contract
+  answered, and it holds nothing" (a measured absence); it raises `LedgerUnreachable` when it
+  could not ask (returning `None` there would render a down node as "the writer never
+  anchored" — a false alarm manufactured out of a network problem); and it raises
+  `LedgerDisagreement`, naming the pair, when two or more endpoints answered and did not
+  agree — not unreachability and not a verdict about the trail, but a third, eclipse-shaped
+  observation of its own.
+
+  **`adapters/evm.py`** reads over stdlib JSON-RPC only (`eth_call` over the same
+  `Transport` REMOTE.md's client already uses), so verification never needs an installed
+  web3 stack, and the `evm` extra in `pyproject.toml` is deliberately empty — there is no
+  client to fetch. A single RPC endpoint is a single point of *narrative* failure, not just
+  of availability, so the reader is handed at least two URLs and asks every one of them on
+  every read: they agree and the value is returned; they answer and differ and it is
+  `LedgerDisagreement`; fewer than two answer and it is `LedgerUnreachable`. Writes go
+  through an injected `Signer` the operator constructs — waxseal never imports `eth-account`
+  or shells to `cast wallet` itself. `AnchoringLiveness.isDelinquent`/`.lastSeen` revert with
+  `TrailNotRegistered` for a trail that never anchored rather than returning `false`/zero,
+  because a bool is two-valued and the honest answer is three-valued; this adapter reads
+  that specific revert as a measured absence (`None`) and leaves what it *means* to pure
+  domain code — `domain/liveness.py`'s `delinquency(None, deadline)` — rather than deciding
+  it at the RPC boundary. Any other revert degrades to `LedgerUnreachable`, labelled with the
+  four-byte selector, never silent.
+
+  **The CLI surface** never appends to the audit trail — the same rule `anchor` already
+  lives under. `waxseal ledger-status <trail> --rpc URL [--rpc URL…] --liveness ADDR
+  [--registry ADDR] [--bond ADDR --writer ADDR]` reuses `reconcile-tickets`'s exit convention
+  exactly: exit 0 = every configured dimension came back clean; exit 1 = a *positively
+  detected* finding — delinquent, slashed, unbonded — the same "detected, not tampered"
+  sense `reconcile-tickets` gives its own exit 1; exit 2 = unreachable, endpoints disagree,
+  or malformed input, never rendered as "0 findings" (rule 5); exit 3 = the named trail does
+  not exist. `verify`/`report` gain `--rpc/--liveness/--registry [--trail-id]`: the ledger
+  dimension is structurally incapable of exit 1 there — `LivenessVerdict.to_verify_verdict()`
+  and `RegistryFinding.to_verdict()` both range over `{OK, UNVERIFIABLE}` only — so
+  `ledger_delinquent`, `registry_disagreement` and `ledger_unreachable` all land on exit 2,
+  because a chain saying "not anchored on time" is not a chain saying "the trail was edited."
+  `waxseal registry publish --descriptor-of FP --registry ADDR --rpc URL […]
+  [--write-rpc URL]` and `waxseal bond deposit --bond ADDR --amount-wei WEI […]` /
+  `bond prove <proof.json> --bond ADDR […]` write to the ledger layer only, printing the
+  chain id, the contract and the action before sending. `anchor` additionally accepts
+  `--evm-rpc/--evm-liveness[/--evm-write-rpc/--evm-trail-id/--evm-consistency-proof-file]`,
+  publishing the same checkpoint to a fourth independently-recording anchor domain alongside
+  `--tsa-url`/`--ots-calendar`. `--declare-topology` gains an optional fifth `ledger=<bool>`
+  subfield, parsed the same way the other four already are. `WAXSEAL_EVM_SIGNER_CMD` is a
+  three-verb external-signer protocol (`address` / `sign-digest` / `sign-tx`) — never a
+  private key on argv or in a flag — on the same footing as `WAXSEAL_API_KEY` and
+  `WAXSEAL_WITNESS_API_KEY`: it never crosses the administrative-authority boundary either.
+
+  `docs/security/threat-model.md` section 5's attacker-capability ladder gains its table's
+  own new row for this: the finalized ledger checkpoint (0.1.5 Workstream F, section 7) is
+  the one exception to "an attacker who holds all local files and every witness can rewrite
+  the live tail," and it is scoped three ways at once — to the prefix that was already
+  finalized before the attacker arrived, never the live tail written after; to a writer that
+  equivocates rather than merely rewrites, because a fresh, internally-consistent lie signed
+  only once produces nothing for `BondedCheckpoints.proveEquivocation` to catch; and to
+  detection, never recovery. `waxseal preflight` (Workstream E, below) reports this as a
+  labelled prefix/tail split rather than folding it into a ladder rung, precisely so it
+  cannot be read as raising rung 5 or 6 on its own.
+
+- **Microsoft AGT audit sink** (`src/waxseal/integrations/agt.py`, 0.1.5 plan,
+  Workstream H). `WaxsealAuditSink` implements
+  `agentmesh.governance.audit_backends.AuditSink` — AGT's real, exported,
+  `@runtime_checkable` extension point — purely by shape: `write`, `write_batch`,
+  `verify_integrity`, `close`. No import of
+  `agent_governance_toolkit`/`agentmesh`/`agent_os` is performed or required anywhere in the
+  module, the same zero-dependency discipline every other integration in this package holds;
+  `AuditEntry` is read only via `getattr`, never `isinstance`-checked against an AGT type,
+  which is the other half of why no import is needed.
+
+  The wiring point was re-verified against the real PyPI wheels rather than the README
+  (`agent-governance-toolkit` 4.1.0 + `agent-governance-toolkit-core` 4.1.0, downloaded and
+  read directly; the finding was re-checked against core 5.0.0 too). The plan's framing —
+  that `govern()` accepts an audit-backend callback — turned out to be wrong:
+  `GovernanceConfig`/`GovernedCallable` construct their own internal `AuditLog` with no field
+  threading a custom sink through in either version read (`GovernanceConfig.audit_file` is
+  accepted but never read — a dead field). That is an upstream API gap, recorded rather than
+  routed around silently (rule 6): the real extension point sits one level down, at
+  `AuditLog(sink=...)`, used directly — standalone at an operator's own governance
+  checkpoints, or by reaching into `governed._audit` post-construction (undocumented, no
+  public setter).
+
+  Two data gaps in AGT's own schema are handled rather than hidden. `AuditEntry` has no
+  top-level "reason" field, so the sink reads it out of `data["reason"]`, matching where
+  `GovernedCallable` actually puts it. `AuditEntry` carries no model identity at all — no
+  `model`/`model_name`/`model_version` anywhere in the schema — so `WaxsealAuditSink.__init__`
+  accepts an optional `model: ModelRef | None`, supplied once at the sink rather than
+  invented per-entry; left `None`, every entry stays a plain
+  `application/vnd.waxseal.agt-event+json` record rather than a silent downgrade to a
+  `DecisionRecord` claim the AGT event never made. Unlike every other host this package's
+  integrations attach to, AGT's own `AuditLog.log()` does **not** swallow a sink exception,
+  so a raise here would abort whatever governed call triggered the audit; never-veto is held
+  one layer more defensively here for exactly that reason, with every failure path — open
+  failure, malformed entry, a failed append — degrading to a labelled, counted dropped write
+  instead of raising. `verify_integrity()` delegates to waxseal's own verifier rather than
+  re-implementing chain verification (rule 4), opening the trail read-only and relaying its
+  verdict.
+
+- **`waxseal preflight <trail>`** (0.1.5 plan, Workstream E) as its own command, distinct
+  from the "commands this build does not have" line the server has been reporting against it
+  since Workstream I shipped. It reads which rung of `docs/security/threat-model.md` section
+  5's six-row attacker-capability ladder the current configuration stops, in that table's own
+  language, and computes no verdict of its own: every fact it prints is re-presented from
+  what already measures it elsewhere (`adapters/anchors.py`'s records, `domain/pinning.py`'s
+  state, `domain/separation.py`'s τ), because a second verdict source is something an
+  operator would have to reconcile against `verify`.
+
+  Each rung is one of four states, never two: `PRESENT`, `ABSENT`, `NOT MEASURED`, or — for
+  the top two rungs, which have no answer to give in any configuration — `NO MECHANISM`.
+  `NOT MEASURED` is the state this command exists for: a preflight run contacts no witness,
+  opens no ledger connection, and holds no seal key, so "no witness confirmed" is a fact
+  about *this run*, never a fact about the deployment, and an `.anchors` sidecar this build
+  cannot parse is not zero sinks. `PRESENT` means the mechanism the table names is
+  *configured*, not that it currently checks out — checking is `verify`'s job, stated in the
+  output rather than left for a reader to assume the stronger claim. The ledger dimension
+  (Workstream F, above) joins the witness row at rung 3 rather than gaining a rung of its
+  own: it is one more record kept under a different administrative authority than the
+  trail's writer, exactly what "external anchor" already names in general terms, and
+  widening the six-row table itself is explicitly out of scope here (a separately-approved
+  SPEC append).
+
+  Two trailing lines, from J4 (`waxseal-p8s`), print the prefix/tail honesty split
+  DESIGN.md §11 and threat-model.md section 1 both name, deliberately *not* folded into a
+  ladder rung: an immutable-prefix line naming the latest checkpoint (or that none exists, or
+  that the sidecar could not be read) with its mechanism explicitly "NOT CONFIRMED this run
+  (finalized ledger / WORM / none)", and a tail line stating that everything after it is
+  tamper-evident only, never more — the live tail and write-time honesty are limits no
+  mechanism closes. Both read from the same locally-observed anchor state the ladder already
+  computed, and never open the network or storage connection a real ledger-finality or
+  WORM-lock check would need.
+
+  Read-only against the trail, its sidecars, and — with `--pin` — the pin state file, which
+  this is the one command that names and only *reads*; it neither writes nor advances it.
+  Exit 0 always, because this is a reading and not a verdict an operator would then have to
+  reconcile against `verify` — the single exception is exit 3, the named local trail does not
+  exist. No URL/remote target: a remote trail has no `.anchors`/`.attest` location at all, so
+  there is nothing here to read rather than something that failed.
+
+### Changed
+
+- **BREAKING (`waxseal.domain.bond`): `NonExtensionProof` now means the evidence the
+  deployed contract actually accepts, and the old challenge type keeps its behaviour
+  under the name `NonExtensionChallenge`.** One name carried two incompatible ideas.
+  `BondedCheckpoints.proveNonExtension` slashes on POSITIVE evidence — one leaf index at
+  which two signed roots each prove a *different* entry — and deliberately never on a
+  consistency proof that merely failed to verify, because slashing on a failure would let
+  anyone drain an honest writer's bond for the price of gas. The domain type modelled the
+  earlier consistency-proof challenge, so `EvmLedgerSink.submit_fraud_proof` **raised
+  `LedgerError` on one of its own two declared argument types** and pointed callers at a
+  second entry point, `submit_non_extension`, that took seven hand-assembled positional
+  arguments and validated none of them.
+
+  Now: `domain/bond.DivergentLeaf` (the leaf claim, moved out of `adapters/evm.py` —
+  only the ABI *encoding* was ever the adapter's, and whether two claims contradict each
+  other is RFC 9162 arithmetic), `domain/bond.NonExtensionProof` carrying the two signed
+  checkpoints and the divergent pair, and `NonExtensionChallenge` unchanged in behaviour
+  beside them. `submit_fraud_proof` is ONE door for both shapes and validates both;
+  `submit_non_extension` and `adapters.evm.LeafClaim` are gone. `waxseal bond prove`'s
+  JSON format is unchanged — it already named these fields.
+
+  **The gap this closes was invisible while the raise stood**: `proveNonExtension` had no
+  end-to-end evidence at any layer, because there was nothing translatable to drive it
+  with. It now has two on-chain tests against real anvil chains and the real compiled
+  contract, driving the real CLI as a subprocess — a divergent leaf built by this
+  repository's own `domain/anchoring.membership_proof`, verified by the contract's
+  `Rfc9162.verifyInclusion` inside revm, asserted by reading raw `bondOf` state before
+  (funded, unslashed) and after (slashed, amount 0). A wrong tuple offset or tree size
+  reverts with `InclusionProofFailed` instead of slashing, so a pass is evidence about
+  the encoding and not only about the plumbing. The structural guard is measured the same
+  way: two leaves that AGREE exit 1 with `not a non-extension: leaves_agree` and send no
+  transaction at all.
+
+- **Function selectors are frozen in ONE place.** `adapters/evm.py` kept its own copies
+  of five constants `domain/abi.py` already froze, from a period when the domain table
+  really did describe an earlier contract draft; that table was corrected and the copies
+  outlived their reason, leaving two hand-maintained lists of the same four-byte values
+  and a comment still calling the corrected one a draft. Two lists is the shape that let
+  six selectors drift through every green gate the first time. The adapter now imports
+  them, keeps one alias (`SELECTOR_SUBMIT_HEAD`, to say which `submit` a call site
+  means), and `tests/architecture/test_invariants.py::TestSelectorsAreFrozenInOnePlace`
+  pins the single owner by scanning for `bytes.fromhex` freezes outside `domain/abi.py`.
+
+- **`JSONLBackend.append()` no longer raises `JSONLCorruptionError`, and a durably
+  completed append can no longer report failure.** The scan ran *after* the entry was
+  written and flushed, still inside the lock, so a `JSONLCorruptionError` about some other,
+  pre-existing line surfaced as an exception out of an append that had already durably
+  succeeded. A caller that retries on exception then recorded the same event twice: two
+  entries, contiguous seq, no gap — so `verify()` still returned `ok` and the duplicate was
+  invisible to chain integrity, which is the shape of bug this library's whole design is
+  meant to keep out. Measured, one event and one retry: 2 rows before, 1 after. `try_append`
+  also counted a drop for an entry that was on the chain, which is `dropped_writes` lying
+  (rule 5).
+
+  Two changes, and neither alone is enough. The scan now fires BEFORE the pending write, on
+  the same predicate over the same entry, so *any* way it can fail — an `OSError` off the
+  read, a warning filter escalated to an error — lands where there is no durable write to
+  misreport. And corruption it finds is now reported as a labelled `RuntimeWarning` (rule 6,
+  the channel the sibling SQLite adapter already uses for its degraded path) rather than as
+  an exception from `append`: bytes torn long ago are not grounds to veto a new entry,
+  refusing would silence the host's whole trail over one old line, and rule 4 forbids the
+  only other exit. The operator is told; nothing is repaired and nothing is dropped.
+  `JSONLCorruptionError` is now raised only by a direct `_integrity_scan()` call. Nothing in
+  `src/` or `server/` ever caught it, so no shipped consumer changes — but code outside this
+  repository that catches it around `append()` will now never see it, and that is the
+  upgrade note.
+
+- **The two checkpoint frame prefixes are renamed, and their bytes are unchanged** (0.1.5
+  plan, Workstream D2). `CHECKPOINT_FRAME_PREFIX` → `CHECKPOINT_FRAME_PREFIX_BARE`, and
+  `CHECKPOINT_FRAME_PREFIX_V2` → `CHECKPOINT_FRAME_PREFIX_AGG_BOUND`. They are parallel
+  frame *shapes* chosen by content — bare, or aggregate-bound — not an old-then-new version
+  pair. The `_V2` name said otherwise and the repository owner himself misread it that way,
+  and a version reading invites "migrate the old one away", which is the migration-060
+  reflex this library exists to make unrepresentable. The **bytes do not move**:
+  `b"waxseal-checkpoint-v1\n"` and `b"waxseal-checkpoint-v2\n"` are already inside
+  externally issued RFC 3161 receipts, so changing them would orphan evidence that exists.
+  The old names stay as aliases of the very same objects — they may be referenced outside
+  this repository, and SPEC.md section 9 spells the first one out in prose — pinned by an
+  identity test rather than an equality one so they cannot drift.
+  `tools/gen_checkpoint_vectors.py` is untouched, its independence from the library being
+  the point, and it reproduces every frozen vector byte-for-byte after the rename. SPEC.md
+  section 15 gains one appended note saying the same thing in prose; no existing SPEC text
+  changed.
+
+### Fixed
+
+- **SPEC.md section 20.2's "roughly 100x" was off by an order of magnitude** (owner-
+  approved frozen-path edit). The by-count-rotation paragraph justified a byte threshold
+  with a spread no measurement in the tree produced. `sources/rotation.py`'s copy of the
+  same claim was corrected in 0.1.5 with a real fixture; the spec's could not be, because
+  SPEC.md is a frozen path and the correction was the owner's to make — which left the two
+  halves of one claim disagreeing by 10x with nothing failing. Measured through the real
+  `AuditLog.append` path with an injected clock: **650 B** for a minimal
+  `UserPromptSubmit` hook event against **6_374 B** for a `PostToolUse` event clipped at
+  `MAX_FIELD_CHARS` — **9.8x**, and not reachable by a better fixture, because every entry
+  pays a ~466 B envelope floor and the clip caps the other end. The argument survives
+  unchanged (a count still says almost nothing about bytes at 10x); only the number was
+  wrong. `tests/test_entry_size_receipt.py` now asserts the spec sentence quotes the
+  numbers it measures, so neither half can drift again.
+
+- **Five tests reported "UNMEASURED" on a machine that could measure them.** One question
+  — is Foundry installed? — had three answers. `tests/adapters/test_evm_anvil.py` and
+  `tests/test_cli_ledger_e2e_anvil.py` fell back to foundryup's install directory when
+  `PATH` did not carry the tools; `tests/domain/test_abi.py` asked `shutil.which` and
+  stopped. `foundryup` writes the binaries and appends a line to the shell profile, so on
+  a pytest run started from anywhere that had not sourced it — the default state of a
+  fresh install — the same run MEASURED the on-chain end-to-end suites against real anvil
+  chains and reported 5x UNMEASURED for the selector cross-check. The skip label said
+  "install Foundry", and Foundry was installed, which is why nobody chased it: rule 5 one
+  level up from the code, where "unmeasured" is an honest verdict only when the thing
+  deciding it is not itself the defect. Resolution now lives once in `tests/_foundry.py`,
+  pinned by `TestFoundryIsResolvedInOnePlace`; absence is still reported and never worked
+  around.
+
+  **On-chain verification receipt, this machine, 2026-09-01, Foundry 1.8.1
+  (`982849d`), Foundry NOT on `PATH`:** `forge test` 53 passed / 0 failed / 0 skipped
+  across five suites; `contracts/script/selectors.sh --check` matches `forge inspect` for
+  all three contracts; full Python suite **3072 passed, 0 skipped, 100% line and branch**,
+  including the 31 anvil end-to-end tests and the 5 `cast` cross-checks that used to skip.
+  The 5 UNMEASURED are 0 with evidence, not 0 by rewording.
+
+- **Three stale citations of the coverage floor.** The floor was ratcheted 90% → 100% on
+  2026-08-23 and `CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md` and
+  `.github/workflows/release.yml` were left saying 90%, so a contributor reading the
+  contributing guide was told a gate that would fail them. `TestCoverageFloorIsStatedOnce`
+  now ties every documented floor to `pyproject.toml`'s `fail_under`; `CHANGELOG.md` is
+  excluded on purpose, because release history is not a stale copy.
+
+- **A mypy override comment named a function that no longer exists.** `pyproject.toml`
+  cited the guarded `cryptography` import as living in
+  `adapters/rfc3161_verify.py::_load_backend`; it is in `_verify`.
+
+- **Read-only commands cost more than the bytes they read** (0.1.5 plan, Workstream A).
+  Four fixes, no behavior change and no hash change; every number below is a counted
+  quantity from `tests/adapters/test_perf_receipts.py`, measured with the fix backed out
+  and again with it in place, never a wall-clock reading.
+
+  - **`tail`** built the whole decoded trail before slicing the last `n` rows off the end.
+    A `deque(maxlen=n)` prints the identical lines while holding the window only: over a
+    2000-entry trail, `tail -n 5` went from **2000 live decoded payloads to 6** (the five
+    it prints plus the one in flight). Bytes read are unchanged, and that is inherent —
+    `entries()` is a forward-only scan, so nothing can print the tail of a JSONL trail
+    without reading it through; what the slice cost was memory, not I/O.
+  - **`JSONLBackend._integrity_scan()` re-read the whole file every time it fired**, so
+    the periodic scan cost O(n) per scan and O(n²/N) over a trail's life. It now resumes
+    from the last byte offset this object parsed clean: over a 50-entry trail grown by 5
+    entries, the second scan went from **24,630 bytes (the whole file) to 2,240** — exactly
+    the bytes appended since the first scan. `JSONLCorruptionError`'s `line_no` and
+    `byte_offset` stay absolute in the file, and a trail that got *shorter* than the
+    cleared prefix is treated as a different file at that path and rescanned from byte 0.
+    The narrower scope is stated in the method's own docstring rather than left to be
+    discovered: a resumed scan cannot see an out-of-band edit to a region the same process
+    already cleared.
+  - **`report` read the trail twice**, once to verify and once to summarize. One pass now
+    feeds both: **185,380 bytes read off a 92,690-byte trail became 92,690**.
+  - **`JSONLBackend.append()` created the trail's parent directory twice per append.**
+    `file_lock()` already makes it before the lock is taken, so the second call could never
+    find anything to do: **2 `mkdir` calls per append became 1.**
+
+  `AuditLog.entry_hashes()` was deliberately left materializing, and its docstring now says
+  why, so the next pass over this code does not "fix" it: `batch_root` and
+  `consistency_proof` need every leaf again after the last one is read, so a streaming
+  variant would have to read the trail twice.
+
+- **A misread benchmark in the 0.1.4 entry above.** The 22.890s measurement was the total
+  for building a 4000-entry trail (5.723ms per append), not the cost of one append at
+  n=4000, which is how the sentence read it. The measured numbers are untouched; only the
+  sentence that misquoted them is corrected.
+
+- **`waxseal install` printed a bare `python3`** (0.1.5 plan, Workstream D1). The
+  interpreter on `PATH` is not necessarily the one that has waxseal installed, and when
+  it is not, every hook event is dropped with a label nobody reads while the hooks look
+  installed — which is what happened on the repository owner's machine, leaving an empty
+  trail. The snippet an operator pastes now names `sys.executable`, the interpreter that
+  just ran `waxseal install` and therefore demonstrably has waxseal. The openclaw crontab
+  line had the same bug and the same fix. The shim keeps its `#!/usr/bin/env python3`
+  shebang, which is a fail-open a host may deliberately override.
+
+- **The server ran `waxseal segments` against the trail *file* instead of the segment
+  directory** (SPEC.md section 20), so it printed "no such segment directory" and exited 3,
+  and a fully rotated, fully intact chain was reported as `absent` — "nothing was read" —
+  about a directory that does exist. `read_target()` now gives that one read its real
+  subject, in the single place where both the chain and the import surfaces render a CLI
+  outcome. A chain with no segments reports `absent` with "no sealed segments", which is
+  honest: nothing was checked, and rule 5 forbids printing that as `ok`. Four server tests
+  had also hard-coded `segments` as their stand-in for a planned-but-absent command and all
+  four inverted the moment Workstream B shipped it — batching debt, since B was kept out of
+  `server/` to keep footprints disjoint, not a defect in B. None of them is deleted or
+  weakened: each is re-pointed at `preflight`, a command this build really does lack, *and*
+  at the condition rather than a name, via a fixture that withholds a command the build does
+  ship. That second form cannot expire the next time a planned command lands, which is how
+  this recurred in the first place. The shipped half of the capability gate had never been
+  tested at all — B landing is what made it testable — and is covered now against a rotated
+  fixture built with `open_segmented` rather than hand-written files.
+
+- **`server/waxseal_server/api/public.py`'s docstring promised a test that every route on
+  the public read point is GET. No such test existed.** The property held only by
+  implication from the mutating-route census, which would go red for a `POST
+  /public/v1/...` but would name the wrong reason while doing it and says nothing about the
+  guarantee the docstring was pointing at. The public read point carrying no write route is
+  the mirror-node guarantee — read authority separated from write authority
+  architecturally, not by a permission bit — and it deserves a test that fails for its own
+  reason. The new assertion is an allowlist of permitted methods (`{"get"}`) and never a
+  `POST` blocklist, which would have been silent about `PUT`, `PATCH` and `DELETE`; the
+  surface is selected two ways, by the router's tag and by the `/public/v1` prefix, with a
+  third test asserting the two agree, because either selector alone can be made vacuous by
+  one edit; and emptiness is asserted too, since a selector that quietly matched nothing
+  would pass forever. The docstring now describes the test that exists, by name, and no
+  more.
+
+### Notes on honesty in the server's output
+
+Three states the server refuses to collapse, each with a test:
+
+- Commands this waxseal build does not have (`preflight` — Workstream E) report
+  `"status": "unavailable"` with a **null** verdict, and are never executed. argparse also
+  exits 2, so running them would produce something indistinguishable from "unverifiable" —
+  a verdict nobody computed. (`segments` was the second example here until Workstream B
+  shipped it inside this same release; it now returns a real verdict, and the tests that
+  had borrowed its name are re-pointed — see Fixed, above.)
+- CLI exit 3 ("nothing was read") reports `"absent"`, never a break. A tamper report
+  against a file that does not exist is a false alarm.
+- The receipt-log check returns `checked: null` with `reason: "not_recorded"` when there
+  is no log, which is never rendered as a measured zero.
+
+### Structure
+
+`server/waxseal_server` is layered the way the library it serves is layered, with a
+one-way dependency arrow — `api/` → `runtime/`+`storage/` → `domain/` → `config` — and
+`tests/test_architecture.py` enforces it by parsing the imports rather than describing
+the rule in a README. `domain/` imports nothing that touches a filesystem, so the parsing
+and verdict rules are testable without standing a server up, and the check carries its own
+falsifiability receipt: add a forbidden import and it goes red. Each credential guard is
+built from one key and handed to one router, which is what makes REMOTE.md section 8's
+separation structural — the witness router cannot consult the chain key because it never
+receives it.
+
+### Tests
+
+`server/` has its own suite and its own 100% line-and-branch floor, deliberately kept out
+of the wheel's gate. The load-bearing test runs the library's own backend-conformance
+contract (`tests/adapters/backend_contract.py`, imported rather than restated) against
+the real server over TCP using the shipped `RemoteBackend`, `HTTPAnchorSink` and
+`HTTPWitness` unmodified — including the four-thread no-fork case. The compare-and-set
+race carries a falsifiability receipt: remove the precondition inside
+`ChainStore.append`'s builder and no 409 is ever served, both writers land at seq 0, and
+`verify_chain` reports the fork.
+
 ## [0.1.4] - 2026-08-29
 
 An independent re-analysis of the library (an arXiv-style paper plus a code-level
@@ -46,8 +746,11 @@ owner's decision and not a precedent.
 - **`JSONLBackend.append()` was O(n) per call, O(n²) over a trail's life.**
   `_tail_locked()` replayed and payload-decoded the *entire* stored trail, inside the
   write lock, on every single append, all to read two values off the last line. The cost
-  measured 4× per doubling of trail size, reaching 22.9s for a single append at n=4000 on
-  this machine. The paper's own re-analysis did not find it, having said it had not read
+  measured 4× per doubling of trail size: building a 4000-entry trail took **22.890s in
+  total** on this machine, i.e. 5.723ms per append. (The sentence originally shipped here
+  read that total as "22.9s for a single append at n=4000", which the measurement never
+  said; the numbers are the measured ones, only the reading of them is corrected.)
+  The paper's own re-analysis did not find it, having said it had not read
   `adapters/`. A tamper-evidence library too slow to use leaves a coverage gap an attacker
   never has to create, because sooner or later an operator turns the slow thing off. The
   fix is a backward seek from EOF that reads only the last stored line, so amortized cost
@@ -357,9 +1060,10 @@ what was checked, say what was not, and never let the second read as the first.
 - AI decision log layer. `DecisionRecord` (`waxseal.domain.decision`) is a decision-shaped
   payload carrying system id, model name, version and digest, outcome, rationale, policy
   version, confidence, and human-oversight mode, alongside `record_decision`,
-  `iter_decisions` and `commit_input` in `waxseal.sources.decisions`. `commit_input` hashes the input **after** redaction, so
-  the commitment cannot act as a guess-confirmation oracle for the secrets redaction just
-  removed; it refuses a redactor on `bytes` rather than silently claiming to have redacted
+  `iter_decisions` and `commit_input` in `waxseal.sources.decisions`. `commit_input`
+  hashes the input **after** redaction, so the commitment cannot act as a
+  guess-confirmation oracle for the secrets redaction just removed; it refuses a
+  redactor on `bytes` rather than silently claiming to have redacted
   them. `human_oversight=None` means *not recorded* and is counted apart from
   `mode="automated"` everywhere, because collapsing them would report an absence of
   evidence as evidence. Optional fields serialize as explicit `null` rather than being omitted, for
@@ -466,8 +1170,8 @@ what was checked, say what was not, and never let the second read as the first.
 
 - **An unreachable witness now exits 2, not 0.** Unreachable means unverifiable by
   witness, and a script reading only the exit code could not previously distinguish
-  "witnessed" from "no witness answered". `inconsistent` stays exit 1 and wins over 2, per the existing
-  combine ordering.
+  "witnessed" from "no witness answered". `inconsistent` stays exit 1 and wins
+  over 2, per the existing combine ordering.
 
 - `sources/{decisions,files,openclaw}` read the chain through the public `log.entries()`
   facade instead of reaching into `log._backend`. The facade's own docstring forbade

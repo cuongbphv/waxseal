@@ -20,10 +20,15 @@ from __future__ import annotations
 import http.server
 import json
 import threading
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from tests.adapters.fake_chain_server import FakeChainServer
 
 from waxseal import AuditLog
 from waxseal.cli import main
@@ -417,7 +422,9 @@ class TestRemoteTarget:
     histories, neither able to see the other's. That needs a witness.)
     """
 
-    def _start_server(self):  # type: ignore[no-untyped-def]
+    def _start_server(
+        self,
+    ) -> tuple[FakeChainServer, http.server.HTTPServer, threading.Thread]:
         import http.server
         import threading
 
@@ -522,7 +529,9 @@ class _WitnessService:
         return 200, json.dumps({"checkpoints": self.records}).encode()
 
 
-def _start_witness(service: _WitnessService):  # type: ignore[no-untyped-def]
+def _start_witness(
+    service: _WitnessService,
+) -> tuple[http.server.HTTPServer, threading.Thread, str]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def _dispatch(self, method: str) -> None:
             length = int(self.headers.get("Content-Length", 0))
@@ -573,20 +582,31 @@ def _add_declared_topology(
     anchor_sinks: int,
     witness: bool,
     pin_separate: bool = True,
+    ledger: bool | None = None,
 ) -> None:
     """Hand-edit a pin file to add a `declared_topology` directly, bypassing
     `--declare-topology` (waxseal-ekd) — useful here for setting up
     fixtures with values `--declare-topology`'s own spec grammar need not
     exercise (e.g. arbitrary `seal_escrow`/`pin_separate` combinations),
     and for tests of the comparison logic itself in isolation from the
-    CLI writer."""
+    CLI writer.
+
+    ``ledger`` (waxseal-fg4.45) follows the SAME "not yet a CLI flag" story
+    `--declare-topology` itself tells for the other four subfields: only
+    written into the object when not ``None``, matching
+    `domain/pinning.py`'s own omit-when-undeclared round-trip so a caller
+    that leaves it out gets exactly the pre-fg4.45 shape.
+    """
     state = json.loads(pin.read_text())
-    state["declared_topology"] = {
+    topology: dict[str, object] = {
         "seal_escrow": seal_escrow,
         "anchor_sinks": anchor_sinks,
         "witness": witness,
         "pin_separate": pin_separate,
     }
+    if ledger is not None:
+        topology["ledger"] = ledger
+    state["declared_topology"] = topology
     pin.write_text(json.dumps(state))
 
 
@@ -625,7 +645,10 @@ class TestDeclaredTopologyShortfall:
         assert "pin ok" in out  # the trail itself still verifies
 
     def test_shortfall_does_not_fire_when_observed_meets_or_exceeds_declared(
-        self, tmp_path: Path, witness_service, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        witness_service: tuple[_WitnessService, str],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         service, url = witness_service
         trail = tmp_path / "trail.jsonl"
@@ -787,6 +810,192 @@ class TestDeclaredTopologyShortfall:
         # writer(1) + seal_escrow(1) + anchor_sinks(2) + witness(1) + pin_separate(1)
         assert "6" in line
         assert "writer(1)" in line and "anchor_sinks(2)" in line and "witness(1)" in line
+
+
+class TestLedgerShortfall:
+    """waxseal-fg4.45: `declared_topology.ledger` vs. what THIS run's own
+    ledger check (`verify --rpc/--liveness`) corroborates. Same shape as
+    `TestDeclaredTopologyShortfall` above, one dimension over.
+    `--declare-topology` gained a `ledger=` subfield in waxseal-fg4.46 (see
+    `TestDeclaredTopologySpecParsing`/`TestDeclareViaCLI` below), but the
+    tests here still use `_add_declared_topology`'s `ledger=` kwarg to build
+    fixtures directly — the same "hand-edit the pin, bypass the CLI writer"
+    pattern this file already uses for `max_anchor_age_s`/
+    `expect_anchor_binding` below, and it isolates the shortfall comparison
+    from the CLI grammar it now shares tests with.
+    """
+
+    LIVENESS = "0x" + "33" * 20
+
+    def _two_nodes(
+        self, handler: object
+    ) -> tuple[list[str], tuple[object, object]]:
+        from tests._fake_evm_rpc import start_fake_node
+
+        url_a, server_a = start_fake_node(handler)  # type: ignore[arg-type]
+        url_b, server_b = start_fake_node(handler)  # type: ignore[arg-type]
+        return [url_a, url_b], (server_a, server_b)
+
+    def test_shortfall_is_exit_2_when_declared_but_ledger_check_fails(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from tests._fake_evm_rpc import head_return, liveness_node
+
+        trail = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(trail, 2)
+        main(["verify", str(trail), "--pin", str(pin)])  # trust-on-first-use
+        _add_declared_topology(pin, anchor_sinks=0, witness=False, ledger=True)
+        capsys.readouterr()
+
+        # Stale head + a short deadline: a genuinely DELINQUENT reading, the
+        # same fixture shape test_cli_ledger_verify.py's own delinquent test
+        # already uses.
+        urls, servers = self._two_nodes(
+            liveness_node(
+                head=head_return(
+                    seq=1, entry_hash="ab" * 32, root="cd" * 32, block_time=1_000_000_000
+                ),
+                deadline=1,
+            )
+        )
+        try:
+            code = main(
+                [
+                    "verify", str(trail), "--pin", str(pin),
+                    "--liveness", self.LIVENESS, "--rpc", urls[0], "--rpc", urls[1],
+                ]
+            )
+        finally:
+            for s in servers:
+                s.shutdown()  # type: ignore[attr-defined]
+        out = capsys.readouterr().out
+        assert code == 2
+        assert "ledger_shortfall" in out
+        assert "pin ok" in out  # the trail itself still verifies
+
+    def test_no_shortfall_when_declared_and_ledger_check_passes(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from tests._fake_evm_rpc import liveness_node
+
+        trail = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(trail, 2)
+        main(["verify", str(trail), "--pin", str(pin)])
+        _add_declared_topology(pin, anchor_sinks=0, witness=False, ledger=True)
+        capsys.readouterr()
+
+        urls, servers = self._two_nodes(liveness_node(deadline=3600))
+        try:
+            code = main(
+                [
+                    "verify", str(trail), "--pin", str(pin),
+                    "--liveness", self.LIVENESS, "--rpc", urls[0], "--rpc", urls[1],
+                ]
+            )
+        finally:
+            for s in servers:
+                s.shutdown()  # type: ignore[attr-defined]
+        out = capsys.readouterr().out
+        assert code == 0
+        assert "ledger_shortfall" not in out
+
+    def test_shortfall_does_not_fire_when_ledger_not_checked_this_run(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # A ledger authority IS declared, but this run passes neither --rpc
+        # nor --liveness: nothing was measured, so the comparison must not
+        # run at all (rule 5) — "not measured" stays distinct from
+        # "measured and found short".
+        trail = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(trail, 2)
+        main(["verify", str(trail), "--pin", str(pin)])
+        _add_declared_topology(pin, anchor_sinks=0, witness=False, ledger=True)
+        capsys.readouterr()
+
+        code = main(["verify", str(trail), "--pin", str(pin)])
+        out = capsys.readouterr().out
+        assert code == 0
+        assert "ledger_shortfall" not in out
+        assert "pin ok" in out
+
+    def test_no_shortfall_when_ledger_never_declared_even_if_check_fails(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The overwhelmingly common case: no pin file declares ledger at
+        # all. Even with a run that would fail a declared ledger (a
+        # delinquent reading), nothing about this bead may change behavior
+        # when nothing was ever declared.
+        from tests._fake_evm_rpc import head_return, liveness_node
+
+        trail = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(trail, 2)
+        main(["verify", str(trail), "--pin", str(pin)])
+        capsys.readouterr()
+
+        urls, servers = self._two_nodes(
+            liveness_node(
+                head=head_return(
+                    seq=1, entry_hash="ab" * 32, root="cd" * 32, block_time=1_000_000_000
+                ),
+                deadline=1,
+            )
+        )
+        try:
+            code = main(
+                [
+                    "verify", str(trail), "--pin", str(pin),
+                    "--liveness", self.LIVENESS, "--rpc", urls[0], "--rpc", urls[1],
+                ]
+            )
+        finally:
+            for s in servers:
+                s.shutdown()  # type: ignore[attr-defined]
+        out = capsys.readouterr().out
+        # Exit 2 here comes only from the delinquent ledger reading itself
+        # (a separate, direct finding), never from a shortfall comparison
+        # that has nothing declared to compare against.
+        assert code == 2
+        assert "ledger_shortfall" not in out
+        assert "delinquent" in out
+
+    def test_declared_ledger_survives_a_pin_advance(self, tmp_path: Path) -> None:
+        # A shortfall (exit 2) still advances the pin (SPEC.md section 13),
+        # and the new pin state must carry the ledger declaration forward,
+        # or the check would silently stop working after the first advance.
+        trail = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(trail, 2)
+        main(["verify", str(trail), "--pin", str(pin)])
+        _add_declared_topology(pin, anchor_sinks=0, witness=False, ledger=True)
+
+        make_trail(trail, 1, start=2)
+        main(["verify", str(trail), "--pin", str(pin)])
+
+        assert json.loads(pin.read_text())["declared_topology"]["ledger"] is True
+
+    def test_a_declared_ledger_raises_tau(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # τ +1 from `ledger=True` alone, the SAME way a declared witness or
+        # anchor sink already raises it — this is the plan's own criterion
+        # ("τ +1 khi ledger khai báo là authority riêng").
+        trail = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(trail, 2)
+        main(["verify", str(trail), "--pin", str(pin)])
+        _add_declared_topology(pin, anchor_sinks=0, witness=False, ledger=True)
+        capsys.readouterr()
+
+        assert main(["verify", str(trail), "--pin", str(pin)]) == 0
+        out = capsys.readouterr().out
+        # writer(1) + seal_escrow(1, _add_declared_topology's own default
+        # True) + pin_separate(1, same default) + ledger(1) = 4
+        assert "τ (separation degree): 4" in out
+        assert "ledger(1)" in out
 
 
 def _add_max_anchor_age(pin: Path, *, max_anchor_age_s: int) -> None:
@@ -1384,6 +1593,53 @@ class TestDeclaredTopologySpecParsing:
                 "seal_escrow=true,anchor_sinks=two,witness=true,pin_separate=true"
             )
 
+    def test_ledger_true_parses_onto_the_topology(self) -> None:
+        # waxseal-fg4.46: the optional 5th subfield, alongside the 4
+        # required-together ones, wired straight into
+        # SeparationTopology.ledger.
+        from waxseal.cli import _parse_declared_topology_spec
+
+        topology = _parse_declared_topology_spec(
+            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
+            "ledger=true"
+        )
+        assert topology.ledger is True
+
+    def test_ledger_false_parses_onto_the_topology(self) -> None:
+        from waxseal.cli import _parse_declared_topology_spec
+
+        topology = _parse_declared_topology_spec(
+            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
+            "ledger=false"
+        )
+        assert topology.ledger is False
+
+    def test_omitting_ledger_parses_as_none_not_false(self) -> None:
+        # The backward-compatibility case this bead exists to protect: every
+        # pre-fg4.46 spec string, and every existing CLI invocation, omits
+        # ledger= entirely and must keep parsing exactly as it did before —
+        # ledger is None ("never declared"), never False ("declared, not
+        # separated"). CLAUDE.md rule 5.
+        from waxseal.cli import _parse_declared_topology_spec
+
+        topology = _parse_declared_topology_spec(
+            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true"
+        )
+        assert topology.ledger is None
+
+    def test_a_non_boolean_ledger_value_is_rejected(self) -> None:
+        # Same error-handling convention every other subfield here already
+        # uses (_parse_bool_field's "must be 'true' or 'false'" message) —
+        # optional changes only whether the key must be present, never how a
+        # given value is validated.
+        from waxseal.cli import _parse_declared_topology_spec
+
+        with pytest.raises(ValueError, match="must be 'true' or 'false'"):
+            _parse_declared_topology_spec(
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
+                "ledger=maybe"
+            )
+
 
 class TestDeclareViaCLI:
     """CLI flags that WRITE `expect_anchor_binding`/`max_anchor_age_s`/
@@ -1441,6 +1697,57 @@ class TestDeclareViaCLI:
             "witness": True,
             "pin_separate": False,
         }
+
+    def test_declare_topology_with_ledger_round_trips_through_the_pin_file(
+        self, tmp_path: Path
+    ) -> None:
+        # End-to-end (waxseal-fg4.46): declare via the CLI's optional 5th
+        # subfield, --pin advances, and the pin JSON file on disk carries
+        # ledger nested inside declared_topology exactly as
+        # domain/pinning.py's render_pin_state already writes it.
+        trail = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(trail, 2)
+
+        code = main(
+            [
+                "verify", str(trail), "--pin", str(pin),
+                "--declare-topology",
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false,"
+                "ledger=true",
+            ]
+        )
+        assert code == 0
+        state = json.loads(pin.read_text())
+        assert state["declared_topology"] == {
+            "seal_escrow": True,
+            "anchor_sinks": 2,
+            "witness": True,
+            "pin_separate": False,
+            "ledger": True,
+        }
+
+    def test_declare_topology_without_ledger_omits_it_from_the_pin_file(
+        self, tmp_path: Path
+    ) -> None:
+        # The same backward-compatibility guarantee as the spec-parsing
+        # test, checked end-to-end: a run that never mentions ledger= must
+        # not grow a "ledger": false key domain/pinning.py's own
+        # omit-when-undeclared rule forbids inventing.
+        trail = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(trail, 2)
+
+        code = main(
+            [
+                "verify", str(trail), "--pin", str(pin),
+                "--declare-topology",
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false",
+            ]
+        )
+        assert code == 0
+        state = json.loads(pin.read_text())
+        assert "ledger" not in state["declared_topology"]
 
     def test_declare_topology_partial_is_a_cli_usage_error(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -1559,7 +1866,7 @@ class TestDeclareViaCLI:
 
 
 @pytest.fixture
-def witness_service():  # type: ignore[no-untyped-def]
+def witness_service() -> Iterator[tuple[_WitnessService, str]]:
     service = _WitnessService()
     httpd, thread, url = _start_witness(service)
     try:

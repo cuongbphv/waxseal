@@ -42,6 +42,32 @@ class TestPackageShape:
         proc = subprocess.run([sys.executable, "-c", code])
         assert proc.returncode == 0
 
+    def test_no_module_builds_a_urllib_opener_at_import(self) -> None:
+        """`build_opener` instantiates HTTPSHandler, which creates an SSL
+        context. As a module-level side effect (`adapters/remote.py`'s old
+        eager `_OPENER`) it ran on every hook import — and on windows/3.14
+        CI, whose newer bundled OpenSSL refuses to initialize inside the
+        hook tests' minimal env, it crashed the interpreter with SSLError
+        0xa080024 BEFORE any hook's fail-open existed: a module-level crash
+        is upstream of every try (5 tests, the 0.1.5 MR's fifth masked
+        class). The opener must be built on first request, never at import.
+        """
+        code = (
+            "import urllib.request\n"
+            "def boom(*a, **k):\n"
+            "    raise AssertionError('urllib opener built at import time')\n"
+            "urllib.request.build_opener = boom\n"
+            + "".join(f"import {name}\n" for name in STDLIB_ONLY_MODULES)
+            + "import waxseal.adapters.remote\n"
+            "import waxseal\n"
+            "print('no-opener-at-import')\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "no-opener-at-import" in proc.stdout
+
     def test_repo_manifests_match_the_package_constants(self) -> None:
         # The curl-install path serves integrations/hermes/*.yaml from the
         # repo while `waxseal install` writes the package constants — the

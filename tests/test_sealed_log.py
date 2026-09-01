@@ -2,7 +2,9 @@
 (stdlib HMAC) and injected asymmetric signers."""
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,6 +22,13 @@ def open_sealed(tmp_path: Path, k0: bytes) -> AuditLog:
         attestor=FileAttestor(tmp_path / "trail.jsonl", initial_key=k0),
         now_fn=lambda: "2026-08-21T06:00:00+00:00",
     )
+
+
+def attestor(log: AuditLog) -> Any:
+    """AuditLog.__init__ types its attestor param `Any | None`: every test
+    below that reaches for the attestor it configured knows it is not None."""
+    assert log._attestor is not None
+    return log._attestor
 
 
 class TestSealedAppend:
@@ -331,7 +340,7 @@ class TestAttestationCriticalSection:
 
         total = threads * per_thread
         assert len(list(log._backend.entries())) == total
-        assert len(list(log._attestor.attestations())) == total
+        assert len(list(attestor(log).attestations())) == total
         assert log.verify_attestations(initial_key=k0).ok
 
     def test_attest_failure_after_persist_is_not_a_dropped_write(
@@ -344,7 +353,7 @@ class TestAttestationCriticalSection:
             def attest(self, seq: int, entry_hash: str) -> None:
                 raise RuntimeError("sidecar disk full")
 
-            def attestations(self):  # noqa: ANN202 - test stub
+            def attestations(self) -> Iterator[Any]:
                 return iter(())
 
         log = AuditLog.open(tmp_path / "trail.jsonl", attestor=FailingAttestor())
@@ -361,12 +370,12 @@ class TestAttestationCriticalSection:
         log = open_sealed(tmp_path, k0)
         for i in range(2):
             log.append(payload={"i": i}, payload_type=PT)
-        real_attest = log._attestor.attest
-        log._attestor.attest = lambda seq, entry_hash: (_ for _ in ()).throw(
+        real_attest = attestor(log).attest
+        attestor(log).attest = lambda seq, entry_hash: (_ for _ in ()).throw(
             RuntimeError("sidecar disk full")
         )
         assert log.try_append(payload={"i": 2}, payload_type=PT) is True
-        log._attestor.attest = real_attest
+        attestor(log).attest = real_attest
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
         assert result.reason == "attestation_gap"
@@ -445,7 +454,7 @@ class TestFssAggregate:
         k0 = generate_key()
         log = open_agg_sealed(tmp_path, k0)
         log.append(payload={"i": 0}, payload_type="application/vnd.test.event+json")
-        [att] = list(log._attestor.attestations())
+        [att] = list(attestor(log).attestations())
         assert att.scheme == FS_HMAC_AGG_SCHEME
 
     def test_truncating_trail_attest_and_keyfile_together_is_still_caught_by_epoch(
@@ -549,7 +558,7 @@ class TestFssAggregate:
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
         assert result.reason == "aggregate_missing"
-        assert log._attestor.attestations().__next__().scheme == FS_HMAC_AGG_SCHEME
+        assert attestor(log).attestations().__next__().scheme == FS_HMAC_AGG_SCHEME
 
     def test_old_fs_hmac_sidecar_without_sealagg_still_verifies_unchanged(
         self, tmp_path: Path
@@ -614,9 +623,9 @@ class TestFssAggregate:
         # the plain per-entry seal check alone.
         class MinimalFsHmacAttestor:
             def __init__(self) -> None:
-                self._rows: list = []
+                self._rows: list[Attestation] = []
 
-            def attest(self, seq: int, entry_hash: str):
+            def attest(self, seq: int, entry_hash: str) -> Attestation:
                 from waxseal.domain.sealing import seal_entry
 
                 value = seal_entry(k0_evolved(seq), entry_hash)
@@ -625,7 +634,7 @@ class TestFssAggregate:
                 self._rows.append(att)
                 return att
 
-            def attestations(self):
+            def attestations(self) -> Iterator[Attestation]:
                 return iter(self._rows)
 
         def k0_evolved(seq: int) -> bytes:
@@ -701,7 +710,7 @@ class TestFaultInjectionBetweenDependentSidecarWrites:
         def explode(*a: object, **kw: object) -> None:
             raise OSError("simulated crash writing .sealagg")
 
-        log._attestor._write_aggregate = explode  # type: ignore[method-assign]
+        attestor(log)._write_aggregate = explode
         with pytest.raises(AttestationFailure):
             log.append(payload={"i": 1}, payload_type=PT)
 
@@ -770,7 +779,7 @@ class TestFaultInjectionBetweenDependentSidecarWrites:
         def explode(*a: object, **kw: object) -> None:
             raise OSError("simulated crash writing .sealkey")
 
-        log._attestor._write_key = explode  # type: ignore[method-assign]
+        attestor(log)._write_key = explode
         with pytest.raises(AttestationFailure):
             log.append(payload={"i": 1}, payload_type=PT)
 

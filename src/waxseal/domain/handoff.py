@@ -1,4 +1,4 @@
-"""Cross-trail handoff binding (SPEC D3; docs/plans/waxseal-paper-conformance.md).
+"""Cross-trail handoff binding (SPEC D3).
 
 ``on_handoff`` in ``integrations/openai_agents.py`` records a handoff phase
 carrying only ``from_agent``/``to_agent`` NAMES. A name commits to nothing

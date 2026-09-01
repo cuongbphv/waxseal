@@ -6,9 +6,27 @@ schema lives in `codex-rs/hooks/src/schema.rs`.
 
 Every tool dispatch (PreToolUse), tool result (PostToolUse), and user prompt
 (UserPromptSubmit) is appended to a hash chain at
-`$CODEX_HOME/waxseal/trail.jsonl` (default `~/.codex/waxseal/trail.jsonl`,
-override with `WAXSEAL_TRAIL`). Secrets are redacted **before** hashing and
-storage.
+`$CODEX_HOME/waxseal/trails/<slug>/trail.00000.jsonl` (default under
+`~/.codex/waxseal`; override the location with `WAXSEAL_TRAIL`). Secrets are
+redacted **before** hashing and storage.
+
+Trails are **routed per project** (SPEC.md section 20): the project key is the
+hook event's `cwd`, so two projects never braid their histories into one file.
+The active segment is rolled over into a new sealed segment once it passes
+16 MiB, and the segments are linked by a rotation binding at each new
+segment's `seq` 0 — never by `prev_hash` across a file boundary.
+
+```bash
+waxseal segments $CODEX_HOME/waxseal/trails/<slug>          # every segment + its binding
+waxseal verify   $CODEX_HOME/waxseal/trails/<slug>/trail.00000.jsonl   # one segment
+```
+
+`waxseal segments` exits 0 intact / 1 broken / 2 unverifiable-present / 3
+nothing read. `WAXSEAL_TRAIL` still overrides the LOCATION, and is not a
+rotation off-switch: a trail named through it rotates too, and on its first
+rotation it is adopted as the base segment. A pre-0.1.5
+`$CODEX_HOME/waxseal/trail.jsonl` is neither migrated nor sealed — it stops receiving
+appends and keeps verifying with plain `waxseal verify`.
 
 > Do not confuse this with the legacy `notify` config: `notify` fires one
 > `agent-turn-complete` event per turn with no tool data — too weak for auditing.
@@ -40,7 +58,7 @@ one-time trust approval for non-managed command hooks via the `/hooks` command.
 ## Verify anytime
 
 ```bash
-waxseal verify ~/.codex/waxseal/trail.jsonl
+waxseal verify ~/.codex/waxseal/trails/<slug>/trail.00000.jsonl
 # exit 0 intact / 1 broken (prints first bad seq) / 2 unverifiable rows present
 ```
 

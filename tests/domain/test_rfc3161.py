@@ -19,6 +19,7 @@ import base64
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from hypothesis import given, settings
@@ -49,11 +50,12 @@ VECTORS_PATH = Path(__file__).parent.parent / "vectors" / "rfc3161.json"
 FROZEN_VECTORS_SHA256 = "f00341d603391ed194497f2285c5a6373a851c91a0c0d60724c8b7a5b180c765"
 
 
-def vectors() -> dict:
-    return json.loads(VECTORS_PATH.read_text(encoding="utf-8"))
+def vectors() -> dict[str, Any]:
+    result: dict[str, Any] = json.loads(VECTORS_PATH.read_text(encoding="utf-8"))
+    return result
 
 
-def granted() -> tuple[bytes, bytes, dict]:
+def granted() -> tuple[bytes, bytes, dict[str, Any]]:
     """(response DER, the message it attests, the expected field values)."""
     vector = next(v for v in vectors()["responses"] if v["name"] == "freetsa-granted")
     return (
@@ -147,7 +149,7 @@ class TestVectorsAreFrozen:
 
 class TestRequestEncoding:
     @pytest.mark.parametrize("vector", vectors()["requests"], ids=lambda v: v["name"])
-    def test_matches_the_frozen_bytes(self, vector: dict) -> None:
+    def test_matches_the_frozen_bytes(self, vector: dict[str, Any]) -> None:
         built = encode_timestamp_req(vector["message_utf8"].encode(), nonce=vector["nonce"])
         assert built.hex() == vector["der_hex"]
 

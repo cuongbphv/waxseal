@@ -26,8 +26,8 @@ import struct
 import pytest
 
 from waxseal.domain.checkpoint import (
-    CHECKPOINT_FRAME_PREFIX,
-    CHECKPOINT_FRAME_PREFIX_V2,
+    CHECKPOINT_FRAME_PREFIX_AGG_BOUND,
+    CHECKPOINT_FRAME_PREFIX_BARE,
     Checkpoint,
     checkpoint_for,
     checkpoint_frame,
@@ -113,7 +113,7 @@ class TestCheckpointV1Compatibility:
     def test_frame_without_an_aggregate_is_unchanged(self) -> None:
         cp = Checkpoint(seq=2, entry_hash=HASHES[2], root=HASHES[0])
         expected = (
-            CHECKPOINT_FRAME_PREFIX
+            CHECKPOINT_FRAME_PREFIX_BARE
             + struct.pack(">Q", 3)
             + lp("2")
             + lp(HASHES[2])
@@ -125,7 +125,7 @@ class TestCheckpointV1Compatibility:
         cp = checkpoint_for(HASHES[:3])
         assert cp.agg_commit is None
         assert cp.agg_epoch is None
-        assert checkpoint_frame(cp).startswith(CHECKPOINT_FRAME_PREFIX)
+        assert checkpoint_frame(cp).startswith(CHECKPOINT_FRAME_PREFIX_BARE)
 
     def test_verify_checkpoint_ignores_the_aggregate_fields(self) -> None:
         # Checking the aggregate needs a key; verify_checkpoint has none and
@@ -140,7 +140,7 @@ class TestCheckpointV2:
             seq=2, entry_hash=HASHES[2], root=HASHES[0], agg_commit="ab" * 32, agg_epoch=3
         )
         expected = (
-            CHECKPOINT_FRAME_PREFIX_V2
+            CHECKPOINT_FRAME_PREFIX_AGG_BOUND
             + struct.pack(">Q", 5)
             + lp("2")
             + lp(HASHES[2])
@@ -160,7 +160,7 @@ class TestCheckpointV2:
             )
         )
         assert v1 != v2
-        assert not v2.startswith(CHECKPOINT_FRAME_PREFIX)
+        assert not v2.startswith(CHECKPOINT_FRAME_PREFIX_BARE)
 
     def test_changing_the_commit_changes_the_frame(self) -> None:
         base = dict(seq=1, entry_hash=HASHES[1], root=HASHES[0], agg_epoch=1)

@@ -64,7 +64,12 @@ def test_entry_hash_is_deterministic_and_hex(ts: str, payload_type: str, seq: in
 def test_any_single_payload_tamper_is_detected(n: int, data: st.DataObject) -> None:
     chain = build_chain(n)
     victim = data.draw(st.integers(min_value=0, max_value=n - 1))
-    chain[victim] = replace(chain[victim], payload=chain[victim].payload + b"x")
+    # build_chain() always constructs a bytes payload; Entry.payload is typed
+    # `bytes | None` only because a redacted entry stores none (CLAUDE.md
+    # "redact-before-hash"), which never applies to this fixture.
+    victim_payload = chain[victim].payload
+    assert victim_payload is not None
+    chain[victim] = replace(chain[victim], payload=victim_payload + b"x")
     result = verify_chain(chain, VersionRegistry())
     assert not result.ok
     assert result.broken_seq == victim

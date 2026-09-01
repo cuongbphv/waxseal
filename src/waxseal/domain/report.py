@@ -31,7 +31,7 @@ import json
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from waxseal.domain.decision import DECISION_PAYLOAD_TYPE, from_payload
 from waxseal.domain.header import Entry
@@ -71,6 +71,53 @@ SCOPE_LINE = (
     "obligation was met, not that payload content is truthful, not that "
     "unrecorded events did not occur"
 )
+
+
+#: The reason string a receipts check reports when there is no `.receipts`
+#: sidecar AT ALL. Defined here rather than in the CLI because this is the file
+#: that has to keep "never measured" apart from "measured and clean" in the
+#: document an auditor still has six months later -- the CLI only prints a line
+#: on the day. `verify` imports it from here so the two surfaces cannot drift
+#: into disagreeing about which state they are describing.
+RECEIPTS_NOT_RECORDED_REASON: Final = "no_receipts_recorded"
+
+# The receipts dimension's states, named rather than re-derived at each render
+# site. `verify` has carried this three-way distinction since J2; `report`
+# carried none of it, so the artifact that outlives the terminal was the one
+# surface where receipt coverage was invisible.
+_RECEIPTS_NOT_CHECKED: Final = "not_checked"
+_RECEIPTS_NOT_RECORDED: Final = "not_recorded"
+_RECEIPTS_PRESENT_EMPTY: Final = "present_empty"
+_RECEIPTS_CHECKED: Final = "checked"
+_RECEIPTS_BROKEN: Final = "broken"
+_RECEIPTS_UNVERIFIABLE: Final = "unverifiable"
+
+# The JSON half of the distinction. A consumer reading `state` never has to
+# know the reason strings by heart, and `not_recorded` can never be diffed
+# against `present_empty` as if both were "0 receipts, fine".
+_RECEIPTS_JSON_NOTE: Final = (
+    "state 'not_checked' means nobody looked; 'not_recorded' means there is no "
+    "sidecar, so acknowledgment was never measured; 'present_empty' means the "
+    "sidecar exists and covers no entry. None of the three is 'checked'."
+)
+
+# Only the three states a generic CheckSummary rendering would collapse are
+# spelled out here; broken/unverifiable/checked fall through to
+# `_summary_text`, which already says the right thing about them. The point of
+# the table is that "no sidecar" and "sidecar with nothing in it" must not both
+# render as some flavour of ok (rule 5, one sidecar over from dropped_writes).
+_RECEIPTS_LABEL: Final[dict[str, str]] = {
+    _RECEIPTS_NOT_CHECKED: "**not checked** (absence of a check is not a pass)",
+    _RECEIPTS_NOT_RECORDED: (
+        "**not recorded** — there is no `.receipts` sidecar beside this trail, so "
+        "per-append acknowledgment by a second authority was never measured here. "
+        "That is **not** the same claim as measured and clean."
+    ),
+    _RECEIPTS_PRESENT_EMPTY: (
+        "sidecar present, **0 record(s)** — checked, and it held nothing to check. "
+        "Not the same as no sidecar at all, and not coverage of any entry."
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +169,11 @@ class AuditReport:
     attestations: CheckSummary | None
     pin: CheckSummary | None = None
     witnesses: tuple[WitnessVerdict, ...] | None = None
+    # `None` means the receipts sidecar was never even looked for, which is a
+    # THIRD state above the two the summary itself carries: "looked, no sidecar"
+    # (RECEIPTS_NOT_RECORDED_REASON) and "looked, sidecar holds nothing" are
+    # both ok=True/checked=0 and neither is coverage.
+    receipts: CheckSummary | None = None
     # `None` means no `declared_topology` was supplied: "not declared", never
     # the smallest declared degree (1) or a bare 0 (rule 5). `counted_
     # authorities` is the enumeration a report must carry alongside the bare
@@ -168,6 +220,7 @@ class AuditReport:
                 },
                 "anchors": _summary_obj(self.anchors),
                 "attestations": _summary_obj(self.attestations),
+                "receipts": _receipts_obj(self.receipts),
                 "pin": _summary_obj(self.pin),
                 "witnesses": _witnesses_obj(self.witnesses),
                 "separation": {
@@ -246,6 +299,7 @@ class AuditReport:
         lines += ["", "## Sidecar checks", ""]
         lines.append(f"- Anchors: {_summary_text(self.anchors)}")
         lines.append(f"- Attestations: {_summary_text(self.attestations)}")
+        lines.append(f"- Receipts: {_receipts_text(self.receipts)}")
         lines.append(f"- Pin: {_summary_text(self.pin)}")
         lines += _witness_lines(self.witnesses)
 
@@ -275,11 +329,12 @@ def build_report(
     attestations: CheckSummary | None = None,
     pin: CheckSummary | None = None,
     witnesses: tuple[WitnessVerdict, ...] | None = None,
+    receipts: CheckSummary | None = None,
     declared_topology: SeparationTopology | None = None,
 ) -> AuditReport:
-    """Summarize a trail. ``anchors``/``attestations``/``pin``/``witnesses``
-    left at ``None`` mean those checks were not run, and the report says so
-    rather than implying a pass. ``declared_topology`` left at ``None`` means
+    """Summarize a trail. ``anchors``/``attestations``/``pin``/``witnesses``/
+    ``receipts`` left at ``None`` mean those checks were not run, and the report
+    says so rather than implying a pass. ``declared_topology`` left at ``None`` means
     no topology was declared for this trail, so τ renders as "not declared",
     never as ``0`` or ``1`` (rule 5)."""
     by_type: Counter[str] = Counter()
@@ -336,6 +391,7 @@ def build_report(
         attestations=attestations,
         pin=pin,
         witnesses=witnesses,
+        receipts=receipts,
         separation_degree=separation_degree(declared_topology),
         counted_authorities=counted_authorities(declared_topology),
     )
@@ -419,6 +475,10 @@ def _witness_lines(verdicts: tuple[WitnessVerdict, ...] | None) -> list[str]:
 def _summary_obj(summary: CheckSummary | None) -> dict[str, Any] | None:
     if summary is None:
         return None
+    return _summary_fields(summary)
+
+
+def _summary_fields(summary: CheckSummary) -> dict[str, Any]:
     return {
         "ok": summary.ok,
         "checked": summary.checked,
@@ -426,6 +486,55 @@ def _summary_obj(summary: CheckSummary | None) -> dict[str, Any] | None:
         "unverifiable": summary.unverifiable,
         "notes": list(summary.notes),
     }
+
+
+def _receipts_state(summary: CheckSummary) -> str:
+    """Which of the receipts dimension's states this summary is in.
+
+    Order matters: a break outranks everything, and the two ok/checked=0 states
+    are separated by the reason string, which is the ONLY thing that tells
+    "there is no sidecar" from "the sidecar is empty".
+    """
+    if not summary.ok:
+        return _RECEIPTS_BROKEN
+    if summary.unverifiable:
+        return _RECEIPTS_UNVERIFIABLE
+    if summary.reason == RECEIPTS_NOT_RECORDED_REASON:
+        return _RECEIPTS_NOT_RECORDED
+    if summary.checked == 0:
+        return _RECEIPTS_PRESENT_EMPTY
+    return _RECEIPTS_CHECKED
+
+
+def _receipts_obj(summary: CheckSummary | None) -> dict[str, Any]:
+    """The summary plus the state NAMED, so a JSON consumer never has to infer
+    absent-vs-empty from a reason string it would have to know by heart.
+
+    Never `null`, unlike the other sidecars: a null would be a fourth way to
+    say one of the three things `state` already says, and the one an
+    unsuspecting consumer would read as "no data" rather than "nobody looked".
+    """
+    if summary is None:
+        return {
+            "state": _RECEIPTS_NOT_CHECKED,
+            "note": _RECEIPTS_JSON_NOTE,
+        }
+    return {
+        **_summary_fields(summary),
+        "state": _receipts_state(summary),
+        "note": _RECEIPTS_JSON_NOTE,
+    }
+
+
+def _receipts_text(summary: CheckSummary | None) -> str:
+    if summary is None:
+        return _RECEIPTS_LABEL[_RECEIPTS_NOT_CHECKED]
+    state = _receipts_state(summary)
+    if state in _RECEIPTS_LABEL:
+        return _RECEIPTS_LABEL[state]
+    # checked / broken / unverifiable: the generic rendering already keeps
+    # those three apart, including the notes that qualify an `ok`.
+    return _summary_text(summary)
 
 
 def _summary_text(summary: CheckSummary | None) -> str:

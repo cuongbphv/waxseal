@@ -1,5 +1,7 @@
 # Sổ đối chiếu với bài luận
 
+*[English](conformance.md)*
+
 Một bài phân tích độc lập kiểu arXiv về waxseal (viết trên v0.1.3) đã chứng minh một tập kết
 quả về thư viện này, đề xuất một tập construction, kê một quy trình đánh giá tám mục, và báo
 hai finding. Bản 0.1.4 đã xử lý một phần.
@@ -56,7 +58,7 @@ dạng chạy được hay không — một câu hỏi khác và yếu hơn câu
 | Tính chặt, và cái giá của "tuyệt đối" | τ được tính và được báo cáo (`waxseal verify`, `waxseal report`) | **[Shipped]** — đã đóng G1 |
 | Truncation và phần dư của aggregate | Test sealing và anchored-aggregate | **[Shipped]** |
 | Bất khả thi về coverage | `dropped_writes: int \| None` và sidecar `.drops` | **[Shipped]**; construction phát hiện dương tính (admission ticket) giờ cũng **[Shipped]** — xem mục 3 |
-| Tách biệt liveness giữa contract và timestamp | `anchor_stale` cho nửa phía verifier; nửa công khai kiểm được cần contract | **[Partial]** — xem mục 3 |
+| Tách biệt liveness giữa contract và timestamp | `anchor_stale` cho nửa phía verifier; `AnchoringLiveness.sol` + `waxseal ledger-status` cho nửa công khai kiểm được | **[Shipped]** — xem mục 3 |
 | Cadence tối ưu, độ phẳng, fleet dividend | Công thức đóng của `domain/cadence.py`, nối vào `waxseal cadence` | **[Shipped]** — xem mục 3 |
 
 ## 3. Các construction
@@ -64,16 +66,22 @@ dạng chạy được hay không — một câu hỏi khác và yếu hơn câu
 | Construction | Section | Trạng thái | Ghi chú |
 |---|---|---|---|
 | Admission ticket ngoại sinh | Coverage | **[Shipped]** | Cơ chế **duy nhất** trong bài luận biến một write bị mất thành một write *bị phát hiện dương tính*. [`domain/tickets.py`](../../src/waxseal/domain/tickets.py) (`Ticket`, `scan_tickets`, `reconcile_tickets`, `render_reconciliation`) đã nối read-only vào `waxseal reconcile-tickets <trail> --issuer NAME --lease-size L [--issued SPEC]` (waxseal-sv1): một vé đã phát mà thiếu trên trail được báo *phát hiện dương tính*, không phải mức đo tối thiểu; cận vùng mù của lease window còn mở (`L-1`) luôn được nêu, không bao giờ đọc thành "sạch"; issuer không tới được (`--issued` bỏ trống) báo `measured=False`, khác với "0 drop" (rule 5). Bên phát vé vẫn là việc của operator — waxseal chỉ mang và đối soát vé, không bao giờ phát vé |
-| Anchoring liveness contract | Contract layer | **[Partial]** | `anchor_stale` cho phép verifier giữ Δ trong trust domain của chính nó gọi một trail là cũ. Nó **không** cho phép một bên thứ ba không liên quan đánh giá delinquency mà không cần operator hợp tác — nửa đó thuộc về contract, và chưa làm |
-| Bonded equivocation contract | Contract layer | **[Out of scope]** | Cần thành phần on-chain và một khoản bond. Thư viện này sản xuất *phát hiện*; một khoản bond định giá lợi ích của kẻ tấn công *trước* khi hành động — đó là một loại hàng khác |
-| Registry fingerprint append-only on-chain | Contract layer | **[Out of scope]** | Sẽ gỡ được điều kiện "registry bị đầu độc" trong an toàn schema cấu trúc. Hôm nay registry nằm phía verifier và tính toàn vẹn của nó là một giả định — giả định đó được phát biểu ra, không bị giấu |
+| Anchoring liveness contract | Contract layer | **[Shipped]** | `ports/ledger.py` + `domain/liveness.py` (F1, `26b074c`); `contracts/src/AnchoringLiveness.sol` — chỉ nhận head đã ký bởi writer, `seq` tăng nghiêm ngặt, đòi consistency proof RFC 9162 cho mọi submit sau lần đầu để một lịch sử bị viết lại không thể tiếp tục anchor (F2, `c21e0e6`); `adapters/evm.py::EvmLedgerReader`/`EvmLedgerSink`/`EvmAnchorSink` qua JSON-RPC thuần stdlib (F3, `20f2762`); `waxseal ledger-status --liveness`, `verify`/`report --liveness`, `anchor --evm-liveness` (F4, `26e3e91`). Một bên thứ ba KHÔNG LIÊN QUAN giờ đánh giá được delinquency mà không cần operator hợp tác — đúng nửa mà dòng này từng ghi là còn thiếu — bằng chứng end-to-end thật trên hai chain anvil sống: [`tests/adapters/test_evm_anvil.py`](../../tests/adapters/test_evm_anvil.py) (tầng adapter) và, lái đúng CLI `waxseal` như một subprocess, [`tests/test_cli_ledger_e2e_anvil.py`](../../tests/test_cli_ledger_e2e_anvil.py) (F5, bead này). **Khoảng trống nêu lúc ship, nay đã đóng** (waxseal-fg4.45, đóng bởi `b63c461` + `83d51a2`): F4 xây dimension ledger như một `_Check` độc lập — cùng hình dạng `_anchor_check`/`_receipts_check` đã có, đúng semantics exit-2 của CLI — thay vì nối vào `SeparationTopology`/`declared_topology` như văn bản gốc của plan mô tả, nên tại thời điểm F4, một `--liveness` đã cấu hình chưa nâng τ. Đã đóng: `SeparationTopology.ledger: bool | None` giờ tính vào τ và được `waxseal preflight` báo cáo, `--declare-topology` nhận subfield `ledger=`, ngữ pháp SPEC §13.1 được append trong `8acffda` |
+| Bonded equivocation contract | Contract layer | **[Shipped]** | `domain/bond.py` (`EquivocationProof`, `NonExtensionProof`, `checkpoint_signing_digest` — F1); `contracts/src/BondedCheckpoints.sol` slash trên hai `ecrecover` cho equivocation (bằng chứng dương tính tự đủ) và trên một divergent leaf DƯƠNG TÍNH cho non-extension, cố ý KHÔNG BAO GIỜ trên một consistency proof chỉ đơn thuần xác minh thất bại — một khác biệt thiết kế so với chữ ký gốc của plan, được chấp nhận vì slash trên một proof thất bại sẽ cho phép bất kỳ ai rút cạn bond của một writer trung thực chỉ với giá gas (F2, `c21e0e6`); `EvmLedgerSink.submit_fraud_proof`/`submit_non_extension` (F3); `waxseal bond deposit`/`bond prove` (F4). Bằng chứng end-to-end thật: [`tests/adapters/test_evm_anvil.py::TestTheBond`](../../tests/adapters/test_evm_anvil.py) và, lái `bond deposit` rồi `bond prove` trên một equivocation dàn dựng như CLI subprocess thật đối đầu hai chain anvil sống, [`tests/test_cli_ledger_e2e_anvil.py::TestBondViaCli::test_deposit_then_prove_equivocation_slashes_the_bond`](../../tests/test_cli_ledger_e2e_anvil.py) — khẳng định cả trạng thái on-chain thô của `bondOf` (đã slash, amount về 0) lẫn cùng sự kiện đó đọc lại qua `ledger-status --bond` (exit 1, reason `bond_slashed`). Phạm vi giữ nguyên như bài luận: cơ chế này biến MỘT hành vi bất lương cụ thể thành đắt đỏ một khi bị bắt; nó không làm equivocation bất khả thi và không phát hiện một writer đơn giản không bao giờ tự mâu thuẫn |
+| Registry fingerprint append-only on-chain | Contract layer | **[Shipped]** | `contracts/src/FingerprintRegistry.sol` tính `fp = sha256(descriptor)` NGAY TRÊN CHAIN và từ chối trùng lặp — không owner, không constructor, không đường update/pause/upgrade, xác minh trên chính BYTECODE ĐÃ DEPLOY (một phép đi qua opcode tìm `DELEGATECALL`/`CALLCODE`/`SELFDESTRUCT`), không chỉ trên source (F2, `c21e0e6`); `domain/registry.py::RegistryCrossCheck`/`descriptor_frame`/`decode_descriptor` (F1); `EvmLedgerReader.registry_lookup`/`registry_agreement` (F3); `waxseal registry publish`, `ledger-status --registry`, `verify`/`report --registry` (F4). Bằng chứng end-to-end thật: [`tests/adapters/test_evm_anvil.py::TestTheRegistry`](../../tests/adapters/test_evm_anvil.py) và, publish qua một CLI subprocess thật rồi tạo ra một disagreement thật hình dạng eclipse giữa hai endpoint trên hai chain anvil sống, [`tests/test_cli_ledger_e2e_anvil.py::TestRegistryPublishAndCrossCheckViaCli`](../../tests/test_cli_ledger_e2e_anvil.py). Gỡ đúng điều kiện dòng này từng nêu: đầu độc một entry giờ cần một va chạm SHA-256 hoặc quyền kiểm soát chain, không chỉ quyền ghi file cục bộ. **Khoảng trống nêu lúc ship, nay đã đóng** (waxseal-fg4.44, đóng bởi `081eab3` + `608775c`): từ vựng tại thời điểm F của `domain/registry.py` gộp "fingerprint vắng mặt trong registry" và "registry không đọc được" vào một status (`REGISTRY_UNREACHABLE`, reason `registry_absent_or_unreachable`), nên `ledger-status`/`verify --registry` khi đó không báo được hai sự kiện đó như hai sự thật tách biệt — được cả F3 lẫn F4 phát hiện độc lập, cả hai đều đúng khi từ chối tự vá trong code adapter/CLI một quyết định thuộc tầng domain. Đã đóng: domain giờ báo bốn trạng thái (`agrees`/`disagrees`/`absent`/`unreachable`) với hai reason tách biệt `registry_fingerprint_not_registered` và `registry_could_not_be_read`, gộp vào instance 13 của nguyên lý Tam trị |
 | Anchoring tối ưu chi phí | Cost | **[Shipped]** | Công thức đóng, tính lồi, cận phẳng, và fleet dividend √M đều là số học trên tham số do operator cung cấp, trong [`domain/cadence.py`](../../src/waxseal/domain/cadence.py) ([`tests/domain/test_cadence.py`](../../tests/domain/test_cadence.py)), nối read-only vào `waxseal cadence` — không có tham số trail nào, không mở trail — lệnh in `N*`, `N_opt` đã clamp, cận clamp `[lam*delta, lam*t_max]`, các số hạng cân bằng, một *dải* khuyến nghị quanh `N_opt` (không phải một điểm, theo `flatness_bound`), và thông báo có nhãn "sai công nghệ anchor, không phải sai cadence" khi `delta > t_max` ([`tests/test_cli_cadence.py`](../../tests/test_cli_cadence.py), waxseal-8nw) |
 | Handoff binding liên trail, anchoring bắc cầu | Multi-agent | **[Shipped]** | [`domain/handoff.py`](../../src/waxseal/domain/handoff.py) (`HandoffBinding`, `binding_holds`) và [`sources/handoff.py`](../../src/waxseal/sources/handoff.py) (`record_handoff`) đã build và test đầy đủ (waxseal-otj) — xem G5, nay đã đóng bởi waxseal-9al.2. `record_handoff` gọi `log.append`, nên theo đúng luật CLI trong CLAUDE.md ("CLI không bao giờ append entry vào chain") nó không bao giờ nối được vào CLI — cùng quy ước đã giữ `record_decision`/`record_file`/`generate_key` không nối CLI từ trước; mục "Handoff binding liên trail" trong README.md/.vi.md/.zh.md nay đã ghi tài liệu cho `record_handoff` như một lệnh gọi thư viện mà code của operator tự import trực tiếp, đúng như cách ba hàm kia đã được ghi. `binding_holds` thuần và read-only, nên CÓ THỂ nối vào CLI mà không đụng tới luật đó: `waxseal verify-handoff <delegate-trail> --origin <origin-trail>` (`tests/test_cli_verify_handoff.py`) nay quét một trail delegate tìm các entry handoff-binding và kiểm từng cái so với `entry_hashes()` hiện tại của trail origin, đúng khuôn mẫu `verify_membership`/`verify_consistency` đã thiết lập qua `waxseal consistency` |
 
-Hai dòng [Out of scope] và dòng [Partial] tầng contract là những dòng changelog 0.1.4 đã khai báo.
-Ba dòng còn lại đều ra mắt sau khi 0.1.4 đã phát hành, sau khi sổ này đã tồn tại để ghi lại từng
-khoảng trống: anchoring tối ưu chi phí (waxseal-cmk, waxseal-8nw) và admission ticket (waxseal-sv1)
-đều đã **[Shipped]** trọn vẹn và tới được từ một lệnh CLI thật; handoff binding liên trail
+Hai trong ba dòng [Out of scope] mà changelog 0.1.4 từng khai báo, cộng dòng [Partial] tầng contract,
+nay đã **[Shipped]**: Workstream F của 0.1.5 xây cả ba construction on-chain mà bài luận gọi là
+"đã thiết kế và phân tích, chưa xây" — chain-agnostic phía sau `ports/ledger.py`, EVM là adapter đầu
+tiên, đường đọc thuần stdlib (`eth_call`), đường ghi qua một `Signer` do operator inject (rule 1 của
+CLAUDE.md không đổi). Contract Foundry thật, bằng chứng end-to-end thật trên anvil ở cả tầng adapter
+lẫn, mới trong release này, chính CLI được lái như một subprocess đối đầu hai chain sống — xem Ghi
+chú của từng dòng ở trên và G6 mục 5 cho hai khác biệt mà bản ship này MANG THEO, được ghi lại chứ
+không xoa nhẵn. Các dòng còn lại ra mắt sớm hơn, sau khi 0.1.4 đã phát hành, khi sổ này đã tồn tại để
+ghi lại từng khoảng trống: anchoring tối ưu chi phí (waxseal-cmk, waxseal-8nw) và admission ticket
+(waxseal-sv1) đều đã **[Shipped]** trọn vẹn và tới được từ một lệnh CLI thật; handoff binding liên trail
 (waxseal-otj) đạt **[Shipped]** theo hai cách khác nhau cho hai nửa của nó — `record_handoff`
 qua tài liệu README cho một lệnh gọi thư viện cố ý không nối CLI, `binding_holds` qua một lệnh
 CLI read-only mới — đóng gap G5 (waxseal-9al.2).
@@ -245,6 +253,46 @@ delegation multi-agent 2 hop (A → B → C, cả hai hop đều được kiểm
 tại (exit 3), và payload của một header-only reader không sẵn có (bị bỏ qua, không báo là thất
 bại — đúng rule 5 unmeasured-≠-absent, không phải việc của lệnh này để tự bịa ra một verdict
 cho những byte nó chưa bao giờ được đưa cho).
+
+### G6 — tầng on-chain ship kèm hai khác biệt đã biết, cố ý [Shipped — cả hai khoảng trống đã đóng]
+
+Workstream F (F1-F4, `26b074c`/`c21e0e6`/`20f2762`/`26e3e91`) đã giao ba contract mà mục 3 ghi
+**[Shipped]**. Hai chỗ code ship khác với văn bản gốc của plan được chính các agent phát hiện ra
+ghi nhận công khai thay vì âm thầm nuốt, và cả hai từng mở dạng bead `needs-human` tại thời
+điểm ghi mục này (nay đều đã đóng — fg4.44 bởi `081eab3`+`608775c`, fg4.45 bởi
+`b63c461`+`83d51a2`) — kỷ luật của sổ này là mô tả cái ĐÃ SHIP, không phải mô tả nguyên văn chưa sửa
+của plan, nên cả hai được ghi thẳng ở đây thay vì hoà vào ba dòng **[Shipped]** ở trên.
+
+- **waxseal-fg4.44 — `registry_absent` và `registry_unreachable` là MỘT status, không phải hai.**
+  `RegistryCrossCheck` trong `domain/registry.py` báo `REGISTRY_UNREACHABLE` (reason
+  `registry_absent_or_unreachable`) cho CẢ HAI trường hợp "registry contract không giữ gì dưới
+  fingerprint này" VÀ "không đọc được registry" — hai sự thật khác nhau một operator có lý do
+  muốn tách biệt, gộp lại vì `RegistryFinding` được xây quanh input nó nhận
+  (`onchain_descriptor: bytes | None`), vốn đã không tách được hai trường hợp trước khi tới kiểu
+  đó. Được F3 (close-reason của `waxseal-7yf`) và F4 (close-reason của `waxseal-j7b`) phát hiện
+  độc lập, cả hai đều đúng khi từ chối tự bịa ra một status thứ ba trong code adapter hoặc CLI —
+  đó là quyết định thuộc tầng domain, và `domain/registry.py` là một module đã ship, đã test từ
+  F1. Còn chờ quyết định của chủ repo: khác biệt này có đáng thêm một state vào một bảng ánh xạ
+  mà chính dòng ở trên vừa khen là exhaustive hay không. **Nay đã đóng** (`081eab3` + `608775c`): chủ repo đã quyết —
+  bảng ánh xạ nhận thêm state, và phép tách được gộp vào instance 13 của nguyên lý Tam trị.
+- **waxseal-fg4.45 — dimension ledger không nâng τ.** Văn bản Workstream F4 của plan mô tả nối
+  một check `--liveness`/`--registry` đã cấu hình vào `SeparationTopology` của
+  `domain/separation.py` (một trường `ledger: bool`) để nó tính vào τ, con số separation-degree mà
+  `waxseal preflight`/`verify --pin` báo cáo (gap G1, ở trên). F4 ship check ledger như một
+  `_Check` độc lập thay vào đó — cùng hình dạng `_anchor_check`/`_receipts_check` đã có, giao đúng
+  semantics exit-2 của CLI — và nêu rõ việc thu hẹp phạm vi này thay vì âm thầm làm. Một operator
+  đọc `τ (separation degree): N` hôm nay nhận một con số không tính công cho một check on-chain đã
+  cấu hình, dù `ledger-status`/`verify --liveness` đang thật sự kiểm tra một điều có thật; khoảng
+  trống nằm ở CON SỐ ĐƯỢC BÁO CÁO, không nằm ở bản thân check. **Nay đã đóng** (`b63c461` + `83d51a2`): τ giờ tính công
+  một thẩm quyền ledger đã khai báo, và `preflight` in tách bạch khai-báo với đo-được.
+
+Không khoảng trống nào trong hai cái trên biến ba dòng **[Shipped]** của mục 3 thành một khẳng
+định sai: các construction hoạt động đúng như mô tả, test trên anvil sống thật kể cả qua một CLI
+subprocess thật (F5,
+[`tests/test_cli_ledger_e2e_anvil.py`](../../tests/test_cli_ledger_e2e_anvil.py)). Cả hai khoảng
+trống từng nằm ở RÌA của bề mặt đã ship — một state từ vựng bị gộp, một đóng góp vào τ chưa được đếm —
+đúng hình dạng mà kỷ luật [Written, unwired] ≠ [Shipped] tồn tại để giữ cho nhìn thấy được, thay
+vì để một sổ như thế này xoa nhẵn đi.
 
 ## 6. Cái gì không thể trở thành [Proved] ở đây, và vì sao
 

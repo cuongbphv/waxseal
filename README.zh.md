@@ -2,6 +2,55 @@
 
 [English](README.md) | [Tiếng Việt](README.vi.md) | **中文**
 
+> **关于本页的链接：** 这份中文 README 是一个入口页。它链接到的文档 —— `SPEC.md`、
+> `DESIGN.md`、`REMOTE.md`、`CHANGELOG.md`、`docs/` 下的各篇，以及 `integrations/`
+> 和 `examples/` 里的 README —— **目前只有英文版**。这是一个刻意的决定，不是遗漏：
+> 一份过时的译文会向读不到原文的读者悄悄陈述一个已经作废的说法，那比没有译文更糟。
+> 越权威的文档越要读英文原件 —— `SPEC.md` 是字节级规范，`pyproject.toml` 是依赖的
+> 唯一来源。
+
+<!-- 翻译范围决定（waxseal-fg4.31，2026-09-01）。这一条已经定案，不必重新讨论；
+     要改的话请连同下面的数字一起改。
+
+     选项：(a) 把 README.zh.md 链接到的文档都译成中文；(b) 在 README.zh.md 里明写
+     这些文档只有英文版；(c) 记下“中文 README 是一个礼节性入口页”这一意图。
+     取 (b) + (c)。
+
+     测得的实际规模（2026-09-01，develop da252bd）：
+       - README.zh.md 共 32 个 markdown 链接、25 个不同目标：2 个外部 URL、1 个页内
+         锚点、22 个仓库内。22 个里有 3 个是刻意指向英文的（语言切换的 README.md /
+         README.vi.md，以及 README.md#capability-extras 那张 specifier 权威表），
+         其余 19 个落在只有英文版的文档上。
+       - docs/ 下英文正文档 14 篇：8 篇“对外文档”各有 .vi.md，6 篇 docs/plans/ 三种
+         语言都只有英文；.zh.md 一篇也没有。根目录 11 篇英文文档里，只有 README 有
+         译本。
+       - 选项 (a) 的下限是 README.zh.md 直接链接的 6 篇 docs/ 文档 = 14,535 词；
+         如果对同一个读者诚实，还得加上他从同一页点得到的 SPEC.md / DESIGN.md /
+         REMOTE.md（共 14,660 词），合计约 29,000 词，且尚未计入 CHANGELOG.md
+         (11,102 词) 和 9 篇 integrations/examples 的 README。
+       - 稳定性：本仓库 2026-08-21 建立，到 2026-09-01 共 37 次提交。这 11 天里，
+         上述 9 篇被链接的文档被改动的提交数为 SPEC.md 8、DESIGN.md 5、REMOTE.md 3、
+         threat-model.md 2，其余五篇各 1 —— 合计 22 次，约每 12 小时就有一次。
+
+     理由：这份文档集正处在高频改动期，不是稳定期，所以 (a) 不是“一次性把 6 篇译完”，
+     而是给每一次未来的文档改动都挂上两笔翻译债。漏掉一次，中文读者读到的就是一个
+     过时的说法，而且他没有任何线索知道自己读到的是旧的 —— 这正是本仓库整体纪律所
+     禁止的那件事：未经测量或已经过时的东西，不得读起来像当前的。CLAUDE.md 的
+     Ternary Evidence Principle 在文档上的同一形状：宁可标注“未提供中文版”，也不要
+     让一份陈旧译文冒充当前译文。
+
+     因此中文 README 的定位是：让中文读者判断这个库是不是他要找的东西，并把他准确地
+     交给英文原件。它不是中文文档集的第一块。越权威的内容（SPEC.md 的字节级格式、
+     pyproject.toml 的 specifier）越是刻意不翻译。
+
+     越南语一侧形状不同，因为 docs/ 的 8 篇对外文档都已有 .vi.md，没有断崖；不要把
+     这条决定推广到 README.vi.md。
+
+     如果以后要重开这个决定：先量一遍上面这些数字（篇数、词数、改动频率）再决定，
+     并且要连带回答“谁在每次文档改动时负责同步中文版”。没有这个答案就不要开始译。
+     相关：waxseal-fg4.13（owner 未决）——译文里的 [Unverified]/[Inference] 标签用
+     哪种语言；真要新增中文译文，先把那条定了，否则新文件会继承同一处不一致。 -->
+
 **面向 AI Agent 框架的防篡改、schema 演进安全的审计哈希链。**
 零依赖。MIT 许可证。Python ≥ 3.11。
 
@@ -118,6 +167,53 @@ pip install waxseal
 
 已发布于 [PyPI](https://pypi.org/project/waxseal/)。从源码安装：
 `pip install git+https://github.com/cuongbphv/waxseal`
+
+## 能力扩展（capability extras）
+
+<!-- 翻译决定（waxseal-fg4.32，2026-09-01）：本节翻译正文，而把具体的 specifier
+     指回英文表格，不把表格复制到三个 README 里。理由：那张表是活内容 ——
+     `rfc3161` 已在 c57a7b7 从 Planned 变为已发布，`evm` 也已随 Workstream F3 落地
+     跟着变为已发布 —— 一张漏更新的译版表格会印出错误的安装指令（过时的包名或版本
+     specifier），而一个指针最多只是多点一次。对新增 extra 的人的影响：只需改
+     README.md 里的表格；三个 README 只有在“已发布 extra 的名字清单”变化时才需要
+     动，因为这里仍用正文列出了 extra 的名字。 -->
+
+零依赖描述的是内核，而不是 waxseal 能力的上限。内核保持 `dependencies = []`，这是一条
+不变量而非偏好；凡是需要第三方客户端的能力，都通过“可选 extra + 注入”抵达：你安装客户
+端，你构造它，你把它传进来，waxseal 自己永远不 import 它。[存储后端](#存储后端)一节里的
+`S3Backend` 和 `PostgresBackend` 就是这个模式，extras 存在只是为了让 `pip` 替你取一个
+兼容的客户端，而不是因为 waxseal 需要它。
+
+今天已发布的是三个 extra：`pip install waxseal[s3]`、`pip install waxseal[postgres]`
+和 `pip install waxseal[rfc3161]`。
+
+`rfc3161` 是 waxseal 唯一自己 import 的 extra，而且只在一个函数里
+（`adapters/rfc3161_verify.py`）—— 所以它没有任何东西需要你注入。它开启的是
+`verify`/`report` 的可选签名维度，并且只有当你用 `--tsa-ca-file` 指名一份 CA bundle
+时才生效：CMS 签名或证书链校验失败的 token 是 exit 1，而任何根本无法校验的情况（包括
+extra 缺失）是 exit 2 并附上说明是哪一种的标签，绝不会是一个沉默的 exit 0。不带这个
+参数则一切照旧：receipt 仍按结构校验，和以前完全一样。参见 [SPEC.md](SPEC.md) 第
+17.1 节。
+
+（`dev` 也存在，用于运行测试套件。它不是一个能力 extra。）
+
+`evm`（链上 ledger 层）已经发布：`ports/ledger.py`、`domain/bond.py`、
+`domain/liveness.py`、`domain/abi.py`、`domain/registry.py`、`adapters/evm.py`，
+以及 CLI 命令 `ledger-status`、`registry publish`、`bond deposit`/`bond prove`、
+`verify`/`report --rpc/--liveness/--registry`、`anchor --evm-*`。
+`pyproject.toml` 里 `evm = []` 为空，**不代表"尚未发布"**——它的意思是：读路径纯用
+`eth_call`（走 `adapters/remote.py` 已有的那套 stdlib Transport），写路径把交易
+字段交给运维方自己构造并注入的 `Signer`，所以没有任何客户端需要 `pip` 去装；这个
+extra 存在只是为了让 `pip install waxseal[evm]` 是一条合法命令、让这项能力在
+metadata 里有名字，而不是因为代码没写。
+[docs/paper/conformance.md](docs/paper/conformance.md) 逐行记着这一层哪些部分
+已发布、还剩下哪些已知缺口。
+
+增加一个**硬**依赖是另一个问题，答案是不。extras 才是被许可的那条路。
+
+权威表格 —— 哪个 extra 取哪个客户端包、版本 specifier 是什么 —— 在英文的
+[README.md § Capability extras](README.md#capability-extras) 里，那里是这些字符串的
+唯一来源。
 
 ## 使用
 
@@ -476,7 +572,8 @@ CLI 自身的契约就是绝不向 chain 追加 entry（这和上文 `record_fil
 
 ## 集成
 
-为七个 agent 框架与编码工具提供审计 hook，另有一个面向自带账本的宿主（OpenClaw）的导出器。每个集成都针对目标当前的
+为七个 agent 框架与编码工具提供审计 hook，另有一个面向自带账本的宿主（OpenClaw）的导出器，
+以及一个面向自带日志系统的治理层（Microsoft AGT）的 AuditSink Protocol 实现。每个集成都针对目标当前的
 hook 契约做过验证（版本记录在各自 README 中），在执行*之前*记录 dispatch，在哈希前
 完成密钥脱敏，超大输出做可见截断，并且**绝不阻塞或否决宿主的工作** —— 任何失败都
 退化为带标注、有计数的 dropped write。
@@ -490,8 +587,8 @@ waxseal install hermes        # 或 claude-code / codex / cursor / hermes-gatewa
 
 `install` 会把轻量 shim 写入宿主的配置目录（shim 只 import
 `waxseal.integrations.*`，因此 `pip install -U waxseal` 即可原地升级 hook 行为），
-并打印宿主仍需添加的 settings 片段。LangChain、CrewAI、OpenAI Agents 集成无需
-install 步骤 —— 直接 import，例如
+并打印宿主仍需添加的 settings 片段。LangChain、CrewAI、OpenAI Agents、Microsoft AGT
+集成无需 install 步骤 —— 直接 import，例如
 `from waxseal.integrations.langchain import WaxsealCallbackHandler`。
 
 | 目标 | 机制 | 目录 |
@@ -504,6 +601,7 @@ install 步骤 —— 直接 import，例如
 | OpenAI Agents SDK | `RunHooks` | [integrations/openai-agents/](integrations/openai-agents/) |
 | hermes-agent | plugin + gateway hook | [integrations/hermes/](integrations/hermes/) |
 | OpenClaw | 审计账本导出器（`openclaw audit --json`，非 hook） | [integrations/openclaw/](integrations/openclaw/) |
+| Microsoft AGT | AuditSink Protocol（挂接到 AGT 自己的 `AuditLog`） | [`waxseal.integrations.agt`](src/waxseal/integrations/agt.py) |
 
 对编码工具类集成的范围说明：这些 hook 给你一份并行的、篡改可检测（tamper-evident）的、**不含密钥**的
 行动记录。它们不会（也无法）改写工具自身的 transcript 文件 —— 如果密钥已经落入

@@ -1,8 +1,8 @@
 """waxseal-audit hook for hermes-agent.
 
 Appends every lifecycle event to a tamper-evident hash chain at
-<hermes home>/audit/trail.jsonl. Requires `pip install waxseal` in the
-environment running the hermes gateway.
+`WAXSEAL_TRAIL`, else <hermes home>/audit/trail.jsonl. Requires
+`pip install waxseal` in the environment running the hermes gateway.
 
 Hermes hook contract: handle(event_type, context), errors must never block
 the pipeline, so every failure path degrades to a counted dropped write
@@ -17,6 +17,7 @@ from typing import Any
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations._trail import home_base, resolve_trail
 
 PAYLOAD_TYPE = "application/vnd.hermes.hook-event+json"
 
@@ -55,11 +56,28 @@ def _hermes_home() -> Path:
 
         return Path(get_hermes_home())
     except Exception:
-        return Path.home() / ".hermes"
+        # home_base(), not Path.home(): the last rung has to honour HOME
+        # first or a host that sets it writes into a different Windows
+        # profile than `waxseal verify` reads (waxseal-fg4.3; the rule and
+        # the ntpath split are documented on home_base itself).
+        return home_base() / ".hermes"
+
+
+def _trail_path() -> Path:
+    """Where this gateway writes.
+
+    `WAXSEAL_TRAIL` is honoured here for the same reason the stdin hooks
+    honour it: an operator who aims the variable at a path and then verifies
+    that path must not be shown an empty file. There is no explicit-argument
+    rung — hermes loads this module itself and passes no path — so the chain
+    is `WAXSEAL_TRAIL` > `HERMES_HOME` > the home fallback, and that last
+    rung reads `HOME` before ``Path.home()`` like every other integration.
+    """
+    return resolve_trail(default=lambda: _hermes_home() / "audit" / "trail.jsonl")
 
 
 def _get_log() -> AuditLog:
-    path = _hermes_home() / "audit" / "trail.jsonl"
+    path = _trail_path()
     log = _logs.get(path)
     if log is None:
         log = AuditLog.open(path, redactor=RegexRedactor(), record_drops=True)
@@ -87,7 +105,7 @@ def handle(event_type: str, context: dict[str, Any] | None) -> None:
         # best-effort (FileDropRecorder.record() never raises).
         from waxseal.adapters.drops import FileDropRecorder
 
-        FileDropRecorder(_hermes_home() / "audit" / "trail.jsonl").record(
+        FileDropRecorder(_trail_path()).record(
             reason=type(e).__name__, payload_type=PAYLOAD_TYPE
         )
         return

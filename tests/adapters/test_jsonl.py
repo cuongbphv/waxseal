@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -110,7 +111,7 @@ class TestRoundTrip:
 
 
 class TestTrailPermissions:
-    def test_trail_file_is_created_owner_only(self, tmp_path) -> None:
+    def test_trail_file_is_created_owner_only(self, tmp_path: Path) -> None:
         # The trail holds prompts, tool output, and file contents at a
         # predictable path (~/.claude/waxseal/...): default-umask 0644 hands
         # every local user the whole audit trail. Only the sealkey was 0600.
@@ -149,7 +150,7 @@ class _ByteCountingFile:
     seeks from EOF, unlike the old whole-file forward parse this wrapper was
     first written against."""
 
-    def __init__(self, fileobj, sink: list) -> None:
+    def __init__(self, fileobj: Any, sink: list[int]) -> None:
         self._fileobj = fileobj
         self._sink = sink
 
@@ -157,27 +158,29 @@ class _ByteCountingFile:
         self._fileobj.__enter__()
         return self
 
-    def __exit__(self, *exc) -> None:
-        return self._fileobj.__exit__(*exc)
+    def __exit__(self, *exc: Any) -> None:
+        self._fileobj.__exit__(*exc)
 
     def __iter__(self) -> "_ByteCountingFile":
         return self
 
     def __next__(self) -> str:
-        line = next(self._fileobj)
+        line: str = next(self._fileobj)
         self._sink.append(_byte_len(line))
         return line
 
-    def read(self, *args, **kwargs):
-        data = self._fileobj.read(*args, **kwargs)
+    def read(self, *args: Any, **kwargs: Any) -> "str | bytes":
+        data: str | bytes = self._fileobj.read(*args, **kwargs)
         self._sink.append(_byte_len(data))
         return data
 
-    def seek(self, *args, **kwargs):
-        return self._fileobj.seek(*args, **kwargs)
+    def seek(self, *args: Any, **kwargs: Any) -> int:
+        pos: int = self._fileobj.seek(*args, **kwargs)
+        return pos
 
-    def tell(self, *args, **kwargs):
-        return self._fileobj.tell(*args, **kwargs)
+    def tell(self, *args: Any, **kwargs: Any) -> int:
+        pos: int = self._fileobj.tell(*args, **kwargs)
+        return pos
 
 
 class TestCostReceipt:
@@ -198,10 +201,10 @@ class TestCostReceipt:
         for _ in range(n - 1):
             backend.append(lambda seq, prev: build_entry(seq, prev))
 
-        sink: list = []
+        sink: list[int] = []
         real_open = open
 
-        def counting_open(file, *args, **kwargs):
+        def counting_open(file: Any, *args: Any, **kwargs: Any) -> Any:
             f = real_open(file, *args, **kwargs)
             if Path(file) == path:
                 return _ByteCountingFile(f, sink)
@@ -241,15 +244,31 @@ class TestCostReceipt:
         n: int,
         integrity_scan_every: int | None,
         monkeypatch: "pytest.MonkeyPatch",
+        *,
+        resumable_scan: bool = True,
     ) -> int:
         # Unlike _bytes_read_by_last_append (which isolates one call to
         # prove the tail-read fix), the amortized-scan claim is about total
         # cost across n appends, so every append here is instrumented.
+        #
+        # resumable_scan=False restores the pre-0.1.5 scan, which re-read the
+        # whole file on every fire, by resetting the resume point before each
+        # call. It is how the falsifiability receipt below still has a "bad"
+        # configuration to fail against (waxseal-aa4 A3).
+        if not resumable_scan:
+            real_scan = JSONLBackend._integrity_scan
+
+            def full_scan(self: JSONLBackend) -> None:
+                self._scanned_offset = 0
+                self._scanned_lines = 0
+                real_scan(self)
+
+            monkeypatch.setattr(JSONLBackend, "_integrity_scan", full_scan)
         backend = JSONLBackend(path, integrity_scan_every=integrity_scan_every)
-        sink: list = []
+        sink: list[int] = []
         real_open = open
 
-        def counting_open(file, *args, **kwargs):
+        def counting_open(file: Any, *args: Any, **kwargs: Any) -> Any:
             f = real_open(file, *args, **kwargs)
             if Path(file) == path:
                 return _ByteCountingFile(f, sink)
@@ -286,24 +305,45 @@ class TestCostReceipt:
         )
 
     # Falsifiability receipt (CLAUDE.md rule 9): the identical measurement
-    # and identical 2.5x bound, but with integrity_scan_every=1 so the scan
-    # runs on EVERY append instead of every 1000th. This must NOT satisfy
-    # the bound above — confirming test_periodic_scan_cost_is_amortized_
-    # not_per_append is not vacuously true (a bound that holds no matter
-    # what "amortized" means would prove nothing about this feature).
-    def test_falsifiability_scan_every_append_breaks_the_amortized_bound(
+    # and identical 2.5x bound, over a configuration that must NOT satisfy
+    # it — confirming test_periodic_scan_cost_is_amortized_not_per_append is
+    # not vacuously true (a bound that holds no matter what "amortized"
+    # means would prove nothing about this feature).
+    #
+    # The "bad" configuration changed in 0.1.5 (waxseal-aa4 A3), and that is
+    # a finding worth recording rather than a bound quietly relaxed. It used
+    # to be integrity_scan_every=1 alone: firing a WHOLE-FILE scan on every
+    # append made total cost O(n^2), and this test measured 9_069_595 bytes
+    # at n=2000 against 4_523_596 at n=1000 once the scan became resumable —
+    # ratio 2.00x, comfortably inside the bound, i.e. the receipt had stopped
+    # falsifying anything. The scan now resumes from the last byte offset it
+    # parsed clean, so scan_every=1 costs O(bytes appended) and no longer
+    # breaks amortization by itself. What carries the amortization now is the
+    # resume, so that is what this receipt removes: with the resume point
+    # reset before every scan (resumable_scan=False, the pre-0.1.5 whole-file
+    # scan) the same measurement reads 228_245_760 bytes at n=1000 and
+    # 906_006_760 at n=2000 — ratio 3.97x, the O(n^2) shape the bound is
+    # there to catch.
+    #
+    # Every number above was re-measured after waxseal-fg4.1 moved the
+    # periodic scan to BEFORE the pending write, and each came down by one
+    # trail line per fire (~449 bytes) — 4_524_045/9_070_045 and
+    # 228_694_650/906_905_650 as first recorded. Both ratios are unchanged to
+    # two decimals: the line the scan no longer sees on this fire is read on
+    # the next one, so the shape this receipt measures never depended on it.
+    def test_falsifiability_unresumed_scan_breaks_the_amortized_bound(
         self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
     ) -> None:
         bytes_1000 = self._bytes_read_by_all_appends(
-            tmp_path / "falsify-1000.jsonl", 1000, 1, monkeypatch
+            tmp_path / "falsify-1000.jsonl", 1000, 1, monkeypatch, resumable_scan=False
         )
         bytes_2000 = self._bytes_read_by_all_appends(
-            tmp_path / "falsify-2000.jsonl", 2000, 1, monkeypatch
+            tmp_path / "falsify-2000.jsonl", 2000, 1, monkeypatch, resumable_scan=False
         )
         assert bytes_2000 > bytes_1000 * 2.5, (
             f"n=2000 total read {bytes_2000} bytes vs n=1000 total read "
             f"{bytes_1000} bytes (ratio {bytes_2000 / bytes_1000:.2f}x) — "
-            "expected scanning on every append (integrity_scan_every=1) to "
+            "expected a non-resuming whole-file scan on every append to "
             "break the 2.5x bound; if it doesn't, the amortized test above "
             "is not actually falsifiable"
         )
@@ -325,8 +365,18 @@ class TestIntegrityScan:
         lines[corrupted_line_no - 1] = lines[corrupted_line_no - 1][:-5]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+        # The scan fires on this append and reports the line — as a labelled
+        # warning, not as an exception, and the append still lands
+        # (waxseal-fg4.1: it used to raise, from AFTER the write). The
+        # line/offset facts are unchanged; only who hears them changed.
+        with pytest.warns(RuntimeWarning) as caught:
+            entry = backend.append(lambda seq, prev: build_entry(seq, prev))
+        assert entry.header.seq == 9
+        message = str(caught[0].message)
+        assert f"line {corrupted_line_no}" in message
+        assert "JSONDecodeError" in message
         with pytest.raises(JSONLCorruptionError) as exc_info:
-            backend.append(lambda seq, prev: build_entry(seq, prev))
+            backend._integrity_scan()
         assert exc_info.value.line_no == corrupted_line_no
         assert isinstance(exc_info.value.cause, json.JSONDecodeError)
         assert str(corrupted_line_no) in str(exc_info.value)
@@ -364,6 +414,80 @@ class TestIntegrityScan:
             backend.append(lambda seq, prev: build_entry(seq, prev))
         # No JSONLCorruptionError raised anywhere above — that is the point.
 
+
+class TestScanNeverInvalidatesADurableAppend:
+    """waxseal-fg4.1: ``_integrity_scan()`` used to run AFTER the entry was
+    written and flushed, so a ``JSONLCorruptionError`` about some OTHER,
+    pre-existing line surfaced as an exception from an append that had already
+    durably succeeded. A caller retrying on exception then recorded the same
+    event twice — two entries, contiguous seq, no gap, so ``verify()`` still
+    returns ok and the duplicate is invisible to chain integrity. That is
+    trail-completeness damage no verdict can see.
+    """
+
+    def _trail_with_nine_entries_and_a_torn_line(self, path: Path) -> JSONLBackend:
+        backend = JSONLBackend(path, integrity_scan_every=10)
+        for _ in range(9):
+            backend.append(lambda seq, prev: build_entry(seq, prev))
+        lines = path.read_text(encoding="utf-8").splitlines()
+        # Line 5 unparseable: a torn write or an out-of-band edit, NOT a hash
+        # tamper. The next append is the one whose scan fires on it.
+        lines[4] = lines[4][:-5]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return backend
+
+    def _rows_holding(self, path: Path, payload: bytes) -> int:
+        # Counts by payload_hash, not by base64 body: the header hash is what
+        # identifies the event regardless of how the envelope stores bytes.
+        return path.read_text(encoding="utf-8").count(compute_payload_hash(payload))
+
+    def test_a_caller_retrying_on_exception_does_not_double_append(
+        self, tmp_path: Path, recwarn: "pytest.WarningsRecorder"
+    ) -> None:
+        # recwarn, not pytest.warns: this test asserts the duplicate is gone,
+        # deliberately without asserting HOW the scan reports (that is
+        # test_pre_existing_corruption_is_reported_as_a_labelled_warning's
+        # job), so a regression here fails on the row count and says so.
+        path = tmp_path / "trail.jsonl"
+        backend = self._trail_with_nine_entries_and_a_torn_line(path)
+        marker = b'{"event":"the-one-event-this-caller-records"}'
+
+        # The caller pattern the bug punishes: retry once on any exception.
+        for _attempt in range(2):
+            try:
+                backend.append(lambda seq, prev: build_entry(seq, prev, marker))
+                break
+            except Exception:
+                continue
+
+        rows = self._rows_holding(path, marker)
+        assert rows == 1, (
+            f"the caller recorded one event and the trail holds {rows} rows for it "
+            "— an append that already reached disk reported failure, so the retry "
+            "wrote it again (contiguous seq, no gap, invisible to verify)"
+        )
+
+    def test_pre_existing_corruption_is_reported_as_a_labelled_warning(
+        self, tmp_path: Path
+    ) -> None:
+        # Rule 6: the degraded scan is labelled in the output, never swallowed.
+        path = tmp_path / "trail.jsonl"
+        backend = self._trail_with_nine_entries_and_a_torn_line(path)
+        with pytest.warns(RuntimeWarning) as caught:
+            entry = backend.append(lambda seq, prev: build_entry(seq, prev))
+        assert entry.header.seq == 9
+        messages = [str(w.message) for w in caught]
+        assert any("waxseal" in m and "line 5" in m for m in messages), messages
+
+    def test_the_scan_itself_still_raises_when_called_directly(self, tmp_path: Path) -> None:
+        # The exception is not gone, only removed from append()'s failure
+        # modes: an explicit check still gets the line and offset it needs.
+        path = tmp_path / "trail.jsonl"
+        backend = self._trail_with_nine_entries_and_a_torn_line(path)
+        with pytest.raises(JSONLCorruptionError) as exc_info:
+            backend._integrity_scan()
+        assert exc_info.value.line_no == 5
+        assert isinstance(exc_info.value.cause, json.JSONDecodeError)
 
 class TestTailReadEdgeCases:
     def _line_for(self, entry: Entry) -> str:

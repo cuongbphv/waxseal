@@ -136,6 +136,7 @@ class AuditLog:
         record_drops: bool = False,
         chain_id: str = "default",
         timeout: float = 10.0,
+        receipts_trail: Path | str | None = None,
     ) -> AuditLog:
         if isinstance(path, str) and path.startswith(("http://", "https://")):
             # MUST come before Path(path): Path() collapses "//" and drops
@@ -154,6 +155,15 @@ class AuditLog:
                 api_key=os.environ.get("WAXSEAL_API_KEY"),
                 chain_id=chain_id,
                 timeout=timeout,
+                # SPEC.md section 19: where the server's per-append
+                # acknowledgment is filed. Threaded from here because
+                # RemoteBackend has accepted it since 63dbe2d and no documented
+                # entry point passed it, which made the sidecar reachable only
+                # by hand-constructing the backend -- built and unreachable is
+                # not shipped. `None` stays "not recorded", never an error: a
+                # receipt is corroboration, and the chain lives server-side
+                # either way.
+                receipts_trail=receipts_trail,
             )
             return cls(
                 remote_backend,
@@ -164,6 +174,18 @@ class AuditLog:
                 anchor_sink=anchor_sink,
                 anchor_every=anchor_every,
                 drop_recorder=None,
+            )
+        if receipts_trail is not None:
+            # The mirror image of the record_drops refusal above. A receipt is
+            # a SERVER's acknowledgment that it accepted an append; a local
+            # backend issues none, so accepting the argument here would name a
+            # sidecar location nothing would ever write to -- an operator
+            # reading "not recorded" could not tell that from a server that
+            # never issued one.
+            raise ValueError(
+                "receipts_trail requires a remote (http/https) trail target: a "
+                "receipt is the server's own acknowledgment of an append, and a "
+                "local backend issues none"
             )
         p = Path(path).expanduser()
         if p.suffix == ".jsonl":
@@ -506,7 +528,17 @@ class AuditLog:
         """Entry hashes in write order: the input every checkpoint, pin, and
         witness check is computed over. One materializing pass, defined once,
         because two spellings of "the trail's hashes" are two chances to
-        disagree about them."""
+        disagree about them.
+
+        The list is inherent, not an unoptimized leftover: `batch_root` and
+        `consistency_proof` (RFC 6962 / RFC 9162) hash the leaves pairwise
+        upward, so every leaf is needed again after the last one is read, and
+        `membership_proof` indexes into them. A streaming variant of this
+        method cannot exist without a second read of the whole trail, which
+        is strictly worse. Callers that only need the chain verdict and a
+        forward pass over entries have `_verify_and_entries` / `entries()`
+        instead — do not "optimize" this one into a generator.
+        """
         return [entry.entry_hash for entry in self.entries()]
 
     def anchor(self) -> Checkpoint:
@@ -660,6 +692,24 @@ class AuditLog:
         # AuditLog.open. Reporting it as anything but "process" scope would
         # overstate what was actually measured.
         return replace(result, dropped_writes=self._dropped, drops_source="process")
+
+    def _verify_and_entries(self) -> tuple[VerifyResult, list[Entry]]:
+        """The chain verdict and the entries it was computed over, from ONE
+        pass over the backend.
+
+        `report` needs both, and reading the trail twice to get them made a
+        read-only command cost double for a verdict and a summary of the same
+        bytes. Deliberately not a public method taking caller-supplied
+        entries: a verdict must be computed over what this log actually
+        stores, never over rows handed in from outside, and the registry that
+        decides which rows are recomputable stays owned by this class.
+
+        `dropped_writes` is left at `None` (verify_chain's own value): a
+        process that observed no writes has not measured completeness, and
+        `None` is never the same as `0` (CLAUDE.md rule 5).
+        """
+        entries = list(self._backend.entries())
+        return verify_chain(entries, self._registry), entries
 
     def _canonical_payload(self, payload: dict[str, Any] | bytes) -> bytes:
         if isinstance(payload, bytes):

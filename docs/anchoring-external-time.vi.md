@@ -135,13 +135,13 @@ ots upgrade receipts/seq-240.ots     # sau khi block Bitcoin xác nhận
 ots verify  receipts/seq-240.ots -f receipts/seq-240.frame
 ```
 
-> **`[Chưa xác minh]`** Bộ byte chính xác mà một calendar trả về từ `/digest` ở đây được coi là
+> **`[Unverified]`** Bộ byte chính xác mà một calendar trả về từ `/digest` ở đây được coi là
 > một tệp `.ots` tách rời. Điều này chưa được xác nhận đối chiếu với
 > `python-opentimestamps`, và ngữ nghĩa upgrade của `GET /timestamp/<hex>` cũng chưa được
 > xác nhận. Hãy kiểm chứng cả hai với client OpenTimestamps trước khi dựa vào công thức này
 > trong môi trường sản xuất.
 
-> **`[Chưa xác minh]`** Những calendar công khai nào còn sống thì thay đổi theo thời gian. Chính
+> **`[Unverified]`** Những calendar công khai nào còn sống thì thay đổi theo thời gian. Chính
 > vì vậy waxseal không cung cấp URL calendar mặc định nào — hãy truyền vào tường minh, và
 > xác nhận rằng nó còn hiệu lực. Các calendar thường được nhắc tới trong tài liệu
 > OpenTimestamps gồm `alice.btc.calendar.opentimestamps.org`,
@@ -195,28 +195,28 @@ log.anchor()
 
 ### Sự kiện hợp đồng EVM
 
-Lưu `sha256(frame)` vào calldata của một hợp đồng hoặc phát nó ra làm topic của một event.
-Số block và transaction hash cùng nhau tạo thành receipt:
+waxseal giờ đã cung cấp sẵn cái này (0.1.5, Workstream F) — xem
+`src/waxseal/adapters/evm.py::EvmAnchorSink`. EVM không còn là "một chuỗi mà
+waxseal không biết tới" nữa; hãy dùng sink thật thay vì tự viết lại:
 
-```python
-class EvmAnchorSink:
-    name = "evm"
-
-    def __init__(self, w3, contract, account):
-        self._w3, self._contract, self._account = w3, contract, account
-
-    def anchor(self, checkpoint):
-        digest = hashlib.sha256(checkpoint_frame(checkpoint)).digest()
-        tx = self._contract.functions.anchor(digest).transact({"from": self._account})
-        receipt = self._w3.eth.wait_for_transaction_receipt(tx)   # raises on revert
-        return f"evm:{receipt.blockNumber}:{receipt.transactionHash.hex()}"
+```bash
+waxseal anchor trail.jsonl --evm-rpc https://rpc.example \
+    --evm-liveness 0xLIVENESS_CONTRACT_ADDRESS
 ```
 
-Các lưu ý riêng cho EVM: một giao dịch bị revert phải ném lỗi chứ không được trả về; một
-lần reorg có thể huỷ một anchor đã xác nhận, nên hãy chờ đủ độ sâu xác nhận mà mô hình mối
-đe doạ của bạn yêu cầu trước khi coi receipt là bằng chứng; và digest thì công khai vĩnh
-viễn, điều đó không sao — nó là hash của một hash, và payload không bao giờ rời khỏi kho
-lưu trữ của bạn.
+Lưu `sha256(frame)` vào calldata của một hợp đồng hoặc phát nó ra làm topic của một event;
+chain id, số block, và transaction hash cùng nhau tạo thành receipt. Bên ký giao dịch không
+bao giờ là một tham số dòng lệnh hay một biến môi trường chứa private key: đó là một tiến
+trình bên ngoài được đặt tên qua `WAXSEAL_EVM_SIGNER_CMD`, một giao thức ba động từ
+(`address` / `sign-digest` / `sign-tx`) — xem đoạn về CLI contract trong CLAUDE.md.
+
+Các lưu ý riêng cho EVM, vẫn đúng dù sink có sẵn của waxseal xử lý việc này hay bạn áp dụng
+lại hình dạng đó cho một chuỗi tương thích EVM mà nó chưa bao phủ: một giao dịch bị revert
+phải ném lỗi chứ không được trả về (sink có sẵn đã làm đúng điều này); một lần reorg có thể
+huỷ một anchor đã xác nhận, nên hãy chờ đủ độ sâu xác nhận mà mô hình mối đe doạ của bạn yêu
+cầu trước khi coi receipt là bằng chứng (`confirm_tag` của `EvmLedgerSink` mặc định là
+`finalized` chính vì lý do đó); và digest thì công khai vĩnh viễn, điều đó không sao — nó là
+hash của một hash, và payload không bao giờ rời khỏi kho lưu trữ của bạn.
 
 ### Hyperledger Fabric
 

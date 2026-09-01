@@ -22,12 +22,13 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from waxseal.domain.checkpoint import (
-    CHECKPOINT_FRAME_PREFIX,
-    CHECKPOINT_FRAME_PREFIX_V2,
+    CHECKPOINT_FRAME_PREFIX_AGG_BOUND,
+    CHECKPOINT_FRAME_PREFIX_BARE,
     Checkpoint,
     checkpoint_frame,
 )
@@ -44,8 +45,9 @@ VECTORS_PATH = Path(__file__).parent.parent / "vectors" / "checkpoint.json"
 FROZEN_VECTORS_SHA256 = "3aaac5b31461d3e3ea613523048e87b206c997fd18815b1bf4ccc9649231cfe4"
 
 
-def vectors() -> dict:
-    return json.loads(VECTORS_PATH.read_text(encoding="utf-8"))
+def vectors() -> dict[str, Any]:
+    result: dict[str, Any] = json.loads(VECTORS_PATH.read_text(encoding="utf-8"))
+    return result
 
 
 class TestVectorsAreFrozen:
@@ -63,7 +65,7 @@ class TestCheckpointFrames:
     @pytest.mark.parametrize(
         "vector", vectors()["checkpoint_frames"], ids=lambda v: v["name"]
     )
-    def test_matches_the_independently_derived_bytes(self, vector: dict) -> None:
+    def test_matches_the_independently_derived_bytes(self, vector: dict[str, Any]) -> None:
         cp = Checkpoint(
             seq=vector["seq"],
             entry_hash=vector["entry_hash"],
@@ -78,23 +80,23 @@ class TestCheckpointFrames:
     @pytest.mark.parametrize(
         "vector", vectors()["checkpoint_frames"], ids=lambda v: v["name"]
     )
-    def test_the_prefix_matches_the_binding(self, vector: dict) -> None:
+    def test_the_prefix_matches_the_binding(self, vector: dict[str, Any]) -> None:
         # SPEC section 15: no binding -> byte-identical v1 output (every anchor
         # taken before the binding existed keeps verifying); a binding -> the
         # v2 prefix AND a different field count, so v1/v2 confusion is
         # unrepresentable.
         frame = bytes.fromhex(vector["frame_hex"])
         if vector["agg_commit"] is None:
-            assert frame.startswith(CHECKPOINT_FRAME_PREFIX)
+            assert frame.startswith(CHECKPOINT_FRAME_PREFIX_BARE)
         else:
-            assert frame.startswith(CHECKPOINT_FRAME_PREFIX_V2)
+            assert frame.startswith(CHECKPOINT_FRAME_PREFIX_AGG_BOUND)
 
 
 class TestAggregateCommits:
     @pytest.mark.parametrize(
         "vector", vectors()["aggregate_commits"], ids=lambda v: v["name"]
     )
-    def test_matches_the_independently_derived_commitment(self, vector: dict) -> None:
+    def test_matches_the_independently_derived_commitment(self, vector: dict[str, Any]) -> None:
         assert aggregate_commit(vector["epoch"], vector["agg"]) == vector["commit"]
 
 

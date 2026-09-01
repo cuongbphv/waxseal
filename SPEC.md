@@ -483,14 +483,27 @@ read as a declaration of the smallest possible value (rule 5).
  "expect_anchor_binding": <bool>,
  "max_anchor_age_s": <int>,
  "declared_topology": {"seal_escrow": <bool>, "anchor_sinks": <int>,
-                       "witness": <bool>, "pin_separate": <bool>}}
+                       "witness": <bool>, "pin_separate": <bool>,
+                       "ledger": <bool, optional>}}
 ```
 
 `expect_anchor_binding` is always written (a plain flag with a real default of
 `false`); `max_anchor_age_s` and `declared_topology` are omitted entirely when absent.
-`declared_topology`, when present, MUST carry all four subfields — a partial object is
-`malformed_pin`, never silently defaulted, because a defaulted field here would be
-indistinguishable from one the operator actually declared.
+`declared_topology`, when present, MUST carry all four ORIGINAL subfields together —
+a partial object over those four is `malformed_pin`, never silently defaulted,
+because a defaulted field here would be indistinguishable from one the operator
+actually declared.
+
+`declared_topology` gained a fifth subfield, `ledger`, in 0.1.5 — genuinely optional,
+not required together with the four above. A `declared_topology` written before it
+existed, or one that simply never mentions it, omits the key entirely and parses as
+`ledger` undeclared: rule 5's `None`, a different claim from a declared-false
+`ledger`, never conflated with it. When the key is present it MUST be a boolean;
+there is no partial-object case to reject for it, because there is exactly one key
+to check, not four. `--declare-topology`'s CLI grammar (`cli.py`) mirrors this
+exactly: `ledger=true`/`ledger=false` is an optional fifth token alongside the four
+required-together ones, and omitting it parses precisely as it did before this
+subfield existed.
 
 This does not contradict the rule above that the section 15 aggregate fields are
 deliberately not part of a pin. That rule is about **values**: `agg_commit` cannot be
@@ -638,6 +651,20 @@ present-but-unconvertible nonce is malformed sidecar content — this format's
 own bytes, so a break (exit 1), not a foreign format. What the stored nonce
 buys is section 17's re-verify replay detection.
 
+**Note (0.1.5): the two frame prefixes are parallel SHAPES, not a version
+pair.** `waxseal-checkpoint-v1\n` and `waxseal-checkpoint-v2\n` select between
+two frame shapes by CONTENT — bare, and aggregate-bound — not between an old
+encoding and its replacement. Neither is superseded: a writer holding no
+aggregate binding emits the first shape forever. The `v1`/`v2` inside the bytes
+is historical naming only, and reading it as an old-then-new pair invites
+migrating the "old" shape away — precisely the class of change this document's
+frozen material forbids. The implementation therefore names the constants
+`CHECKPOINT_FRAME_PREFIX_BARE` and `CHECKPOINT_FRAME_PREFIX_AGG_BOUND`, keeping
+the pre-0.1.5 names (`CHECKPOINT_FRAME_PREFIX`, as spelled in section 9, and
+`CHECKPOINT_FRAME_PREFIX_V2`) as aliases of the same values. The BYTES above are
+frozen: externally issued anchor receipts already contain them, so a change
+would orphan evidence that exists.
+
 ## 16. Scope statement
 
 Every auditor report carries a fixed, machine-identifiable scope statement:
@@ -738,6 +765,46 @@ Honest limit worth stating plainly: an attacker who rewrites BOTH the record
 and its receipt is caught only by the delegated signature verification, never
 by the structural check.
 
+### 17.1 Optional signature verification (`waxseal[rfc3161]`, added in 0.1.5)
+
+Section 17's check is structural and stays structural: it is what a
+zero-dependency build can do, and it is what runs when no bundle is named. The
+optional `rfc3161` extra adds a second, independent dimension — the CMS
+signature and the X.509 chain — engaged only by `--tsa-ca-file <bundle.pem>`
+on `verify` or `report`.
+
+The bundle is the operator's. waxseal consults no default trust store: not the
+system store, not certifi, not the certificates the token happens to carry. A
+default would decide whom the operator trusts without saying so on any line of
+output.
+
+The dimension has three states, never two:
+
+| State | Class | Exit |
+|---|---|---|
+| `signature_valid` | the CMS signature verifies and the signer chains to an anchor in the named bundle | 0 |
+| `signature_invalid` | checked and false — the signature does not verify, the signed attributes commit to another TSTInfo, or the signer chains to nobody in the bundle | 1 |
+| `signature_unchecked` | the question was never put — the extra is not installed, the bundle is unreadable, or the token's CMS is a shape this build cannot parse | 2 |
+
+`signature_unchecked` MUST NOT be rendered as a pass. An absent extra that
+exits 0 reports authenticity nobody established, and every `signature_unchecked`
+line therefore names both its cause and its remedy.
+
+Unreadable is unchecked, never invalid — section 17's asymmetry, carried into
+the module that CAN say "false". Only a signature that verifiably fails, or a
+chain that verifiably does not reach the named anchors, earns exit 1.
+
+Without `--tsa-ca-file` no exit code in section 17's table changes. The run is
+not silent about it: it prints one `signature_unchecked` line naming the flag,
+the same way a pending OpenTimestamps proof is stated without raising the exit
+code.
+
+What a `signature_valid` line does NOT claim, and says so on the line itself:
+certificate validity windows, revocation status and the `timeStamping`
+extended key usage are not checked. `openssl ts -verify` remains the documented
+route and checks more; this extra is a second option for operators who cannot
+run it, never a replacement.
+
 ## 18. OpenTimestamps anchoring
 
 Submission: POST the raw 32-byte `SHA-256(checkpoint_frame(cp))` to
@@ -767,3 +834,498 @@ the recipe for assembling a detached `.ots` file from a raw calendar response,
 have not been confirmed against python-opentimestamps and are not specified
 here. [Unverified] Which public calendars are currently live also changes over
 time; the sink therefore requires an explicit URL and ships no default.
+
+## 19. Per-append receipt sidecar (`.receipts`) — added in 0.1.5
+
+Anchoring (section 9) bounds a rewrite to the window since the last published
+checkpoint; a pin (section 13) is the verifier's own memory. Neither is a
+per-append acknowledgment: a record, made at write time by a second authority,
+that entry `seq` carried `entry_hash` the moment it was accepted. The receipt
+sidecar is that record on the writer's side, paired with the server-side
+receipt chain REMOTE.md section 10 defines. Together they shrink the rewrite
+window from the anchor cadence to a single entry: an edit to any acknowledged
+entry contradicts a stored receipt from the very next append onward, not from
+the next checkpoint.
+
+The receipt head chain is computed server-side (REMOTE.md section 10); its
+frame is defined here because these are canonical bytes:
+
+```
+RECEIPT_FRAME_PREFIX = b"waxseal-receipt-v1\n"
+RECEIPT_GENESIS      = "0" * 64          # prev for the first receipt
+
+receipt_head = lowercase_hex(SHA-256(
+    RECEIPT_FRAME_PREFIX || u64be(3)
+ || lp(str(receipt_seq)) || lp(prev_receipt_head) || lp(entry_hash)))
+```
+
+Sidecar `<trail>.receipts`: one JSON object per line, O_APPEND, mode 0600
+(same discipline as `.attest`/`.anchors`/`.drops`):
+
+```
+{"entry_hash": "<hex64>", "receipt_head": "<hex64>", "receipt_seq": <int>, "seq": <int>, "source": "<str>", "ts": "<str>", "v": 1}
+```
+
+`source` labels which server issued the receipt (a base URL or operator
+label) — metadata only. A record MUST NEVER contain payload content
+(section 12's rule, for section 12's reason).
+
+Writer behavior: a `201` append response carrying receipt fields appends one
+record, best-effort — a failed sidecar write MUST NOT fail or retry the append
+(the entry is already durable; the miss is labelled, rule 6). A response
+without receipt fields appends nothing and is not an error.
+
+Verification, when a verifier is given the sidecar: for every readable record,
+the trail's own entry hash at `seq` is compared with the record's
+`entry_hash`. The comparison is deterministic — the same footing as a pin
+(section 13) — so its failures are breaks, never unverifiable:
+
+| Reason | Class | Exit |
+|---|---|---|
+| `receipt_mismatch` | the trail's hash at that seq differs from the acknowledged one | 1 |
+| `receipt_beyond_head` | the trail is shorter than an acknowledged append — rollback/truncation | 1 |
+| `malformed_receipt_record` | a record in a known version this build cannot read (this project's own format — section 17's asymmetry) | 1 |
+| `unreadable_record_version` | a `v` from a newer build — unverifiable by name | 2 |
+
+No sidecar at all → reported as `receipts: not recorded`, never a failure and
+never conflated with "checked, found nothing" (rule 5; section 12's own
+absent-vs-empty rule, one sidecar over).
+
+Honest limits, stated plainly (section 9's sidecar caveat applies verbatim):
+the sidecar is as attacker-writable as the trail beside it. An attacker who
+rewrites BOTH consistently is caught only against the server's own receipt
+chain — read back over REMOTE.md section 10, or compared by a third party —
+never by the sidecar alone. What the sidecar alone defeats is the cheaper
+attack: a trail edit that does not also curate the sidecar. The one-entry
+window claim holds exactly when the server sits under a different
+administrative authority than the writer — the same condition every other
+mechanism in this specification states and cannot check.
+
+### 19.1 Receipt-frame descriptor fingerprint (added in 0.1.5, waxseal-fg4.9)
+
+`RECEIPT_FRAME_PREFIX` above names the receipt_head frame's SHAPE — the same
+role `DESCRIPTOR_PREFIX` plays for the header frame (section 4). It is not,
+on its own, an identity a verifier can check a record against: unlike
+`hash_version`, nothing in the frame ties a `receipt_head` value to the exact
+field set (`receipt_seq`, `prev_receipt_head`, `entry_hash`, in that order)
+that produced it. This section closes that gap the same way section 4 closes
+it for the header, by deriving a fingerprint from a descriptor of that field
+set rather than trusting a hand-written literal to keep meaning the same
+thing forever:
+
+```
+RECEIPT_DESCRIPTOR_PREFIX = b"waxseal-receipt-descriptor-v1\n"
+
+receipt_fingerprint = lowercase_hex(SHA-256(
+    RECEIPT_DESCRIPTOR_PREFIX || u64be(5)
+ || lp("sha256") || lp("lp64")
+ || lp("receipt_seq") || lp("prev_receipt_head") || lp("entry_hash")))
+```
+
+`lp` here is the DESCRIPTOR frame's own length prefix (section 4's `lp`,
+restated for this frame rather than shared with it — see
+`domain/receipt_fingerprint.py`'s module docstring for why sharing code
+between the two would be its own hazard): 8-byte big-endian length followed
+by the UTF-8 bytes, untagged. Widening or reordering the three receipt_head
+inputs, or changing the algorithm or encoding name, changes
+`receipt_fingerprint` automatically — the same migration-060 protection
+`hash_version` already gives the header.
+
+The sidecar record gains one field, additive to the shape section 19 above
+defines:
+
+```
+{"entry_hash": "<hex64>", "receipt_frame_fingerprint": "<hex64>", "receipt_head": "<hex64>", "receipt_seq": <int>, "seq": <int>, "source": "<str>", "ts": "<str>", "v": 1}
+```
+
+`receipt_frame_fingerprint` is this build's `receipt_fingerprint` at write
+time — never a caller-supplied literal, the same rule `hash_version` follows.
+Absent on any record written before this section existed (every receipt
+issued under 0.1.5 prior to this append): a verifier treats an absent value
+as this build's OWN current `receipt_fingerprint`, so an already-issued
+receipt keeps verifying under the identity it always had. CLAUDE.md rule 2
+(never change a frozen fingerprint's meaning) applies to `receipt_fingerprint`
+values exactly as it applies to `hash_version` values: this is an ADDITIVE
+identity layered onto the unchanged receipt_head frame bytes above, never a
+reinterpretation of any already-issued receipt.
+
+Verification gains one row, extending section 19's table by the same
+asymmetry (section 17) that already separates `malformed_receipt_record` from
+`unreadable_record_version` — a record whose declared `receipt_frame_fingerprint`
+this build does not recognize is unverifiable by name, never a break, because
+this build was never told what that identity means and must not judge the
+record's other fields under its own assumptions:
+
+| Reason | Class | Exit |
+|---|---|---|
+| `unrecognized_receipt_frame_fingerprint` | a `receipt_frame_fingerprint` this build's registry does not recognize | 2 |
+
+This is a SEPARATE axis from `unreadable_record_version` above, not a
+replacement for it: `v` names the JSON record's own shape;
+`receipt_frame_fingerprint` names the receipt_head hash frame's identity. A
+record can be unrecognized on one axis while fully readable on the other, and
+the two reasons are never collapsed into each other.
+
+## 20. Sealed segments (`trail.NNNNN.jsonl`) — added in 0.1.5
+
+A hook that appends on every tool dispatch grows one file without bound, and
+one file shared by every project a developer touches braids unrelated
+histories into a single chain. Rotation fixes the first; per-project routing
+fixes the second. Neither is optional and neither has an environment
+variable: routing and rotation are on by default.
+
+### 20.1 Layout
+
+A trail lives in a per-project directory under the host's own waxseal home
+(`~/.claude/waxseal`, `$CODEX_HOME/waxseal`, `~/.cursor/waxseal`):
+
+```
+<host waxseal home>/trails/<slug>/trail.00000.jsonl
+                                  trail.00001.jsonl
+                                  ...
+                                  segments.lock
+slug = sanitize(basename(cwd))[:32] + "-" + SHA-256(cwd)[:12]
+```
+
+`sanitize` folds to lowercase `[a-z0-9-]`; an empty result is the literal
+`unnamed`. The digest is over the LITERAL `cwd` string — never a resolved
+path. Resolving is host-dependent (symlinks, case folding), so the same
+project would land in two slugs on whichever host disagreed, and a split
+trail is indistinguishable from a truncated one. A 48-bit collision merely
+MERGES two projects into one trail: weaker privacy separation, never a broken
+chain.
+
+Ordinals are zero-padded to five digits, so LEXICOGRAPHIC order over names
+equals CHRONOLOGICAL order. Timestamp names are not permitted: clock skew
+reverses them, and a verifier walking names would check the bindings
+backwards. An ordinal past `99999` is refused rather than widened.
+
+Every sidecar keeps deriving its own path as `<segment file name> + suffix`
+(section 9's `.anchors`, section 11's `.attest`/`.sealagg`, section 12's
+`.drops`, section 19's `.receipts`), so each segment carries its own
+sidecars with no rule of its own.
+
+The pre-0.1.5 shared trail (`<host waxseal home>/trail.jsonl`) is NOT
+migrated and NOT force-sealed. Routed appends simply stop arriving, and it
+keeps verifying forever under plain `waxseal verify`. A trail named through
+`WAXSEAL_TRAIL` keeps its location, and rotation still applies to it: on its
+first rotation it is ADOPTED as the base segment, and the successor is
+`<its stem>.00000.jsonl`.
+
+### 20.2 Rotation binding
+
+The active segment is the highest ordinal present. Rotation only ever CREATES
+a file; nothing is renamed, so every `chain_id` already recorded against a
+segment stays true.
+
+A new segment is a NEW chain: `seq` 0, `prev_hash` = 64 zeros (section 1).
+Segments are linked ONLY by a binding, never by `prev_hash` across a file
+boundary — extending the chain across files would make verifying the newest
+segment require every byte of every older one, which is the growth problem
+rotation exists to solve.
+
+The binding is the seq-0 entry of every segment that has a predecessor:
+
+```
+payload_type = "application/vnd.waxseal.rotation-binding+json"
+payload      = {"chain_id": "<slug>/<predecessor identity>",
+                "head_hash": "<hex64>",
+                "seq": <int>}
+```
+
+The triple is exactly the handoff binding of section D3 / `domain/handoff.py`,
+reused verbatim including its parser and `binding_holds`. Only the payload
+type and the `chain_id` convention are new. Reusing the handoff type is not
+permitted: it would make `verify-handoff` report rotation bindings, and the
+two carry different obligations — a rotation binding is MANDATORY at seq 0 of
+every segment with a predecessor (its absence is a verdict), a handoff
+binding is optional wherever it appears.
+
+`seq` and `head_hash` name the CLOSING segment's tail at the moment of
+rotation: its last `seq` and its `entry_hash` at that `seq`. The identity in
+`chain_id` is the predecessor's file name without the `.jsonl` suffix
+(`trail.00000`, or `trail` for an adopted unnumbered base). The slug half
+records which project directory the segment lived under at rotation time and
+is metadata only — resolution is by identity, so moving or renaming the
+directory is not a break.
+
+Rotation is triggered by ONE `stat` of the active segment at open: a
+threshold of 16 MiB, a constant in code with no environment variable. By-count
+triggering is not permitted (stored entry sizes differ by roughly 10x -- 650 B
+for a minimal `UserPromptSubmit` event against 6_374 B for a `PostToolUse`
+event clipped at `MAX_FIELD_CHARS`, both measured through the real append path
+in `tests/test_entry_size_receipt.py` -- so a count says almost nothing about
+bytes). Reading the closing segment's tail and appending the new segment's
+genesis binding are ONE critical section, held across BOTH files by
+`<dir>/segments.lock`, so N racing writers produce exactly one rotation. A
+writer publishes one last checkpoint for the segment it is sealing,
+best-effort, into that segment's own `.anchors` (section 9's sidecar, never a
+chain append); a failure there is labelled and never blocks.
+
+### 20.3 Verification (`waxseal segments <dir>`)
+
+Read-only: it appends nothing, to the trail or to any sidecar. It walks each
+stem's segments in ordinal order (an unnumbered base first, as the oldest),
+takes each segment's own `verify_chain` verdict (section 5), and checks each
+rotation binding against the predecessor's OWN current entry hashes.
+
+A binding that is PRESENT is checked wherever the segment sits, including at
+the lowest ordinal in the directory. Exempting the lowest one unconditionally
+would make prefix deletion free: remove segments 0 and 1, and segment 2
+becomes "the first" and is never asked about the binding it still carries.
+Only a segment whose seq 0 is not a binding is exempt, and then only at
+position 0.
+
+Per-segment state is `ok`, `broken`, `unverifiable` or `missing`; the
+aggregate is the join of them under the severity order of section 5's own
+verdicts (`ok` < `unverifiable` < `broken`), never a comparison of exit
+codes — 2 is the larger code but the weaker finding.
+
+| Reason | Class | Exit |
+|---|---|---|
+| `rotation_binding_missing` | a segment with a predecessor whose seq 0 is not a binding | 1 |
+| `rotation_binding_mismatch` | the predecessor's hash at that seq differs from the one the binding committed to — deterministic, the same footing as `verify-handoff` | 1 |
+| `segment_missing` | a surviving binding names a predecessor that is not present | 1 |
+| `rotation_binding_unreadable` | a binding payload this build cannot parse — unverifiable by name | 2 |
+| `rotation_binding_unchecked` | the predecessor is present but unreadable, so there was nothing to compare | 2 |
+| `segment_unreadable` | a segment's stored lines will not parse at all (a torn write from a crash mid-rotation, an out-of-band edit) | 2 |
+| section 5's own reasons, plus `broken_seq` | a break inside one segment's chain, prefixed with the segment name | 1 |
+
+An unknown schema fingerprint inside any segment stays `unverifiable` and
+MUST NOT become exit 1 (section 4's rule, unchanged one layer up).
+
+`segment_missing` is a BREAK, not an unverifiable state. A surviving binding
+is POSITIVE evidence that the named segment existed, which puts its absence
+on the same fail-closed footing as `binding_holds` itself; reporting it as
+unverifiable would let deleting a segment downgrade the whole directory from
+exit 1 to exit 2, letting an attacker choose their own verdict. A missing
+segment is nonetheless never rendered as "tampered": it gets its own state
+and its own line, because a legitimate archival move produces exactly the
+same evidence, and which of the two happened is an operator's decision, never
+this command's.
+
+Exit 3 means nothing was read: no such directory, or a directory holding no
+numbered segment. A trail that has never rotated is not a one-segment
+directory — `waxseal verify <trail>` is the command for it, and reporting "ok,
+all bindings hold" about a directory nothing was checked in would be a verdict
+about nothing.
+
+Honest limits, in the same terms as section 19: a rotation binding is as
+attacker-writable as the segments around it. An attacker who rewrites a
+closing segment AND regenerates every binding downstream of it is caught only
+against an external anchor (section 9) or a witness (section 14) that saw the
+old head, never by the bindings alone. What the bindings alone defeat is the
+cheaper attack: editing or deleting one segment without curating the ones that
+name it.
+
+## 21. Ledger layer (added in 0.1.5, Workstream F)
+
+Three ports/contracts, one per question a chain-agnostic reader can ask about a trail:
+did the writer anchor on time (liveness), does the world agree with this build about
+what a fingerprint means (registry), and is there a stake behind the writer's
+signatures (bond). `ports/ledger.py` defines the three as Protocols
+(`LedgerReader`/`LedgerSink`/`Signer`/`TransactionSigner`); `adapters/evm.py`'s
+`EvmLedgerReader`/`EvmLedgerSink`/`EvmAnchorSink` are the first (and, at this writing,
+only) adapter, over stdlib `eth_call` JSON-RPC for reads and an operator-injected
+`Signer` for writes — no crypto library enters this process (CLAUDE.md rule 1).
+
+### 21.1 The error contract
+
+A `LedgerReader` method returns `None` ONLY for "the contract answered, and it holds
+nothing" (no checkpoint for this trail id, no deadline configured, no descriptor under
+this fingerprint) — a MEASURED ABSENCE. It raises `LedgerUnreachable` when it could not
+ask at all (a network failure, or a contract answer this build cannot parse); returning
+`None` there would render a dead node as a writer that never anchored, which is a false
+alarm manufactured out of a network problem. `bond_status` is the one method that never
+returns `None`, because `BondStatus` (21.3) already has four values and a `None` there
+would be a fifth encoding of one of them.
+
+### 21.2 Checkpoint signing digest and the trail id
+
+A writer's checkpoint is signed off-chain and submitted by any party — the contract
+does not need the submitter to be the writer, only the SIGNATURE to be. The 32 bytes a
+writer's key signs (F1/F2's digests were reconciled onto this single shape in `fbba32f`,
+after the two independently-written halves of the ledger layer signed different bytes
+through every green gate until an end-to-end anvil submit caught it):
+
+```
+LEDGER_CHECKPOINT_SIG_PREFIX = b"waxseal-ledger-checkpoint-sig-v1\n"
+
+trail_id_for(chain_id) = SHA-256(UTF-8(chain_id))          # 32 bytes
+
+checkpoint_signing_digest(chain_id, cp) = SHA-256(
+    LEDGER_CHECKPOINT_SIG_PREFIX
+ || u64be(2)                                    # field count
+ || lp(hex(trail_id_for(chain_id)))
+ || checkpoint_frame(cp))                        # section 9's frame, unchanged
+```
+
+The trail is bound INSIDE the digest, keyed by `trail_id_for`, not by the trail's name
+directly: the contracts hold `bytes32` mapping keys and cannot hold a name of unbounded
+length, so the reduction has to happen somewhere, and it is pinned here rather than
+left for each side of the protocol to assume independently. `checkpoint_frame` is
+signed DIRECTLY, not through its own hash first: lp64 (section 2) already
+length-prefixes every field, so the concatenation above is already injective, and an
+extra hash-and-re-hex would only add a second surface for two languages to disagree
+about, for a property the encoding already guarantees.
+
+This digest is a SEPARATE mechanism from `checkpoint_frame` alone (section 9): a
+checkpoint anchored locally or to an RFC 3161/OpenTimestamps sink is never signed this
+way, because those sinks do not need a writer identity recovered from a signature —
+only the ledger's `ecrecover`-based contracts do.
+
+### 21.3 The three ternaries
+
+Every on-chain read this section defines is three-valued, never two — the Ternary
+Evidence Principle (CLAUDE.md) applied to a chain the client does not control:
+
+| Reading | Values | Domain module |
+|---|---|---|
+| Liveness | `live` / `delinquent` / `unreachable` | `domain/liveness.py`, `LivenessVerdict` |
+| Bond status | `bonded` / `slashed` / `unbonded` / `unreachable` | `domain/bond.py`, `BondStatus` |
+| Registry cross-check | `agrees` / `disagrees` / `unreachable` | `domain/registry.py`, `RegistryFinding` |
+
+Bond status carries FOUR values, not three, deliberately: `slashed` names an
+ADJUDICATED event (a fraud proof was submitted and accepted); `unbonded` names a writer
+that simply never posted a stake. Folding the second into the first would print
+"slashed" over a writer nobody ever proved anything against — an adjudication asserted
+from an absence, the same collapse CLAUDE.md rule 5 forbids in the other direction.
+`unreachable` remains the one value across all three readings that means nothing was
+measured.
+
+Each reading maps onto `Verdict` (domain/verdict.py) two DIFFERENT ways, because
+`ledger-status` and `verify`/`report` answer different questions (21.6):
+
+- `LivenessVerdict.to_verdict()` / `BondStatus.to_verdict()` (the `ledger-status`
+  sense): the bad measured state (`delinquent`, `slashed`, `unbonded`) is a POSITIVELY
+  DETECTED finding, `Verdict.BROKEN`.
+- `LivenessVerdict.to_verify_verdict()` / `RegistryFinding.to_verdict()` (the
+  `verify`/`report` sense): range over `{OK, UNVERIFIABLE}` ONLY — `BROKEN` is not
+  spelled in either mapping table, so neither reading can ever contribute a `verify`
+  break, by construction. A chain saying "not anchored on time" or "two registries
+  disagree" is not a chain saying "the trail was edited"; letting either raise `broken`
+  would print "tampered" over a writer whose network was down, or over a conflict this
+  process has no standing to adjudicate.
+
+`RegistryFinding`'s status has NO mapping onto `BROKEN` at all: `_REGISTRY_STATUS`'s
+entire range is `{OK, UNVERIFIABLE}`, so a registry disagreement structurally cannot
+reach `verify` exit 1 through any path, and there is no `to_verdict()` variant that
+would let it.
+
+### 21.4 A fourth transport-layer value: `LedgerDisagreement`
+
+`EvmLedgerReader` requires at least TWO RPC endpoints (`MIN_ENDPOINTS = 2`): one
+endpoint is one narrative, and an eclipsing adversary does not need to break a chain,
+only to be the single voice the client hears. Every read asks every configured
+endpoint and resolves three ways:
+
+- every endpoint agrees → the value, returned;
+- two or more endpoints answered and DID NOT agree → `LedgerDisagreement` is raised,
+  naming every disagreeing pair and what each answered;
+- fewer than two endpoints answered → `LedgerUnreachable`, naming every silence.
+
+Disagreement is checked BEFORE the quorum requirement: a measured conflict between two
+reachable endpoints outranks a partial silence, because reporting the outage instead
+would erase the one observation that distinguishes an eclipse from a mere outage.
+
+`LedgerDisagreement` sits BESIDE `ok`/`broken`/`unverifiable` (section 5), not inside
+that vocabulary: it is not a verdict about the trail at all, it is an observation about
+the TRANSPORT — two independent, reachable observers reporting different states of the
+same contract. It is not itself a not-measured state collapsing into a binary (the
+shape the Ternary Evidence Principle names), which is why CLAUDE.md's Named-principle
+list documents it here rather than counting it as one more numbered instance there.
+Every caller that catches it (the CLI's ledger dimensions, 21.6) maps it onto
+`Verdict.UNVERIFIABLE`, reported with both disagreeing answers printed, never resolved
+by picking one.
+
+Comparison excludes fields the chain itself does not hold precisely: a checkpoint's
+`block_time` is a miner-influenced value with a tolerance of seconds, immaterial
+against deadlines measured in hours, so two endpoints differing only in `block_time`
+still agree; `chain_id`/`seq`/`entry_hash`/`root` are compared exactly, and any
+difference in those IS a disagreement.
+
+### 21.5 The revert as a three-way answer
+
+`AnchoringLiveness.isDelinquent`/`.lastSeen` REVERT with `TrailNotRegistered` for an
+unregistered or never-anchored trail, rather than returning `false`/zero: `bool` is
+two-valued and the honest answer is three-valued. On the READ path this specific,
+recognised revert is a MEASURED ABSENCE (`None`, 21.1) — the node answered,
+deterministically, from state, and a second call answers the same. An UNRECOGNISED
+revert is different again: the contract answered with something this build cannot
+interpret, so nothing was measured, and it degrades to `LedgerUnreachable`, labelled
+with the four-byte error selector rather than swallowed silently (CLAUDE.md rule 6). A
+genuine network failure carries no selector at all. Three distinguishable outcomes from
+one call site, never collapsed into two:
+
+| What happened | Read-path result | Labelled how |
+|---|---|---|
+| a revert this build recognises (e.g. `TrailNotRegistered`) | measured absence, `None` | — |
+| a revert this build does not recognise | `LedgerUnreachable` | the 4-byte selector, in the message |
+| the node could not be reached at all | `LedgerUnreachable` | no selector — a genuine silence |
+
+On the WRITE path the same shape inverts: a transaction the contract rejects (any
+revert) is the contract answering NO, a POSITIVE rejection — it raises `LedgerError`
+(never `LedgerUnreachable`), because the node was reached and it refused the write on
+purpose. Estimating gas before sending catches most rejections before broadcasting;
+either way, the operator's gas is not spent learning what the estimate already said.
+
+### 21.6 CLI contract
+
+`waxseal ledger-status <trail> --rpc URL [--rpc URL…] --liveness ADDR [--registry ADDR]
+[--bond ADDR --writer ADDR] [--trail-id NAME] [--json]` is read-only against the ledger
+layer. Exit codes reuse `Verdict.to_exit_code()`, the SAME convention
+`reconcile-tickets` (the exogenous-admission-tickets section) already establishes: 0 =
+every configured dimension came back clean (live, and registry agrees if `--registry`
+was given, and bonded if `--bond` was given); 1 = a POSITIVELY DETECTED finding —
+delinquent, slashed, or unbonded; 2 = unreachable, endpoints disagree
+(`LedgerDisagreement`), or malformed input — never rendered as "0 findings" (rule 5); 3
+= the named trail does not exist (nothing was read). `--trail-id` defaults to the trail
+path's own resolved string when omitted.
+
+`verify`/`report` accept the same `--rpc/--liveness/--registry [--trail-id]`, adding a
+ledger dimension that can ONLY ever contribute exit 2 (21.3), with reasons
+`ledger_delinquent`, `registry_disagreement`, `ledger_unreachable`.
+
+`waxseal registry publish --descriptor-of FP --registry ADDR --rpc URL […]
+[--write-rpc URL]` publishes the descriptor this build's own `VersionRegistry` holds
+for `FP` — the contract computes `sha256(descriptor)` itself (`FingerprintRegistry.sol`,
+append-only, no owner, no update path), so there is no separate fingerprint argument
+that could disagree with the bytes sent. `waxseal bond deposit --bond ADDR
+--amount-wei WEI […]` posts or tops up the signer's own stake. `waxseal bond prove
+<proof.json> --bond ADDR […]` submits a fraud proof — `{"kind": "equivocation", ...}`
+(two signed, conflicting checkpoints at one seq, self-contained) or `{"kind":
+"non_extension", ...}` (a POSITIVE divergent-leaf challenge, never a mere failing
+consistency proof — see `domain/bond.py`'s own module docstring for why the latter
+would let anyone empty an honest writer's bond for the price of gas). None of these
+three commands appends a chain entry: they write to the ledger layer, the same footing
+`anchor` already has, never to the audit trail (CLAUDE.md's CLI contract is unchanged).
+Every ledger write prints the chain id, the contract address, and the action before
+sending.
+
+`waxseal anchor` accepts `--evm-rpc URL […] --evm-liveness ADDR [--evm-write-rpc URL]
+[--evm-trail-id NAME] [--evm-consistency-proof-file PROOF.JSON]`, publishing the SAME
+checkpoint `AuditLog.anchor()` already computed to a fourth independently-recording
+anchor domain alongside `--tsa-url`/`--ots-calendar` (section 9). The consistency proof
+is required by the contract from the SECOND submit for a given trail id onward
+(`AnchoringLiveness.submit` gates every submit after the first on an RFC 9162 proof
+that the new head extends the recorded one); omitting it after the first submit
+surfaces as a labelled `LedgerError` naming the revert, never a silent no-op.
+
+Credentials: `WAXSEAL_EVM_SIGNER_CMD` names an external program answering a three-verb
+protocol — `<cmd> address`, `<cmd> sign-digest 0x<hex32>`, `<cmd> sign-tx` (fields as a
+JSON object on stdin) — never a private key on argv or in the process table, the same
+env-only discipline `WAXSEAL_API_KEY`/`WAXSEAL_WITNESS_API_KEY` already draw.
+
+### 21.7 Scope, stated plainly
+
+None of the above closes coverage, attests any individual entry's honesty, helps
+against a writer compromised before it signs, or defends against an eclipse that
+controls every RPC endpoint a client is configured to reach. `AnchoringLiveness`
+detects that a writer stopped anchoring, never which entry (if any) was altered.
+`FingerprintRegistry` removes the poisoned-LOCAL-registry caveat on structural schema
+safety; it does not license this build to recompute a row under a fingerprint it merely
+agrees is real by NAME (RFC 6962 section 4.6 — unchanged, section 4). `BondedCheckpoints`
+prices ONE specific dishonesty — signing two conflicting checkpoints at one position —
+expensive once caught; it does not make equivocation impossible, and it does not detect
+a writer that is dishonest but never contradicts itself. See
+`docs/security/threat-model.md` section 7 for the full doctrine.

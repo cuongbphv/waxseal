@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from collections.abc import Callable
 
 import pytest
 
@@ -29,7 +30,9 @@ CP = Checkpoint(seq=4, entry_hash="a" * 64, root="b" * 64)
 PROOF = b"\x00\x01\x02pending-proof-bytes"
 
 
-def recording(status: int = 200, body: bytes = PROOF) -> tuple[list[RemoteRequest], object]:
+def recording(
+    status: int = 200, body: bytes = PROOF
+) -> tuple[list[RemoteRequest], Callable[[RemoteRequest], RemoteResponse]]:
     seen: list[RemoteRequest] = []
 
     def transport(request: RemoteRequest) -> RemoteResponse:

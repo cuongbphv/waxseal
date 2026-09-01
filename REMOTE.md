@@ -207,3 +207,101 @@ binds a forward-secure aggregate (SPEC.md section 15):
 
 Both appear together or neither appears. A receiver that predates them ignores
 them under section 8's unknown-key rule, so no version negotiation is needed.
+
+## 10. Per-append receipts (server receipt chain) — added in 0.1.5
+
+A server MAY maintain a **receipt chain** per `chain_id`: a running hash over
+the entries it has acknowledged, in acknowledgment order, computed with the
+frame SPEC.md section 19 defines (`prev_receipt_head` = 64 zeros for the first
+receipt). The chain exists so the server is bound by its own acknowledgments —
+it cannot later re-tell the history of what it accepted without the retelling
+being visible. A server that implements it:
+
+- MUST include both `receipt_seq` and `receipt_head` in every `201` body for
+  that chain — both or neither, section 9's rule:
+
+  ```
+  201 {"receipt_seq": <int>, "receipt_head": "<hex64>"}
+  ```
+
+- MUST treat the receipt chain as append-only: once a
+  `(receipt_seq, receipt_head)` pair has been issued, the server MUST NOT ever
+  answer a different `receipt_head` for that `receipt_seq`.
+- SHOULD expose the current head read-only:
+
+  ```
+  GET /v1/chains/{chain_id}/receipts/head
+  200 {"receipt_seq": <int>, "receipt_head": "<hex64>"}
+  404                     # no receipts yet — NOT an error
+  ```
+
+  This endpoint SHOULD be readable without write credentials (a mirror-style
+  read point): its value to a third party auditing the server's
+  acknowledgment history is the reason it exists, and section 5's write
+  credential grants nothing here.
+
+A client receiving receipt fields on a `201` stores them in the `.receipts`
+sidecar (SPEC.md section 19), best-effort — a failed sidecar write never fails
+or retries the append. A `201` without them is a server that does not
+implement this section: the client records nothing and MUST NOT treat it as an
+error (absence is "not recorded", never "checked"). A receiver MUST ignore
+keys it does not recognize (section 8's rule), which is how these fields reach
+existing deployments without a version bump.
+
+Trust model consequence (section 1 unchanged): a receipt narrows the window in
+which a write-capable attacker on the writer's side can rewrite locally — from
+the anchor cadence down to one entry. It does not make the server less trusted
+or more honest, and a server and writer under one administrative authority
+collapse the guarantee — the same sentence every other section ends on.
+
+## 11. Segment rotation (server-hosted chains) — added in 0.1.5
+
+A chain that has never rotated is UNCHANGED by this section — everything
+above still describes it exactly. Whether and when a chain's storage rotates
+is implementation-defined (the reference server bounds trail growth by
+sealing the file it is writing once a size threshold is crossed) and is not
+part of this wire contract. What follows becomes true only once a chain has
+rotated at least once (SPEC.md section 20).
+
+- **`GET /head` and cursorless `GET /entries` describe the ACTIVE SEGMENT,
+  not the chain's full history.** The active segment is the file the server
+  is currently appending to; after a first rotation that is a newer numbered
+  file, and the file that used to be the whole chain becomes a SEALED
+  segment. This is forced, not a convenience: each segment is its own chain
+  with its own genesis `prev_hash` (64 zeros) and its own `seq` counting from
+  0, linked to its predecessor only by a rotation-binding entry at the new
+  segment's `seq` 0 (SPEC.md section 20.2) — never by continuing `prev_hash`
+  across a file boundary. Concatenating segments before handing them to a
+  client's `verify_chain` would produce a `seq` that restarts at 0
+  mid-stream, indistinguishable from a fork — a false tamper alarm the server
+  would manufacture out of its own housekeeping. A client can observe a
+  rotation directly: `/head`'s `seq` visibly drops rather than continuing to
+  climb (the new segment's `seq` 0 is the binding entry the server appends
+  for itself, so a client's own next entry lands at `seq` 1, not 0).
+- **The opaque cursor (section 4) now carries a segment identity alongside
+  its offset.** The reference server's cursor is
+  `e<offset>~<segment-identity>` (e.g. `e2~trail.00003`) — clients still MUST
+  treat the whole string as opaque, but a paging read now finishes the
+  segment it started on instead of being resumed at its offset inside
+  whatever segment happens to be active by the time it comes back. A cursor
+  issued before a chain's storage carried segment identity (bare
+  `e<offset>`, no suffix) is refused with `400 invalid_cursor` rather than
+  aimed at a guessed file. The correct response is the same as for any other
+  opaque-cursor failure: drop it and restart paging from `cursor=null`.
+- **`verify`, `report`, `inspect`, and `export-proof` target the active
+  segment only; `segments` is the read that covers the whole group.** None of
+  those four per-entry reads takes a segment selector, so an operator wanting
+  a verdict or a proof for an entry that has already been sealed into an
+  older segment has NO route through this API today. Say so plainly: these
+  reads do not offer full-history coverage once a chain has rotated.
+  `segments` reports the group and the rotation bindings between its files,
+  and is the read to reach for when the question is about the chain as a
+  whole rather than one entry.
+- **`cross_check_receipts` keys `seq` to a LIST of hashes, not a single
+  one.** Because `seq` restarts at 0 in every segment, a rotated chain can
+  hold several entries recorded at the same `seq` — one per segment — and a
+  receipt for that `seq` is satisfied by a match against any hash in the
+  list. Detection power is unchanged: an edited or deleted entry still
+  changes or removes its hash from the list either way. On a chain that has
+  never rotated, every list has exactly one element — the same check it
+  always was, generalized rather than altered.

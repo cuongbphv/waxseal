@@ -22,7 +22,7 @@ Tài liệu này không phải tư vấn pháp lý, và không nêu tên tổ ch
 
 Mọi điều khoản được trích dưới đây đều được truy xuất từ nguồn nêu tại
 [§8 Nguồn và mức xác minh](#8-nguồn-và-mức-xác-minh) vào ngày 2026-08-23. Chỗ nào không
-xác minh được từ nguồn chính thức hoặc nguồn sơ cấp thì được gắn nhãn `[Chưa xác minh]`
+xác minh được từ nguồn chính thức hoặc nguồn sơ cấp thì được gắn nhãn `[Unverified]`
 ngay tại chỗ và cần được kiểm tra lại trước khi sử dụng.
 
 ---
@@ -139,7 +139,7 @@ Nội dung subcategory dưới đây trích từ NIST AI RMF Playbook.
 | MANAGE 4.1 | "Kế hoạch giám sát hệ thống AI sau triển khai được thực hiện…" | **Một phần** | cung cấp nền tảng giám sát; kế hoạch thuộc về tổ chức |
 | MANAGE 4.3 | "Sự cố và lỗi được truyền đạt tới các chủ thể AI liên quan; quy trình theo dõi và khôi phục được lập tài liệu" | **Trực tiếp** | một quyết định đang bị điều tra có thể trích xuất thành proof bundle và chứng minh là nguyên vẹn một cách độc lập với bên đang giữ nhật ký |
 
-**NIST AI 600-1 (Generative AI Profile).** `[Chưa xác minh]` — các mã định danh hành động
+**NIST AI 600-1 (Generative AI Profile).** `[Unverified]` — các mã định danh hành động
 cụ thể của GenAI Profile không được truy xuất cho tài liệu này. Các hành động về truy vết
 và nguồn gốc (provenance) trong đó là phần liên quan; hãy kiểm tra trực tiếp trước khi
 trích dẫn.
@@ -168,7 +168,7 @@ waxseal tự nó không phát ra cảnh báo nào ngoài các exit code của ve
 ## 5. Quản trị rủi ro mô hình — SR 11-7 và các văn bản kế thừa
 
 SR 11-7 / OCC Bulletin 2011-12, *Supervisory Guidance on Model Risk Management* (2011), là
-văn bản tham chiếu lâu năm. **`[Chưa xác minh]`** Cục Dự trữ Liên bang đã ban hành **SR
+văn bản tham chiếu lâu năm. **`[Unverified]`** Cục Dự trữ Liên bang đã ban hành **SR
 26-2, "Revised Guidance on Model Risk Management"**, và OCC ban hành một bulletin tương ứng
 năm 2026; danh mục văn bản đã được xác nhận nhưng **nội dung bản sửa đổi chưa truy xuất
 được**, và việc nó thay thế SR 11-7 toàn bộ hay một phần thì chưa xác minh. Hãy kiểm tra
@@ -189,7 +189,7 @@ văn bản nào đang áp dụng trước khi dựa vào phần này.
 ## 6. SOC 2 (AICPA Trust Services Criteria)
 
 Bộ tiêu chí của AICPA không được trích nguyên văn ở đây (chúng không được công bố mở). Các
-mã định danh dưới đây dùng ở mức mô tả; **`[Chưa xác minh]`** so với văn bản TSC chính thức.
+mã định danh dưới đây dùng ở mức mô tả; **`[Unverified]`** so với văn bản TSC chính thức.
 
 | Tiêu chí | Lĩnh vực | Mức phủ |
 |---|---|---|
@@ -228,7 +228,7 @@ pháp luật thương mại, nhưng **chưa** đối chiếu với bản công b
 tới **thủ tục cấp phép**, không phải yêu cầu về audit trail hay ghi log, và được liệt kê ở
 đây chỉ để không ai mặc định rằng nó áp đặt một yêu cầu như vậy.
 
-`[Chưa xác minh]` Yêu cầu chứng nhận an toàn hệ thống thông tin cấp độ 4 được ghi nhận là
+`[Unverified]` Yêu cầu chứng nhận an toàn hệ thống thông tin cấp độ 4 được ghi nhận là
 nằm ở Điều 8(7) của Nghị quyết; số điều khoản chưa được xác nhận từ nguồn sơ cấp.
 
 ---

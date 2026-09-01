@@ -104,6 +104,7 @@ class TestRunner:
             if e.header.payload_type == OPENCLAW_AUDIT_PAYLOAD_TYPE
         ]
         assert len(stored) == 1
+        assert stored[0].payload is not None
         assert json.loads(stored[0].payload)["eventId"] == "evt-12"
         assert log.verify().ok
 
@@ -198,12 +199,13 @@ class TestUnopenableTrail:
     def test_returns_zero_when_the_log_cannot_be_opened_at_all(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        import waxseal.integrations.openclaw as runner
-
         def refuse(*args: object, **kwargs: object) -> AuditLog:
             raise OSError("read-only file system")
 
-        monkeypatch.setattr(runner.AuditLog, "open", refuse)
+        # waxseal.integrations.openclaw imports AuditLog from waxseal for its
+        # own use without re-exporting it; patch the identical class object
+        # through the name this file already imports at module level.
+        monkeypatch.setattr(AuditLog, "open", refuse)
 
         assert main(["--trail", str(tmp_path / "trail.jsonl")]) == 0
 

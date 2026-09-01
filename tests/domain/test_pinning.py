@@ -305,6 +305,83 @@ class TestDeclaredTopology:
             parse_pin_state(json.dumps(obj))
 
 
+class TestDeclaredTopologyLedger:
+    """``declared_topology.ledger`` (waxseal-fg4.45) is NOT a fifth required
+    subfield the way the original four are: it was added after SPEC 13.1's
+    "all four together" shape had already shipped, so it round-trips as its
+    own optional key inside the object — present only when not ``None``,
+    the same convention ``declared_topology`` itself and ``max_anchor_age_s``
+    already use one level up. ``topology_at`` above (no ``ledger=`` given)
+    is this class's own fixture for "predates the field entirely" — every
+    assertion in ``TestDeclaredTopology`` already exercises that case
+    without knowing it, which is the append-only property this bead exists
+    to hold.
+    """
+
+    def topology_at(self, n: int, *, ledger: bool | None) -> PinState:
+        return PinState(
+            target="/trail.jsonl",
+            chain_id=None,
+            checkpoint=pin_at(n),
+            pinned_ts="2026-08-23T09:00:00+00:00",
+            declared_topology=SeparationTopology(
+                seal_escrow=True, anchor_sinks=2, witness=True, pin_separate=False,
+                ledger=ledger,
+            ),
+        )
+
+    def test_round_trip_with_ledger_true(self) -> None:
+        state = self.topology_at(3, ledger=True)
+        assert parse_pin_state(render_pin_state(state)) == state
+        assert json.loads(render_pin_state(state))["declared_topology"]["ledger"] is True
+
+    def test_round_trip_with_ledger_false(self) -> None:
+        state = self.topology_at(3, ledger=False)
+        assert parse_pin_state(render_pin_state(state)) == state
+        assert json.loads(render_pin_state(state))["declared_topology"]["ledger"] is False
+
+    def test_ledger_key_is_omitted_not_null_when_undeclared(self) -> None:
+        # The same rule 5 discipline `declared_topology` itself gets from
+        # `render_pin_state`: undeclared must round-trip as an ABSENT key,
+        # never a present `null`, or a reader could not tell "never asked"
+        # from "asked and the answer was written as null".
+        state = self.topology_at(3, ledger=None)
+        rendered = render_pin_state(state)
+        assert "ledger" not in json.loads(rendered)["declared_topology"]
+        parsed = parse_pin_state(rendered)
+        assert parsed == state
+        assert parsed.declared_topology is not None
+        assert parsed.declared_topology.ledger is None
+
+    def test_a_pin_written_before_ledger_existed_parses_it_as_none(self) -> None:
+        # `TestDeclaredTopology.topology_at` builds exactly this shape: a
+        # declared_topology object with the original four subfields and no
+        # "ledger" key at all — every one of THAT class's own tests already
+        # covers this without naming it; this test names it directly.
+        obj = json.loads(render_pin_state(TestDeclaredTopology().topology_at(2)))
+        assert "ledger" not in obj["declared_topology"]
+        parsed = parse_pin_state(json.dumps(obj))
+        assert parsed.declared_topology is not None
+        assert parsed.declared_topology.ledger is None
+
+    @pytest.mark.parametrize("bad_value", ["yes", 1, 0])
+    def test_non_bool_ledger_value_is_malformed(self, bad_value: object) -> None:
+        obj = json.loads(render_pin_state(self.topology_at(2, ledger=True)))
+        obj["declared_topology"]["ledger"] = bad_value
+        with pytest.raises(PinMalformed):
+            parse_pin_state(json.dumps(obj))
+
+    def test_explicit_json_null_for_ledger_parses_the_same_as_absent(self) -> None:
+        # `_optional_bool_or_none`'s own convention (matching every other
+        # `_optional_*` reader in this module): an explicit `null` and a
+        # missing key both mean "not declared".
+        obj = json.loads(render_pin_state(self.topology_at(2, ledger=True)))
+        obj["declared_topology"]["ledger"] = None
+        parsed = parse_pin_state(json.dumps(obj))
+        assert parsed.declared_topology is not None
+        assert parsed.declared_topology.ledger is None
+
+
 class TestMaxAnchorAge:
     """``max_anchor_age_s`` is a second trailing-optional field on PinState,
     the same pattern ``declared_topology`` established: absent means "this

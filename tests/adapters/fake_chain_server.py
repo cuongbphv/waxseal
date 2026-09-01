@@ -6,8 +6,10 @@ only the transport layer differs, mirroring FakeS3Client's role for s3.py).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import struct
 import threading
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -17,13 +19,46 @@ from waxseal.domain.header import GENESIS_PREV_HASH
 
 _ROUTE = re.compile(r"/v1/chains/(?P<chain_id>[^/]+)/(?P<resource>head|entries)$")
 
+# SPEC.md section 19's receipt frame, written out from the prose rather than
+# imported from anywhere: the server implements it in
+# server/waxseal_server/domain/receipts.py, and a fake that borrowed that
+# implementation could only ever prove the client agrees with itself.
+RECEIPT_FRAME_PREFIX = b"waxseal-receipt-v1\n"
+RECEIPT_GENESIS = "0" * 64
+
+
+def _lp(value: str) -> bytes:
+    enc = b"\x01" + value.encode("utf-8")
+    return struct.pack(">Q", len(enc)) + enc
+
+
+def receipt_head(receipt_seq: int, prev_receipt_head: str, entry_hash: str) -> str:
+    frame = (
+        RECEIPT_FRAME_PREFIX
+        + struct.pack(">Q", 3)
+        + _lp(str(receipt_seq))
+        + _lp(prev_receipt_head)
+        + _lp(entry_hash)
+    )
+    return hashlib.sha256(frame).hexdigest()
+
 
 class FakeChainServer:
-    def __init__(self, *, enforce_precondition: bool = True, page_size: int = 1000) -> None:
+    def __init__(
+        self,
+        *,
+        enforce_precondition: bool = True,
+        page_size: int = 1000,
+        issue_receipts: bool = False,
+    ) -> None:
         self._lock = threading.Lock()
         self._chains: dict[str, list[dict[str, Any]]] = {}
         self.enforce_precondition = enforce_precondition
         self.page_size = page_size
+        # REMOTE.md section 10 is OPTIONAL for a server, so the default stays
+        # off: a client must keep working against a server that issues nothing.
+        self.issue_receipts = issue_receipts
+        self.receipt_heads: list[str] = []
         # Falsifiability instrumentation: counts POSTs the server itself
         # rejected as a lost race (409), for the receipt tests to report.
         self.rejected_races = 0
@@ -68,7 +103,13 @@ class FakeChainServer:
                 self.rejected_races += 1
                 return 409, b'{"error":"conflict"}'
             entries.append(obj)
-        return 201, b"{}"
+            if not self.issue_receipts:
+                return 201, b"{}"
+            prev = self.receipt_heads[-1] if self.receipt_heads else RECEIPT_GENESIS
+            next_seq = len(self.receipt_heads)
+            head = receipt_head(next_seq, prev, obj["entry_hash"])
+            self.receipt_heads.append(head)
+        return 201, json.dumps({"receipt_seq": next_seq, "receipt_head": head}).encode("utf-8")
 
     def _list(self, chain_id: str, cursor: str | None) -> tuple[int, bytes]:
         with self._lock:

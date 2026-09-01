@@ -48,7 +48,7 @@ class TestHandoffBinding:
         # bool is an int subclass; silently accepting True as seq=1 would
         # hide a caller's type error inside a number that looks plausible.
         with pytest.raises(ValueError, match="seq"):
-            HandoffBinding(chain_id="a", seq=True, head_hash=A_HASH)  # type: ignore[arg-type]
+            HandoffBinding(chain_id="a", seq=True, head_hash=A_HASH)
 
     def test_non_int_seq_rejected(self) -> None:
         with pytest.raises(ValueError, match="seq"):

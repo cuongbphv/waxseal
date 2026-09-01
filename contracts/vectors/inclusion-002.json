@@ -1,0 +1,68 @@
+[
+  {
+    "name": "bad_extra_sibling",
+    "entryHash": "0x57e543facd3ed8c744dd171b709afccb653720de91b71d84277dba8c15a117a5",
+    "index": 3,
+    "batchSize": 8,
+    "proof": [
+      "0xe4a3571483c1fc3fc15d0a3fcc1c7754032add8bfa5b74e1602ec06d8b8f498b",
+      "0xa1932ed9b18a5f09cfbd0508a0a35066546f1030f6863a8db1e97b6c3ce04d16",
+      "0x3801370f0e35416d9e3b5efb99ded3a641504cf644c9b0a6b9eebe46965f4be6",
+      "0xe4a3571483c1fc3fc15d0a3fcc1c7754032add8bfa5b74e1602ec06d8b8f498b"
+    ],
+    "root": "0xd0e64405b475e73b7dfa6b791f5130dfbe91a51cb2d85a4b7baab95e4169b5cb",
+    "expectOk": false
+  },
+  {
+    "name": "bad_reordered_siblings",
+    "entryHash": "0x57e543facd3ed8c744dd171b709afccb653720de91b71d84277dba8c15a117a5",
+    "index": 3,
+    "batchSize": 8,
+    "proof": [
+      "0xa1932ed9b18a5f09cfbd0508a0a35066546f1030f6863a8db1e97b6c3ce04d16",
+      "0xe4a3571483c1fc3fc15d0a3fcc1c7754032add8bfa5b74e1602ec06d8b8f498b",
+      "0x3801370f0e35416d9e3b5efb99ded3a641504cf644c9b0a6b9eebe46965f4be6"
+    ],
+    "root": "0xd0e64405b475e73b7dfa6b791f5130dfbe91a51cb2d85a4b7baab95e4169b5cb",
+    "expectOk": false
+  },
+  {
+    "name": "bad_forged_root",
+    "entryHash": "0x57e543facd3ed8c744dd171b709afccb653720de91b71d84277dba8c15a117a5",
+    "index": 3,
+    "batchSize": 8,
+    "proof": [
+      "0xe4a3571483c1fc3fc15d0a3fcc1c7754032add8bfa5b74e1602ec06d8b8f498b",
+      "0xa1932ed9b18a5f09cfbd0508a0a35066546f1030f6863a8db1e97b6c3ce04d16",
+      "0x3801370f0e35416d9e3b5efb99ded3a641504cf644c9b0a6b9eebe46965f4be6"
+    ],
+    "root": "0xd1e64405b475e73b7dfa6b791f5130dfbe91a51cb2d85a4b7baab95e4169b5cb",
+    "expectOk": false
+  },
+  {
+    "name": "bad_index_outside_batch",
+    "entryHash": "0x57e543facd3ed8c744dd171b709afccb653720de91b71d84277dba8c15a117a5",
+    "index": 8,
+    "batchSize": 8,
+    "proof": [
+      "0xe4a3571483c1fc3fc15d0a3fcc1c7754032add8bfa5b74e1602ec06d8b8f498b",
+      "0xa1932ed9b18a5f09cfbd0508a0a35066546f1030f6863a8db1e97b6c3ce04d16",
+      "0x3801370f0e35416d9e3b5efb99ded3a641504cf644c9b0a6b9eebe46965f4be6"
+    ],
+    "root": "0xd0e64405b475e73b7dfa6b791f5130dfbe91a51cb2d85a4b7baab95e4169b5cb",
+    "expectOk": false
+  },
+  {
+    "name": "bad_inner_node_as_leaf",
+    "entryHash": "0x9f39dbf6a3937b5205abe220c9238a6c0643c254d767198984820027a4fca350",
+    "index": 3,
+    "batchSize": 8,
+    "proof": [
+      "0xe4a3571483c1fc3fc15d0a3fcc1c7754032add8bfa5b74e1602ec06d8b8f498b",
+      "0xa1932ed9b18a5f09cfbd0508a0a35066546f1030f6863a8db1e97b6c3ce04d16",
+      "0x3801370f0e35416d9e3b5efb99ded3a641504cf644c9b0a6b9eebe46965f4be6"
+    ],
+    "root": "0xd0e64405b475e73b7dfa6b791f5130dfbe91a51cb2d85a4b7baab95e4169b5cb",
+    "expectOk": false
+  }
+]

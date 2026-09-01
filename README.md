@@ -128,6 +128,68 @@ pip install waxseal
 Released on [PyPI](https://pypi.org/project/waxseal/). From source:
 `pip install git+https://github.com/cuongbphv/waxseal`
 
+## Capability extras
+
+Zero dependencies describes the core, not a ceiling on what waxseal can do. The
+core keeps `dependencies = []`, which is an invariant rather than a preference,
+and capability that needs a third-party client arrives through an optional extra
+plus injection: you install the client, you construct it, you pass it in, and
+waxseal never imports it itself. `S3Backend` and `PostgresBackend` under
+[Storage backends](#storage-backends) are the pattern, and the extras exist so
+`pip` can fetch a compatible client for you rather than because waxseal needs
+one.
+
+Shipped today:
+
+| Extra | Install | Client it fetches | What you can then inject |
+|---|---|---|---|
+| `s3` | `pip install waxseal[s3]` | `boto3` | an S3 client for `S3Backend` (conditional-PUT appends) |
+| `postgres` | `pip install waxseal[postgres]` | `psycopg[binary]>=3.1` | a connection factory for `PostgresBackend` |
+| `rfc3161` | `pip install waxseal[rfc3161]` | `cryptography>=40` | nothing — see the note below |
+| `evm` | `pip install waxseal[evm]` | none — deliberately empty, see below | a `Signer` for the on-chain ledger layer's write path |
+
+`rfc3161` is the one extra waxseal does import itself, inside a single function
+(`adapters/rfc3161_verify.py`), which is why its "inject" column is empty. It
+turns on the optional signature dimension of `verify`/`report`, and only when
+you name a CA bundle with `--tsa-ca-file`: a token whose CMS signature or
+certificate chain fails is exit 1, and anything that could not be checked at
+all — the extra absent included — is exit 2 with a label saying which, never a
+silent exit 0. Without the flag nothing changes: receipts are checked
+structurally, exactly as before. See [SPEC.md](SPEC.md) section 17.1.
+
+`evm` is shipped, and its emptiness is the design, not an unfinished feature:
+the on-chain ledger layer (`ports/ledger.py`, `domain/bond.py`,
+`domain/liveness.py`, `domain/abi.py`, `domain/registry.py`,
+`adapters/evm.py`) reads a contract over the same stdlib JSON-RPC `Transport`
+`RemoteBackend` already uses (`eth_call`, no client to fetch) and writes
+through a `Signer` the operator constructs and injects — there is nothing for
+`pip` to pull in. The extra exists only so `pip install waxseal[evm]` is a
+valid thing to type and the capability has a name in the metadata; it never
+becomes a route by which a crypto library reaches the core. The layer is
+chain-agnostic behind the port — EVM is the first adapter, not the design.
+CLI surface: `waxseal ledger-status`, `waxseal registry publish`, `waxseal
+bond deposit`/`bond prove`, and `verify`/`report --rpc/--liveness/--registry`,
+`anchor --evm-liveness` (see the CLI list under [Usage](#usage) below) —
+checked end-to-end against two live anvil chains running real Foundry contracts
+(`contracts/src/AnchoringLiveness.sol`, `BondedCheckpoints.sol`,
+`FingerprintRegistry.sol`; commits `26b074c`/`c21e0e6`/`20f2762`/`26e3e91`).
+[docs/paper/conformance.md](docs/paper/conformance.md) tracks this layer row
+by row, including two open, non-blocking gaps recorded there rather than
+smoothed over.
+
+(`dev` also exists, for running the test suite. It is not a capability extra.)
+
+Adding a *hard* dependency is a different question, and the answer is no. Extras
+are the sanctioned route.
+
+The shipped-extras table above is the single source for these client package
+names and version specifiers. [README.vi.md](README.vi.md) and
+[README.zh.md](README.zh.md) translate the prose of this section but link back
+to that table rather than duplicating the strings, so a translation that falls
+behind costs a click and never prints a wrong install command. Ship or retire an
+extra and you edit that table; the other two READMEs need touching only when the
+*list of shipped extra names* changes, which they do carry in prose.
+
 ## Usage
 
 ```python
@@ -166,9 +228,16 @@ waxseal head trail.jsonl       # print the chain head (seq + entry_hash) for anc
 waxseal checkpoint trail.jsonl # print {seq, entry_hash, root} — a batch root, not just the tip
 waxseal anchor trail.jsonl     # append a checkpoint to the local .anchors sidecar
 waxseal verify --anchors trail.jsonl  # also check trail history against .anchors
+waxseal preflight trail.jsonl  # which attacker-capability rung this config stops; always exit 0 (exit 3: no such trail)
+waxseal segments trail-dir/    # verify every sealed segment + rotation binding in a directory; read-only
 
 # Any of the above except `anchor` also accepts a remote chain server URL:
 waxseal verify http://chain.example.com/v1/chains/default
+
+# On-chain ledger layer (waxseal[evm]; see Capability extras above):
+waxseal ledger-status trail.jsonl --liveness 0xADDR --rpc https://rpc1 --rpc https://rpc2
+waxseal registry publish --descriptor-of FINGERPRINT --registry 0xADDR --rpc https://rpc1 --rpc https://rpc2
+waxseal bond deposit --bond 0xADDR --amount-wei 1000000000000000000 --rpc https://rpc1 --rpc https://rpc2
 ```
 
 ## Storage backends
@@ -350,9 +419,12 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 
 - **RFC 3161** makes `ts` attested rather than asserted. waxseal checks the reply
   *structurally* (status, message imprint, nonce, digest algorithm) and says so in every
-  line it prints. It does **not** verify the CMS/X.509 signature; that is delegated to
-  `openssl ts -verify` and the recipe is in the docs. A receipt it cannot read is
-  *unverifiable* (exit 2); only one that attests different bytes is *broken* (exit 1).
+  line it prints. By default it does **not** verify the CMS/X.509 signature; that is
+  delegated to `openssl ts -verify` and the recipe is in the docs. A receipt it cannot
+  read is *unverifiable* (exit 2); only one that attests different bytes is *broken*
+  (exit 1). With the `rfc3161` extra installed and a CA bundle you name
+  (`--tsa-ca-file`), the signature dimension is checked too — and a token it could not
+  check is exit 2 with a label, never a silent pass.
 - **OpenTimestamps** stores a *pending* Bitcoin proof, opaquely and on purpose. Finish it
   later with `ots upgrade` / `ots verify`.
 - The two can be given **together on one `anchor` run**, publishing the same checkpoint to
@@ -515,9 +587,10 @@ claim from a measured `0`.
 
 ## Integrations
 
-Audit hooks for seven agent frameworks and coding tools, plus one exporter for a
-host that already keeps its own ledger (OpenClaw). Each one is
-verified against the target's current hook contract (version noted in its README),
+Audit hooks for seven agent frameworks and coding tools, one exporter for a
+host that already keeps its own ledger (OpenClaw), and one audit-sink Protocol
+implementation for a governance layer that owns its own logging (Microsoft
+AGT). Each one is verified against the target's current hook contract (version noted in its README),
 records dispatch *before* execution, redacts secrets before hashing, clips huge
 outputs visibly, and **can never block or veto the host's work**, since every failure
 degrades to a labelled, counted dropped write.
@@ -532,9 +605,9 @@ waxseal install hermes        # or claude-code / codex / cursor / hermes-gateway
 `install` writes thin shims into the host's config directory (importing
 `waxseal.integrations.*`, so `pip install -U waxseal` upgrades hook behavior in
 place) and prints any settings snippet the host still needs. The LangChain,
-CrewAI, and OpenAI Agents integrations need no install step at all; import them
-directly, for example `from waxseal.integrations.langchain import
-WaxsealCallbackHandler`.
+CrewAI, OpenAI Agents, and Microsoft AGT integrations need no install step at
+all; import them directly, for example `from waxseal.integrations.langchain
+import WaxsealCallbackHandler`.
 
 | Target | Mechanism | Directory |
 |---|---|---|
@@ -546,11 +619,36 @@ WaxsealCallbackHandler`.
 | OpenAI Agents SDK | `RunHooks` | [integrations/openai-agents/](integrations/openai-agents/) |
 | hermes-agent | plugin + gateway hook | [integrations/hermes/](integrations/hermes/) |
 | OpenClaw | audit-ledger exporter (`openclaw audit --json`, no hook) | [integrations/openclaw/](integrations/openclaw/) |
+| Microsoft AGT | `AuditSink` Protocol (attach to AGT's own `AuditLog`) | [`waxseal.integrations.agt`](src/waxseal/integrations/agt.py) |
 
 Scope note for the coding tools: these hooks give you a parallel,
 tamper-evident, **secret-free** record of every action. They do not (and cannot)
 rewrite the tool's own transcript files. If a key lands in one of those, rotate it. The
 waxseal trail is the copy you can keep, share, and verify.
+
+## Self-hosted server
+
+`server/` is a self-hosted chain server, witness, and public read point, with
+a read-only Vue 3 web portal — a separate application on its own FastAPI +
+uvicorn stack, not part of the `waxseal` wheel (CLAUDE.md rule 1 constrains
+the library's dependencies, not this directory's; nothing here is packaged
+into it). Its write path uses `waxseal` as a library; every read/verify route
+shells out to `python -m waxseal.cli` and reports the exit code, so the CLI
+stays the one verdict authority and no route ever edits, deletes, reorders,
+or repairs an entry. Three credentials stay apart: the chain API key, the
+witness key, and a credential-free public read point with no write route at
+all. Operators, roles, and API keys live in PostgreSQL — trails themselves
+stay plain JSONL files a third party can verify with the stock `waxseal
+verify`, never something only this server can read.
+
+```bash
+docker compose -f server/docker-compose.yml up --build   # http://127.0.0.1:8000
+```
+
+[server/README.md](server/README.md) covers the layout;
+[server/docs/deployment.md](server/docs/deployment.md) covers configuration,
+data layout, TLS termination at a reverse proxy, and what self-hosting does
+and does not buy.
 
 ## Guarantees and non-guarantees
 

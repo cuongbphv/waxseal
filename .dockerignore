@@ -12,3 +12,9 @@ docs
 __pycache__
 *.py[cod]
 *.egg-info
+
+# server/ build artifacts: the image builds the UI in its own node stage.
+server/web/node_modules
+server/web/dist
+server/waxseal_server/static
+server/.venv

@@ -14,12 +14,12 @@ trail's own entry hashes alone, and the "when" comes from whatever anchors it
 (a block time, an RFC 3161 token, a commit), and baking a clock reading in here
 would make the frame depend on something the trail itself can't reproduce.
 
-A checkpoint may also carry a forward-secure aggregate binding (frame v2). The
-reason it belongs in the FRAME and not merely alongside it in the sidecar
-record: a signing or timestamping sink attests ``sha256(checkpoint_frame(cp))``
-and nothing else, so a binding that lived only in the surrounding JSON would
-be witnessed by no one, which is precisely the class of sink the binding
-exists to reach.
+A checkpoint may also carry a forward-secure aggregate binding, which selects
+the aggregate-bound frame shape. The reason the binding belongs in the FRAME
+and not merely alongside it in the sidecar record: a signing or timestamping
+sink attests ``sha256(checkpoint_frame(cp))`` and nothing else, so a binding
+that lived only in the surrounding JSON would be witnessed by no one, which
+is precisely the class of sink the binding exists to reach.
 """
 
 from __future__ import annotations
@@ -32,13 +32,26 @@ from typing import Final
 from waxseal.domain.anchoring import batch_root
 from waxseal.domain.hashing import lp
 
-CHECKPOINT_FRAME_PREFIX: Final = b"waxseal-checkpoint-v1\n"
+# The two prefixes are parallel frame SHAPES picked by content — bare, and
+# aggregate-bound — not an old-then-new version pair. The `-v1`/`-v2` inside
+# the bytes reads like one, and the repository owner himself misread the old
+# `_V2` name that way; a version reading invites "migrate the old one away",
+# which is the migration-060 reflex this library exists to block. Neither
+# shape is superseded and neither will be.
+#
+# The BYTES are frozen: they are already inside externally issued RFC 3161
+# receipts, so moving them would orphan real evidence. A separate prefix AND
+# a different field count make cross-shape confusion unrepresentable under
+# PAE framing rather than merely unlikely — no aggregate-bound frame can be
+# parsed as a bare frame over different content.
+CHECKPOINT_FRAME_PREFIX_BARE: Final = b"waxseal-checkpoint-v1\n"
+CHECKPOINT_FRAME_PREFIX_AGG_BOUND: Final = b"waxseal-checkpoint-v2\n"
 
-# v2 adds the forward-secure aggregate binding. A separate prefix AND a
-# different field count, so PAE framing makes v1/v2 confusion unrepresentable
-# rather than merely unlikely: no v2 frame can be parsed as a v1 frame over
-# different content.
-CHECKPOINT_FRAME_PREFIX_V2: Final = b"waxseal-checkpoint-v2\n"
+# Pre-0.1.5 names, kept because they may be referenced outside this repo
+# (SPEC.md section 9 names the first one in prose). Aliases of the very same
+# objects, never re-declared literals, so they cannot drift apart.
+CHECKPOINT_FRAME_PREFIX: Final = CHECKPOINT_FRAME_PREFIX_BARE
+CHECKPOINT_FRAME_PREFIX_V2: Final = CHECKPOINT_FRAME_PREFIX_AGG_BOUND
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,21 +114,23 @@ class Checkpoint:
 def checkpoint_frame(checkpoint: Checkpoint) -> bytes:
     """Canonical bytes for a checkpoint: PAE-style prefix + field count + fields.
 
-    Emits the v1 frame when there is no aggregate binding and the v2 frame
-    when there is. Half a binding cannot arrive here, since ``Checkpoint`` refuses
-    to hold one, so an epoch committing to nothing can never become a frame a
-    witness attests and nobody can check.
+    The shape follows the CONTENT: the bare frame when there is no aggregate
+    binding, the aggregate-bound frame when there is. There is no version
+    parameter to pass, and neither shape supersedes the other. Half a binding
+    cannot arrive here, since ``Checkpoint`` refuses to hold one, so an epoch
+    committing to nothing can never become a frame a witness attests and
+    nobody can check.
     """
     if checkpoint.agg_commit is None:
         return (
-            CHECKPOINT_FRAME_PREFIX
+            CHECKPOINT_FRAME_PREFIX_BARE
             + struct.pack(">Q", 3)
             + lp(str(checkpoint.seq))
             + lp(checkpoint.entry_hash)
             + lp(checkpoint.root)
         )
     return (
-        CHECKPOINT_FRAME_PREFIX_V2
+        CHECKPOINT_FRAME_PREFIX_AGG_BOUND
         + struct.pack(">Q", 5)
         + lp(str(checkpoint.seq))
         + lp(checkpoint.entry_hash)

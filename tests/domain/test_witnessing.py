@@ -99,7 +99,12 @@ class TestUnreachable:
         assert verdict.reason == "connection refused"
 
     def test_is_distinguishable_from_consistent(self) -> None:
-        assert WITNESS_UNREACHABLE != WITNESS_CONSISTENT
+        # Ternary Evidence Principle regression guard (CLAUDE.md item 5): the
+        # two Final string literals are provably distinct today, which is
+        # exactly why mypy flags the comparison as non-overlapping -- the
+        # assertion exists to catch a future edit that collapses them onto
+        # the same string, not to model runtime uncertainty.
+        assert WITNESS_UNREACHABLE != WITNESS_CONSISTENT  # type: ignore[comparison-overlap]
 
 
 class TestUnreadableCheckpoints:

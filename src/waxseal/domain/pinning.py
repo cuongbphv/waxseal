@@ -156,6 +156,16 @@ def render_pin_state(state: PinState) -> str:
     ``expect_anchor_binding`` follows neither convention: it is a plain
     boolean with a real, meaningful default (``False``), so it is always
     written explicitly, never omitted and never a special-cased ``null``.
+
+    ``declared_topology.ledger`` (waxseal-fg4.45) nests the SAME
+    omit-when-undeclared rule one level down, inside the object the four
+    original subfields already write unconditionally: those four are
+    required together and always present when ``declared_topology`` is at
+    all, but ``ledger`` is ``bool | None`` on its own (see
+    ``SeparationTopology``'s docstring), so it is written only when it is
+    not ``None`` — an older topology that never declared it must round-trip
+    through save/load without ever growing a ``"ledger": false`` this
+    module invented.
     """
     obj: dict[str, Any] = {
         "v": PIN_STATE_VERSION,
@@ -168,12 +178,15 @@ def render_pin_state(state: PinState) -> str:
         "expect_anchor_binding": state.expect_anchor_binding,
     }
     if state.declared_topology is not None:
-        obj["declared_topology"] = {
+        topology_obj: dict[str, Any] = {
             "seal_escrow": state.declared_topology.seal_escrow,
             "anchor_sinks": state.declared_topology.anchor_sinks,
             "witness": state.declared_topology.witness,
             "pin_separate": state.declared_topology.pin_separate,
         }
+        if state.declared_topology.ledger is not None:
+            topology_obj["ledger"] = state.declared_topology.ledger
+        obj["declared_topology"] = topology_obj
     if state.max_anchor_age_s is not None:
         # A plain scalar, unlike declared_topology's nested object, so there is
         # only one number to declare, not a group of fields that must arrive
@@ -273,16 +286,40 @@ def _optional_bool(obj: dict[str, Any], key: str, default: bool) -> bool:
     return value
 
 
+def _optional_bool_or_none(obj: dict[str, Any], key: str) -> bool | None:
+    """Like ``_optional_bool``, but absence means "never declared", not a
+    caller-supplied meaningful default — ``SeparationTopology.ledger``'s own
+    convention (see its docstring), distinct from ``expect_anchor_binding``'s
+    plain-bool-with-a-real-default one that ``_optional_bool`` above serves.
+    """
+    value = obj.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise PinMalformed(f"pin state field {key!r} must be a boolean, got {value!r}")
+    return value
+
+
 def _optional_topology(obj: dict[str, Any], key: str) -> SeparationTopology | None:
     """The whole ``declared_topology`` object is optional, but never partial.
 
     Key absent: ``None``, meaning "not declared", the ordinary case for every pin
     state written before this field existed, unchanged by this bead. Key
-    present: all four subfields are required together, each validated with
-    the same discipline as every other pin field, since a partially-present
-    object (e.g. missing ``pin_separate``) is malformed, never silently
-    defaulted, because a defaulted field here would be indistinguishable
-    from an operator who actually declared it that way.
+    present: all four ORIGINAL subfields are required together, each
+    validated with the same discipline as every other pin field, since a
+    partially-present object (e.g. missing ``pin_separate``) is malformed,
+    never silently defaulted, because a defaulted field here would be
+    indistinguishable from an operator who actually declared it that way.
+
+    ``ledger`` (waxseal-fg4.45) is deliberately NOT a fifth required
+    subfield here: it was added after SPEC 13.1's "all four together" shape
+    had already shipped, so requiring it now would turn every
+    ``declared_topology`` written by an older waxseal into ``malformed_pin``
+    on its very next read — the exact append-only violation this bead's
+    OWNER DECISION forbids. It is read with ``_optional_bool_or_none``
+    instead: absent (every pre-fg4.45 topology, and any topology that still
+    does not mention it) parses as ``None``, "never declared", never as
+    ``False``.
     """
     value = obj.get(key)
     if value is None:
@@ -294,6 +331,7 @@ def _optional_topology(obj: dict[str, Any], key: str) -> SeparationTopology | No
         anchor_sinks=_require_int(value, "anchor_sinks"),
         witness=_require_bool(value, "witness"),
         pin_separate=_require_bool(value, "pin_separate"),
+        ledger=_optional_bool_or_none(value, "ledger"),
     )
 
 

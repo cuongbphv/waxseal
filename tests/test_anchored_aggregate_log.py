@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -431,7 +432,7 @@ class TestHTTPAnchorSinkBinding:
             sent.append(request.body)  # type: ignore[attr-defined]
             return RemoteResponse(status=200, headers={}, body=b"{}")
 
-        sink = HTTPAnchorSink("http://witness/anchor", transport=transport)  # type: ignore[arg-type]
+        sink = HTTPAnchorSink("http://witness/anchor", transport=transport)
         sink.anchor(
             Checkpoint(seq=1, entry_hash="a" * 64, root="b" * 64, agg_commit="c" * 64,
                        agg_epoch=2)
@@ -451,7 +452,7 @@ class TestHTTPAnchorSinkBinding:
             sent.append(request.body)  # type: ignore[attr-defined]
             return RemoteResponse(status=200, headers={}, body=b"{}")
 
-        sink = HTTPAnchorSink("http://witness/anchor", transport=transport)  # type: ignore[arg-type]
+        sink = HTTPAnchorSink("http://witness/anchor", transport=transport)
         sink.anchor(Checkpoint(seq=1, entry_hash="a" * 64, root="b" * 64))
         assert "agg_commit" not in json.loads(sent[0])
 
@@ -619,12 +620,14 @@ class TestFaultInjectionBetweenAnchorsAndSealagg:
             def __enter__(self) -> TornFile:
                 return self
 
-            def __exit__(self, *exc: object) -> bool:
+            def __exit__(self, *exc: object) -> Literal[False]:
                 self._real.close()  # type: ignore[attr-defined]
                 return False
 
         def faulty_fdopen(fd: int, *a: object, **kw: object) -> object:
-            return TornFile(real_fdopen(fd, *a, **kw))
+            # os.fdopen's overloads key off literal mode strings; this stub
+            # forwards whatever the real caller passed through unchanged.
+            return TornFile(real_fdopen(fd, *a, **kw))  # type: ignore[call-overload]
 
         monkeypatch.setattr(os, "fdopen", faulty_fdopen)
         with pytest.raises(OSError, match="simulated crash"):

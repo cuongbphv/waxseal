@@ -21,22 +21,41 @@ import argparse
 import contextlib
 import functools
 import sys
-from collections import Counter
-from collections.abc import Callable
+from collections import Counter, deque
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Any, Final
 
 from waxseal.adapters.anchors import AnchorRecord
 from waxseal.adapters.remote import RemoteError
+from waxseal.adapters.rfc3161_verify import (
+    SIGNATURE_INVALID,
+    SIGNATURE_UNCHECKED,
+    SignatureCheck,
+)
+from waxseal.domain.bond import DivergentLeaf
 from waxseal.domain.checkpoint import Checkpoint
+from waxseal.domain.header import Entry
 from waxseal.domain.pinning import PinState
-from waxseal.domain.report import SCOPE_LINE, CheckSummary
+from waxseal.domain.preflight import (
+    Observed,
+    PreflightObservation,
+    ladder_for,
+    render_ladder,
+)
+from waxseal.domain.report import (
+    RECEIPTS_NOT_RECORDED_REASON,
+    SCOPE_LINE,
+    CheckSummary,
+)
 from waxseal.domain.rfc3161 import NONCE_MISMATCH, RECEIPT_IMPRINT_MISMATCH
+from waxseal.domain.segments import SegmentRead
 from waxseal.domain.separation import (
     SeparationTopology,
     counted_authorities,
+    ledger_shortfall,
     render_counted_authorities,
     render_separation_degree,
     separation_degree,
@@ -46,10 +65,32 @@ from waxseal.domain.verdict import Verdict
 from waxseal.domain.witnessing import WitnessVerdict
 from waxseal.log import AuditLog
 
+if TYPE_CHECKING:
+    # Ledger-layer types (F4) used only in annotations here. Deferred behind
+    # TYPE_CHECKING, matching how every OTHER adapter this file touches
+    # (witness, rfc3161, ots, install) is imported lazily inside the one
+    # function that needs it at runtime: `adapters/evm.py` is zero-dep
+    # stdlib, so there is no cost this guards against except parsing ~900
+    # lines of module on every CLI invocation, including `waxseal tail`.
+    from waxseal.adapters.evm import EvmContracts, EvmLedgerSink
+
 # The only two RFC 3161 outcomes that mean "checked and false" rather than
 # "not readable here": the token commits to bytes other than the record it
 # sits beside. Everything else is a format this build cannot read.
 _RECEIPT_CHECKED_FALSE: Final = frozenset({RECEIPT_IMPRINT_MISMATCH, NONCE_MISMATCH})
+
+_TSA_CA_FILE_HELP = (
+    "PEM bundle of trust anchors for the TSA that issued the RFC 3161 receipts "
+    "in <path>.anchors. Passing it TURNS ON the signature dimension, which "
+    "needs the optional extra (`pip install 'waxseal[rfc3161]'`): a receipt "
+    "whose CMS signature does not verify, or whose signer does not chain to "
+    "this bundle, is signature_invalid, exit 1; anything that could not be "
+    "checked at all (extra absent, bundle unreadable, a token shape this build "
+    "cannot parse) is signature_unchecked, exit 2, never a silent pass. "
+    "Without this flag the receipts are checked STRUCTURALLY only, exactly as "
+    "before, and every line says so — waxseal names no default trust anchor, "
+    "because choosing one would decide whom you trust on your behalf"
+)
 
 _PIN_HELP = (
     "check the trail against a checkpoint this verifier recorded previously, "
@@ -81,7 +122,11 @@ _DECLARE_TOPOLOGY_HELP = (
     "binding, as seal_escrow=<bool>,anchor_sinks=<int>,witness=<bool>,"
     "pin_separate=<bool> — all four subfields required together (SPEC 13.1: "
     "a partial declaration is malformed_pin, never silently defaulted). "
-    "Requires --pin; only takes effect on a run that advances it"
+    "An optional fifth ledger=<bool> may be added to declare the on-chain "
+    "ledger authority; omitting it leaves ledger undeclared (None), never "
+    "false, and every spec string written before this subfield existed "
+    "keeps parsing unchanged. Requires --pin; only takes effect on a run "
+    "that advances it"
 )
 
 _TSA_HELP = (
@@ -104,6 +149,68 @@ _WITNESS_HELP = (
     "there too; on `verify`, check the trail extends everything that witness "
     "saw. Point it at a host that is NOT the chain server — witnessing a "
     "server to itself proves nothing"
+)
+
+_PREFLIGHT_PIN_HELP = (
+    "read this verifier's pin state file for the declarations it carries "
+    "(declared_topology, expect_anchor_binding, max_anchor_age_s). READ-ONLY "
+    "here: unlike `verify --pin`/`report --pin`, preflight never writes it "
+    "and never advances it"
+)
+
+# --------------------------------------------------------------- ledger (F4)
+#
+# `--rpc`/`--liveness`/`--registry`/`--bond` are shared verbatim across every
+# subcommand that reads the on-chain ledger layer (`ledger-status`, `verify`,
+# `report`), so one set of help strings, never one copied per parser.
+
+_RPC_HELP = (
+    "on-chain JSON-RPC endpoint (repeatable; at least 2 required — "
+    "adapters/evm.py refuses a single endpoint because it cannot disagree "
+    "with itself, which is exactly the eclipse an operator relying on one "
+    "voice would be blind to)"
+)
+
+_LIVENESS_HELP = "AnchoringLiveness contract address"
+
+_LEDGER_REGISTRY_HELP = (
+    "FingerprintRegistry contract address; cross-checks every schema "
+    "fingerprint this trail actually carries against what the contract "
+    "holds (agreement is decided by SHA-256, the same computation the "
+    "contract performs, never by this build's ability to parse the "
+    "descriptor it reads back)"
+)
+
+_BOND_HELP = "BondedCheckpoints contract address"
+
+_TRAIL_ID_HELP = (
+    "the on-chain trail identifier (hashed to a bytes32 trail id, "
+    "domain/bond.py's trail_id_for); default: the resolved local trail "
+    "path (or the URL, verbatim) — the same value `--pin` names a trail by. "
+    "Anchoring and later reading a trail must agree on this value or they "
+    "key two different slots on the same contract"
+)
+
+_LEDGER_VERIFY_HELP = (
+    "cross-check the trail against an on-chain AnchoringLiveness contract. "
+    "A chain disagreement or an unreachable ledger is reported as "
+    "unverifiable (exit 2), never as broken (exit 1): the whole point of "
+    "the liveness ternary is that punctuality and integrity are different "
+    "questions — a trail can be perfectly intact and merely late"
+)
+
+_WAXSEAL_EVM_SIGNER_CMD_MISSING = (
+    "WAXSEAL_EVM_SIGNER_CMD is not set. A ledger write needs a signer, and "
+    "waxseal never takes a private key on argv or in an env var that "
+    "carries key material — the same boundary WAXSEAL_API_KEY and "
+    "WAXSEAL_WITNESS_API_KEY already draw for credentials. Set "
+    "WAXSEAL_EVM_SIGNER_CMD to an executable this CLI can invoke as "
+    "`<cmd> address`, `<cmd> sign-digest 0x<64 hex>`, and `<cmd> sign-tx` "
+    "(the transaction fields as a JSON object on stdin) — see "
+    "ExternalEvmSigner's docstring for the exact three-verb contract, and "
+    "tests/adapters/test_evm_anvil.py's CastSigner for the two operations "
+    "(`cast wallet sign --no-hash`, `cast mktx`) a real wrapper needs to "
+    "perform behind it"
 )
 
 
@@ -169,6 +276,15 @@ def main(argv: list[str] | None = None) -> int:
     p_verify.add_argument(
         "--witness", action="append", default=None, metavar="URL", help=_WITNESS_HELP
     )
+    p_verify.add_argument(
+        "--tsa-ca-file", type=Path, default=None, metavar="BUNDLE.PEM", help=_TSA_CA_FILE_HELP
+    )
+    p_verify.add_argument(
+        "--rpc", action="append", default=None, metavar="URL", help=_RPC_HELP
+    )
+    p_verify.add_argument("--liveness", default=None, metavar="ADDR", help=_LEDGER_VERIFY_HELP)
+    p_verify.add_argument("--registry", default=None, metavar="ADDR", help=_LEDGER_REGISTRY_HELP)
+    p_verify.add_argument("--trail-id", default=None, metavar="NAME", help=_TRAIL_ID_HELP)
 
     p_tail = sub.add_parser("tail", help="print the last entries")
     p_tail.add_argument("path")
@@ -197,6 +313,29 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_anchor.add_argument("--tsa-url", metavar="URL", help=_TSA_HELP)
     p_anchor.add_argument("--ots-calendar", metavar="URL", help=_OTS_HELP)
+    p_anchor.add_argument(
+        "--evm-rpc", action="append", default=None, metavar="URL", help=_RPC_HELP
+    )
+    p_anchor.add_argument(
+        "--evm-liveness", default=None, metavar="ADDR",
+        help="publish this checkpoint to an AnchoringLiveness contract too "
+        "(adds a fourth independent anchor domain alongside --tsa-url/"
+        "--ots-calendar); requires --evm-rpc and WAXSEAL_EVM_SIGNER_CMD",
+    )
+    p_anchor.add_argument(
+        "--evm-write-rpc", default=None, metavar="URL",
+        help="which --evm-rpc endpoint actually receives the transaction "
+        "(default: the first --evm-rpc given)",
+    )
+    p_anchor.add_argument("--evm-trail-id", default=None, metavar="NAME", help=_TRAIL_ID_HELP)
+    p_anchor.add_argument(
+        "--evm-consistency-proof-file", type=Path, default=None, metavar="PROOF.JSON",
+        help="a JSON array of hex bytes32 strings: the RFC 9162 consistency "
+        "proof the contract requires from the SECOND submit onward for this "
+        "trail id. Omit only for the very first submit — the contract "
+        "reverts NotAnExtension on every one after that without one, which "
+        "surfaces here as a labelled error, never a silent no-op",
+    )
 
     p_report = sub.add_parser(
         "report", help="print an auditor report: what the trail holds and what was checked"
@@ -212,6 +351,15 @@ def main(argv: list[str] | None = None) -> int:
     p_report.add_argument(
         "--witness", action="append", default=None, metavar="URL", help=_WITNESS_HELP
     )
+    p_report.add_argument(
+        "--tsa-ca-file", type=Path, default=None, metavar="BUNDLE.PEM", help=_TSA_CA_FILE_HELP
+    )
+    p_report.add_argument(
+        "--rpc", action="append", default=None, metavar="URL", help=_RPC_HELP
+    )
+    p_report.add_argument("--liveness", default=None, metavar="ADDR", help=_LEDGER_VERIFY_HELP)
+    p_report.add_argument("--registry", default=None, metavar="ADDR", help=_LEDGER_REGISTRY_HELP)
+    p_report.add_argument("--trail-id", default=None, metavar="NAME", help=_TRAIL_ID_HELP)
 
     p_export = sub.add_parser(
         "export-proof",
@@ -329,6 +477,24 @@ def main(argv: list[str] | None = None) -> int:
         help="operator's tolerated detection window",
     )
 
+    p_preflight = sub.add_parser(
+        "preflight",
+        help="print which rung of the attacker-capability ladder this "
+        "trail's configuration stops (read-only; a reading, not a verdict)",
+    )
+    p_preflight.add_argument("path")
+    p_preflight.add_argument(
+        "--pin", type=Path, default=None, metavar="STATEFILE",
+        help=_PREFLIGHT_PIN_HELP,
+    )
+
+    p_segments = sub.add_parser(
+        "segments",
+        help="verify a directory of sealed trail segments and the rotation "
+        "bindings that link them (read-only; appends nothing)",
+    )
+    p_segments.add_argument("dir", help="the per-project trail directory to walk")
+
     p_install = sub.add_parser(
         "install", help="write the audit hook shim files for an agent framework"
     )
@@ -341,6 +507,96 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_install.add_argument("--force", action="store_true",
                            help="overwrite shim files that differ")
+
+    p_ledger_status = sub.add_parser(
+        "ledger-status",
+        help="read-only liveness/registry/bond ternaries for a trail's "
+        "on-chain state (exit codes match reconcile-tickets: 0 clean, "
+        "1 a positively-detected finding, 2 unmeasured, 3 no such trail)",
+    )
+    p_ledger_status.add_argument("path")
+    p_ledger_status.add_argument(
+        "--rpc", action="append", default=None, metavar="URL", help=_RPC_HELP
+    )
+    p_ledger_status.add_argument("--liveness", required=True, metavar="ADDR", help=_LIVENESS_HELP)
+    p_ledger_status.add_argument(
+        "--registry", default=None, metavar="ADDR", help=_LEDGER_REGISTRY_HELP
+    )
+    p_ledger_status.add_argument("--bond", default=None, metavar="ADDR", help=_BOND_HELP)
+    p_ledger_status.add_argument(
+        "--writer", default=None, metavar="ADDR",
+        help="the writer address to check the bond of; required with --bond",
+    )
+    p_ledger_status.add_argument("--trail-id", default=None, metavar="NAME", help=_TRAIL_ID_HELP)
+    p_ledger_status.add_argument("--json", action="store_true", help="emit JSON instead of text")
+
+    p_registry = sub.add_parser(
+        "registry", help="on-chain fingerprint registry writes (ledger layer)"
+    )
+    sub_registry = p_registry.add_subparsers(dest="registry_command", required=True)
+    p_registry_publish = sub_registry.add_parser(
+        "publish",
+        help="publish a header-schema descriptor to the on-chain fingerprint "
+        "registry (not a chain-entry append — same footing as `anchor`)",
+    )
+    p_registry_publish.add_argument(
+        "--descriptor-of", required=True, metavar="FINGERPRINT",
+        help="which fingerprint (as this build's own VersionRegistry knows "
+        "it) to publish the descriptor of; the contract computes "
+        "sha256(descriptor) itself, so there is no separate fingerprint "
+        "argument that could disagree with the bytes sent",
+    )
+    p_registry_publish.add_argument(
+        "--registry", required=True, metavar="ADDR", help="FingerprintRegistry contract address"
+    )
+    p_registry_publish.add_argument(
+        "--rpc", action="append", default=None, metavar="URL", help=_RPC_HELP
+    )
+    p_registry_publish.add_argument(
+        "--write-rpc", default=None, metavar="URL",
+        help="which --rpc endpoint actually receives the transaction (default: the first)",
+    )
+
+    p_bond = sub.add_parser(
+        "bond", help="bonded-equivocation contract writes (ledger layer)"
+    )
+    sub_bond = p_bond.add_subparsers(dest="bond_command", required=True)
+    p_bond_deposit = sub_bond.add_parser(
+        "deposit", help="post or top up the signer's own stake"
+    )
+    p_bond_deposit.add_argument("--bond", required=True, metavar="ADDR", help=_BOND_HELP)
+    p_bond_deposit.add_argument(
+        "--rpc", action="append", default=None, metavar="URL", help=_RPC_HELP
+    )
+    p_bond_deposit.add_argument(
+        "--write-rpc", default=None, metavar="URL",
+        help="which --rpc endpoint actually receives the transaction (default: the first)",
+    )
+    p_bond_deposit.add_argument(
+        "--amount-wei", type=int, required=True, metavar="WEI", help="amount to deposit, in wei"
+    )
+    p_bond_prove = sub_bond.add_parser(
+        "prove",
+        help="submit a fraud proof (equivocation or non-extension) against a writer's bond",
+    )
+    p_bond_prove.add_argument(
+        "proof", help="path to a JSON fraud-proof file; "
+        '{"kind": "equivocation", "chain_id": ..., "checkpoint_a": '
+        '{"seq": ..., "entry_hash": ..., "root": ...}, "signature_a": "0x..", '
+        '"checkpoint_b": {...}, "signature_b": "0x.."} or '
+        '{"kind": "non_extension", "chain_id": ..., "older": {...}, '
+        '"older_signature": "0x..", "newer": {...}, "newer_signature": "0x..", '
+        '"in_older": {"index": ..., "entry_hash": ..., "proof": ["0x..", ...]}, '
+        '"in_newer": {...}}',
+    )
+    p_bond_prove.add_argument("--bond", required=True, metavar="ADDR", help=_BOND_HELP)
+    p_bond_prove.add_argument(
+        "--rpc", action="append", default=None, metavar="URL", help=_RPC_HELP
+    )
+    p_bond_prove.add_argument(
+        "--write-rpc", default=None, metavar="URL",
+        help="which --rpc endpoint actually receives the transaction (default: the first)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -358,6 +614,16 @@ def main(argv: list[str] | None = None) -> int:
             "--pin (there is no pin state file to declare against)"
         )
 
+    if args.command in ("verify", "report") and args.trail_id is not None and not (
+        args.liveness or args.registry
+    ):
+        # Same rule-6 shape as the pin-declaration check above: --trail-id
+        # names WHICH on-chain trail to check, and checks nothing on its own.
+        parser.error("--trail-id requires --liveness or --registry")
+
+    if args.command == "ledger-status" and args.bond is not None and args.writer is None:
+        parser.error("--bond requires --writer (the address whose bond status to check)")
+
     if args.command == "cadence":
         # Pure arithmetic over operator-supplied measurements: opens no
         # trail at all, unlike every other subcommand here.
@@ -365,6 +631,19 @@ def main(argv: list[str] | None = None) -> int:
             lam=args.lam, c=args.c, w=args.w, rho=args.rho, M=args.M,
             delta=args.delta, t_max=args.t_max,
         )
+
+    if args.command == "segments":
+        # Takes a DIRECTORY, not a trail path, so it sits above the
+        # single-trail plumbing below (the same reason `cadence` does).
+        return _segments(Path(args.dir).expanduser())
+
+    if args.command == "preflight":
+        # Sits above the shared trail plumbing because it owns its own
+        # "nothing was read" rule: preflight reads LOCAL sidecars, so a URL
+        # target has no location for any of them, and that is exit 3 (nothing
+        # read, nothing created) rather than the exit 1 `anchor`/`receipt`
+        # use — a reading command has no verdict codes to spend.
+        return _preflight(args.path, pin_path=args.pin)
 
     if args.command == "install":
         # Writes host shim files only, and never touches any audit log.
@@ -377,6 +656,31 @@ def main(argv: list[str] | None = None) -> int:
         # file and no trail at all, so none of the trail plumbing below
         # applies to it.
         return _verify_proof(Path(args.bundle).expanduser())
+
+    if args.command == "registry":
+        # Publishes a descriptor by fingerprint, not by trail: no audit log
+        # is ever opened for this command, the same shape `cadence` has.
+        return _registry_publish(
+            descriptor_of=args.descriptor_of,
+            registry_addr=args.registry,
+            rpc_urls=args.rpc,
+            write_rpc=args.write_rpc,
+        )
+
+    if args.command == "bond":
+        if args.bond_command == "deposit":
+            return _bond_deposit(
+                bond_addr=args.bond,
+                rpc_urls=args.rpc,
+                write_rpc=args.write_rpc,
+                amount_wei=args.amount_wei,
+            )
+        return _bond_prove(
+            bond_addr=args.bond,
+            rpc_urls=args.rpc,
+            write_rpc=args.write_rpc,
+            proof_path=Path(args.proof).expanduser(),
+        )
 
     is_url = args.path.startswith(("http://", "https://"))
     trail: Path | None
@@ -435,6 +739,15 @@ def main(argv: list[str] | None = None) -> int:
                 declare_expect_anchor_binding=args.expect_anchor_binding,
                 declare_max_anchor_age_s=args.max_anchor_age_s,
                 declare_topology=args.declare_topology,
+                tsa_ca_file=args.tsa_ca_file,
+                ledger_rpc_urls=args.rpc,
+                ledger_liveness=args.liveness,
+                ledger_registry=args.registry,
+                ledger_trail_id=(
+                    args.trail_id
+                    if args.trail_id is not None
+                    else _pin_target(args.path, trail)
+                ),
             )
             # Printed here rather than inside _verify so it cannot drift
             # between that function's verdict paths. `report` carries the
@@ -460,6 +773,30 @@ def main(argv: list[str] | None = None) -> int:
                 declare_expect_anchor_binding=args.expect_anchor_binding,
                 declare_max_anchor_age_s=args.max_anchor_age_s,
                 declare_topology=args.declare_topology,
+                tsa_ca_file=args.tsa_ca_file,
+                ledger_rpc_urls=args.rpc,
+                ledger_liveness=args.liveness,
+                ledger_registry=args.registry,
+                ledger_trail_id=(
+                    args.trail_id
+                    if args.trail_id is not None
+                    else _pin_target(args.path, trail)
+                ),
+            )
+        if args.command == "ledger-status":
+            return _ledger_status(
+                log,
+                rpc_urls=args.rpc,
+                liveness=args.liveness,
+                registry=args.registry,
+                bond=args.bond,
+                writer=args.writer,
+                trail_id=(
+                    args.trail_id
+                    if args.trail_id is not None
+                    else _pin_target(args.path, trail)
+                ),
+                as_json=args.json,
             )
         if args.command == "export-proof":
             return _export_proof(log, args.seq)
@@ -489,6 +826,11 @@ def main(argv: list[str] | None = None) -> int:
                 witnesses=args.witness,
                 tsa_url=args.tsa_url,
                 ots_calendar=args.ots_calendar,
+                evm_rpc=args.evm_rpc,
+                evm_liveness=args.evm_liveness,
+                evm_write_rpc=args.evm_write_rpc,
+                evm_trail_id=args.evm_trail_id,
+                evm_consistency_proof_file=args.evm_consistency_proof_file,
             )
         return _inspect(log, trail)
     except (OSError, RemoteError) as e:
@@ -558,6 +900,11 @@ def _verify(
     declare_expect_anchor_binding: bool = False,
     declare_max_anchor_age_s: int | None = None,
     declare_topology: SeparationTopology | None = None,
+    tsa_ca_file: Path | None = None,
+    ledger_rpc_urls: list[str] | None = None,
+    ledger_liveness: str | None = None,
+    ledger_registry: str | None = None,
+    ledger_trail_id: str | None = None,
 ) -> int:
     # A CLI process saw no writes, so it cannot measure drops (None, not 0).
     result = log.verify(measure_drops=False)
@@ -605,7 +952,7 @@ def _verify(
     # check_anchors False in that case (no local sidecar to check), and this
     # guard just makes that invariant visible to mypy, not a new behavior.
     if check_anchors and trail is not None:
-        anchor_check = _anchor_check(log, trail)
+        anchor_check = _anchor_check(log, trail, tsa_ca_file=tsa_ca_file)
         observed_anchor_sinks = _observed_anchor_sinks(trail)
         observed_anchor_records = _observed_anchor_records(trail)
         observed_anchor_unreadable = _observed_anchor_unreadable(trail)
@@ -615,6 +962,29 @@ def _verify(
     if witnesses:
         witness_verdicts = _witness_verdicts(log, witnesses)
         observed_witness_consistent = _observed_witness_consistent(witness_verdicts)
+
+    # Ledger (waxseal-fg4.45), measured here for the same reason anchors and
+    # witnesses already are above: `_pin_check` needs THIS run's ledger
+    # result to compare against a declared_topology.ledger, and can only do
+    # that if the check has already run by the time `_pin_check` is called.
+    # F4 originally computed this AFTER `_pin_check` (still true in the
+    # `report` builder below at the time of writing) — printing was
+    # unaffected either way, since `_ledger_check` is idempotent, but the
+    # comparison inside `_pin_check` was structurally unreachable: nothing
+    # had been measured yet for it to read.
+    ledger_check: _Check | None = None
+    observed_ledger_ok: bool | None = None
+    if ledger_liveness is not None or ledger_registry is not None:
+        assert ledger_trail_id is not None  # main() always fills this in
+        ledger_check = _ledger_check(
+            log.entries(),
+            rpc_urls=ledger_rpc_urls,
+            liveness=ledger_liveness,
+            registry=ledger_registry,
+            trail_id=ledger_trail_id,
+            now_fn=now_fn,
+        )
+        observed_ledger_ok = _observed_ledger_ok(ledger_check)
 
     pending_pin: PinState | None = None
     if pin_path is not None:
@@ -632,6 +1002,7 @@ def _verify(
             declare_expect_anchor_binding=declare_expect_anchor_binding,
             declare_max_anchor_age_s=declare_max_anchor_age_s,
             declare_topology=declare_topology,
+            observed_ledger_ok=observed_ledger_ok,
         )
         print(check.line)
         codes.append(check.exit_code)
@@ -646,6 +1017,18 @@ def _verify(
         for verdict in witness_verdicts:
             print(_witness_line(verdict))
         codes.append(_witness_exit_code(witness_verdicts))
+
+    if ledger_check is not None:
+        # Printed here, in the ORIGINAL position, even though it was
+        # computed earlier above: only the computation moved, matching the
+        # anchor_check/witness_verdicts precedent this function already
+        # follows for the same reason.
+        print(ledger_check.line)
+        codes.append(ledger_check.exit_code)
+
+    receipts_check = _receipts_check(log, trail)
+    print(receipts_check.line)
+    codes.append(receipts_check.exit_code)
 
     # τ (waxseal-mfi, closing conformance.md gap G1): printed unconditionally,
     # never only when --pin is given: "not declared" must be as loud as any
@@ -695,8 +1078,128 @@ def _print_drop_count(trail: Path | None) -> None:
         print(f"dropped_writes >= {count} (measured minimum, from {trail}.drops)")
 
 
-def _anchor_check(log: AuditLog, trail: Path) -> _Check:
-    """Check the `.anchors` sidecar against the trail as it stands now."""
+# Rule 5, one sidecar over from `.drops`: no `.receipts` file at all is "not
+# recorded", never "checked, found nothing" and never a failure. Printed on
+# every run, including the runs where nothing was recorded, because an
+# absence an operator only sees by asking is an absence they will not see.
+_RECEIPTS_ABSENT_LINE: Final = (
+    "receipts: not recorded (no .receipts sidecar — per-append acknowledgment "
+    "was never measured here, which is NOT the same as measured and clean)"
+)
+
+# A summary alone cannot carry absent-vs-empty: both are `ok=True, checked=0`.
+# The reason string and the line above are what keep them apart, so the two are
+# defined once, together, instead of rebuilt at each return.
+_RECEIPTS_NOT_RECORDED: Final = CheckSummary(
+    # The reason string lives in domain/report.py, because `report` renders
+    # this same state into the artifact an auditor keeps and must not print it
+    # as a flavour of "ok". Shared, never re-spelled: two surfaces agreeing by
+    # coincidence is how absent quietly becomes clean.
+    ok=True,
+    checked=0,
+    reason=RECEIPTS_NOT_RECORDED_REASON,
+)
+
+# SPEC.md section 19's honest limit, printed rather than filed in a doc: the
+# sidecar is as attacker-writable as the trail beside it, so this check is
+# worth exactly what it defeats and no more.
+_RECEIPTS_LIMIT_NOTE: Final = (
+    "the sidecar is as attacker-writable as the trail beside it — a rewrite "
+    "that curates BOTH passes this check; only the server's own receipt chain "
+    "(REMOTE.md section 10) catches that"
+)
+
+
+def _receipts_check(log: AuditLog, trail: Path | None) -> _Check:
+    """Reconcile the `.receipts` sidecar against the trail as it stands now.
+
+    A receipt is a second authority's write-time acknowledgment that entry
+    `seq` carried `entry_hash`, so an edit to any acknowledged entry is
+    contradicted from the very next append onward rather than at the next
+    checkpoint — the rewrite window falls from the anchor cadence to one entry.
+
+    Not gated behind a flag, unlike `--anchors`: there is nothing external to
+    contact and nothing to pay for, and the absent case has to print anyway.
+    """
+    from waxseal.adapters.receipts import read_receipts, receipts_path
+    from waxseal.domain.receipts import ReceiptRecord, reconcile_receipts
+
+    if trail is None:
+        # A URL target has no local sidecar location at all, the same state as
+        # never having recorded one.
+        return _Check(_RECEIPTS_NOT_RECORDED, _RECEIPTS_ABSENT_LINE)
+    try:
+        sidecar = read_receipts(trail)
+    except OSError as e:
+        # An environment fact, not a record-level finding: this build has no
+        # coverage here, which is exit 2 and a label, never tampering.
+        return _Check(
+            CheckSummary(ok=True, checked=0, reason=None, unverifiable=True),
+            f"receipts: {receipts_path(trail)} could not be read ({e}) — "
+            "unverifiable, NOT evidence of tampering",
+        )
+    if not sidecar.present:
+        return _Check(_RECEIPTS_NOT_RECORDED, _RECEIPTS_ABSENT_LINE)
+
+    # entry_hashes() materializes the whole trail, so it is only paid for when
+    # there is at least one readable record to compare against.
+    hashes = (
+        log.entry_hashes()
+        if any(isinstance(line, ReceiptRecord) for line in sidecar.lines)
+        else []
+    )
+    result = reconcile_receipts(hashes, sidecar)
+    notes: list[str] = []
+    if result.unreadable_versions:
+        versions = ", ".join(sorted(set(result.unreadable_versions)))
+        notes.append(
+            f"{len(result.unreadable_versions)} record(s) in an unreadable format "
+            f"version ({versions}) — unverifiable by name, NOT evidence of tampering"
+        )
+    if result.verdict is Verdict.BROKEN:
+        where = (
+            f"seq={result.broken_seq}"
+            if result.broken_seq is not None
+            # A malformed record names no trustworthy seq: the field that would
+            # have named one is the field that failed to parse.
+            else f"line {result.broken_line}"
+        )
+        line = f"RECEIPTS BROKEN at {where}: {result.reason}"
+    elif result.checked:
+        line = f"receipts ok (checked={result.checked}, latest=seq {result.latest_seq})"
+        notes.append(_RECEIPTS_LIMIT_NOTE)
+    else:
+        line = (
+            "receipts: sidecar present, 0 record(s) — checked, found nothing "
+            "(NOT the same as no sidecar at all)"
+        )
+    for note in notes:
+        line += f"\n  note: {note}"
+    return _Check(
+        CheckSummary(
+            ok=result.verdict is not Verdict.BROKEN,
+            checked=result.checked,
+            reason=result.reason,
+            unverifiable=result.verdict is Verdict.UNVERIFIABLE,
+            notes=tuple(notes),
+        ),
+        line,
+    )
+
+
+def _anchor_check(log: AuditLog, trail: Path, *, tsa_ca_file: Path | None = None) -> _Check:
+    """Check the `.anchors` sidecar against the trail as it stands now.
+
+    ``tsa_ca_file`` turns on the OPTIONAL signature dimension
+    (`adapters/rfc3161_verify.py`). It is opt-in for the same reason
+    ``--anchors`` itself is: a dimension the operator did not engage is not
+    part of this run's verdict, and `verify` must not start exiting 2 on
+    every healthy trail whose TSA nobody named a bundle for -- the argument
+    ``_receipt_verdict`` already makes for a pending OpenTimestamps proof.
+    What it must never do is engage the dimension and then come back 0
+    without an answer, so once a bundle IS named every unchecked token is
+    exit 2 with a label naming its cause.
+    """
     import json
 
     from waxseal.adapters.anchors import read_anchor_records
@@ -743,6 +1246,34 @@ def _anchor_check(log: AuditLog, trail: Path) -> _Check:
     notes.extend(r.note for r in receipts if r.note is not None)
     unverifiable_receipts = [r for r in receipts if r.status == _RECEIPT_UNVERIFIABLE]
 
+    signature_checks = _signature_checks(records, tsa_ca_file)
+    signature_verdict = Verdict.OK
+    if tsa_ca_file is None:
+        # Not engaged, so not part of the verdict -- but never silent either
+        # (rule 6). One line, sourced from the adapter so the remedy it names
+        # cannot drift from the one the engaged path prints.
+        if signature_checks:
+            notes.append(
+                f"{len(signature_checks)} RFC 3161 receipt(s): {signature_checks[0][1].label}"
+            )
+    else:
+        notes.extend(f"seq={seq}: {check.label}" for seq, check in signature_checks)
+        for _, check in signature_checks:
+            signature_verdict = signature_verdict.join(check.verdict)
+        if signature_verdict is Verdict.BROKEN:
+            broken_signature = next(
+                check for _, check in signature_checks if check.verdict is Verdict.BROKEN
+            )
+            return _Check(
+                CheckSummary(
+                    ok=False,
+                    checked=len(records),
+                    reason=SIGNATURE_INVALID,
+                    notes=tuple(notes),
+                ),
+                f"ANCHOR BROKEN: {broken_signature.label}",
+            )
+
     bound = sum(1 for r in records if r.checkpoint.agg_commit is not None)
     if bound:
         # The CLI holds no seal key, so the chain-shape claim of a v2 record
@@ -776,16 +1307,47 @@ def _anchor_check(log: AuditLog, trail: Path) -> _Check:
         reason = "unreadable_record_version"
     elif unverifiable_receipts:
         reason = unverifiable_receipts[0].reason
+    elif signature_verdict is Verdict.UNVERIFIABLE:
+        # Engaged and unanswerable: the third way this build can lack
+        # coverage, and the only one an operator can fix by installing
+        # something. Still not evidence of tampering.
+        reason = SIGNATURE_UNCHECKED
     return _Check(
         CheckSummary(
             ok=True,
             checked=len(records),
             reason=reason,
-            unverifiable=bool(sidecar.unreadable_versions or unverifiable_receipts),
+            unverifiable=bool(
+                sidecar.unreadable_versions
+                or unverifiable_receipts
+                or signature_verdict is Verdict.UNVERIFIABLE
+            ),
             notes=tuple(notes),
         ),
         line,
     )
+
+
+def _signature_checks(
+    records: Sequence[AnchorRecord], tsa_ca_file: Path | None
+) -> list[tuple[int, SignatureCheck]]:
+    """The signature dimension for every record carrying a readable RFC 3161
+    receipt. A receipt whose base64 or DER this build cannot read is skipped:
+    ``_receipt_verdict`` already reported it as unverifiable, and reporting it
+    twice under two vocabularies would double-count one fact."""
+    from waxseal.adapters.rfc3161_verify import verify_token_signature
+    from waxseal.domain import rfc3161
+
+    checks: list[tuple[int, SignatureCheck]] = []
+    for record in records:
+        receipt = record.receipt
+        if receipt is None or not receipt.startswith(rfc3161.RECEIPT_PREFIX):
+            continue
+        der = rfc3161.decode_receipt(receipt)
+        if der is None:
+            continue
+        checks.append((record.checkpoint.seq, verify_token_signature(der, ca_file=tsa_ca_file)))
+    return checks
 
 
 def _observed_anchor_sinks(trail: Path) -> int:
@@ -1049,6 +1611,25 @@ def _observed_witness_consistent(verdicts: list[WitnessVerdict]) -> bool:
     return any(v.status == WITNESS_CONSISTENT for v in verdicts)
 
 
+def _observed_ledger_ok(check: _Check) -> bool:
+    """Whether this run's ledger check (waxseal-fg4.45, F4's
+    ``--rpc``/``--liveness``/``--registry``) corroborated the declared
+    ledger authority: the "observed" half of a declared-vs-observed
+    separation comparison, the ledger dimension's own
+    ``_observed_witness_consistent``. Only ``Verdict.OK`` counts — a
+    delinquent liveness finding, a registry disagreement, AND an
+    unreachable RPC endpoint (``_ledger_check`` can never itself distinguish
+    the last from the first two; all three land on ``Verdict.UNVERIFIABLE``,
+    see that function's docstring) all fold to ``False`` here, the same
+    precedent set for an unreachable-vs-inconsistent witness: neither is a
+    ledger this run actually confirmed agreement with. The caller decides
+    whether this dimension was measured AT ALL this run (``None`` when
+    neither flag was given) — this function is only ever called once that
+    is already known to be true.
+    """
+    return check.verdict is Verdict.OK
+
+
 def _witness_api_key() -> str | None:
     # Same rule as the chain backend: credentials come from the environment,
     # never from argv (where they would land in shell history and `ps`).
@@ -1075,6 +1656,7 @@ def _pin_check(
     declare_expect_anchor_binding: bool = False,
     declare_max_anchor_age_s: int | None = None,
     declare_topology: SeparationTopology | None = None,
+    observed_ledger_ok: bool | None = None,
 ) -> tuple[_Check, PinState | None]:
     """Check the trail against what this verifier last confirmed.
 
@@ -1092,6 +1674,18 @@ def _pin_check(
     below is skipped entirely, the same way an undeclared topology skips it.
     An empty tuple for ``observed_anchor_records`` is a DIFFERENT, meaningful
     value: anchors WERE checked this run, and the sidecar held zero records.
+
+    ``observed_ledger_ok`` (waxseal-fg4.45) is the ledger dimension's own
+    "what THIS run measured" value, the same shape as
+    ``observed_witness_consistent`` and gated the same way at the call site:
+    ``None`` means this run passed neither ``--rpc``/``--liveness`` nor
+    ``--registry``, so the ledger comparison below is skipped entirely, not
+    treated as "ledger not corroborated". ``True`` only when
+    ``_ledger_check``'s verdict was ``Verdict.OK`` this run — delinquent,
+    disagreeing, AND unreachable all fold to ``False`` here, the same
+    precedent ``_observed_witness_consistent`` already sets for an
+    unreachable-vs-inconsistent witness: neither is a ledger this run
+    actually confirmed agreement with.
 
     ``declare_expect_anchor_binding``/``declare_max_anchor_age_s``/
     ``declare_topology`` are what THIS run's CLI flags asked to declare
@@ -1227,18 +1821,18 @@ def _pin_check(
 
     head = checkpoint_for(hashes)
 
-    # The pin matches, but three more declared-vs-observed comparisons can
+    # The pin matches, but four more declared-vs-observed comparisons can
     # still turn this into an exit-2 finding. Checked in this fixed order,
     # anchor_policy_downgrade FIRST, then anchor_staleness, then
-    # separation_shortfall, and documented here because all three land on
-    # _Check/CheckSummary, which carries only one `reason`: when a run
-    # happens to trip more than one at once, this ordering decides which
-    # single reason string surfaces. Not security-critical among the three
-    # (every outcome here is exit 2/unverifiable either way), just a
-    # tiebreak, but anchor_policy_downgrade goes first because it is the
-    # direct F2 finding (SPEC §15 replay-plus-truncate protection silently
-    # stripped) this release's own analysis singles out as the most
-    # consequential exit-2 case.
+    # ledger_shortfall (waxseal-fg4.45), then separation_shortfall, and
+    # documented here because all four land on _Check/CheckSummary, which
+    # carries only one `reason`: when a run happens to trip more than one at
+    # once, this ordering decides which single reason string surfaces. Not
+    # security-critical among the four (every outcome here is exit
+    # 2/unverifiable either way), just a tiebreak, but anchor_policy_downgrade
+    # goes first because it is the direct F2 finding (SPEC §15
+    # replay-plus-truncate protection silently stripped) this release's own
+    # analysis singles out as the most consequential exit-2 case.
     #
     # anchor_policy_downgrade (W5/F2): only compared when the operator asked
     # for the check AND this run actually checked anchors at all: `None`
@@ -1325,6 +1919,41 @@ def _pin_check(
                     expect_anchor_binding=effective_expect_anchor_binding,
                 ),
             )
+
+    # ledger_shortfall (waxseal-fg4.45): only compared when a ledger
+    # authority was actually declared AND this run actually checked it via
+    # --rpc/--liveness/--registry: `None` means "not measured this run",
+    # never "not corroborated" (rule 5) — the same shape anchor_staleness
+    # above uses for its own not-measured-this-run case, and the reason
+    # `ledger_shortfall`/`separation_shortfall` are gated independently
+    # (`domain/separation.py`'s docstring on why they are sibling functions,
+    # not one function with a third parameter).
+    if (
+        stored.declared_topology is not None
+        and observed_ledger_ok is not None
+        and ledger_shortfall(stored.declared_topology, observed_ledger_ok=observed_ledger_ok)
+    ):
+        # Exit 2, never exit 1: a shortfall is "we observed less than
+        # declared": an absence of corroborating evidence for the declared
+        # ledger authority, not evidence the trail itself was tampered with.
+        return (
+            _Check(
+                CheckSummary(ok=True, checked=stored.checkpoint.seq + 1,
+                             reason="ledger_shortfall", unverifiable=True),
+                f"pin ok but ledger_shortfall: declared ledger=true, this run "
+                f"observed ledger_ok={observed_ledger_ok} — NOT evidence of "
+                "tampering, the trail itself still verifies",
+            ),
+            PinState(
+                target=target,
+                chain_id=chain_id,
+                checkpoint=head,
+                pinned_ts=now,
+                declared_topology=effective_declared_topology,
+                max_anchor_age_s=effective_max_anchor_age_s,
+                expect_anchor_binding=effective_expect_anchor_binding,
+            ),
+        )
 
     # A declared topology can still say this run observed LESS independence
     # than the operator claimed. Only compared when a topology was actually
@@ -1430,13 +2059,22 @@ def _report(
     declare_expect_anchor_binding: bool = False,
     declare_max_anchor_age_s: int | None = None,
     declare_topology: SeparationTopology | None = None,
+    tsa_ca_file: Path | None = None,
+    ledger_rpc_urls: list[str] | None = None,
+    ledger_liveness: str | None = None,
+    ledger_registry: str | None = None,
+    ledger_trail_id: str | None = None,
 ) -> int:
+    import json
+
     from waxseal.domain.report import build_report
 
-    # measure_drops=False for the same reason verify uses it: a CLI process
-    # observed no writes, so it must report "not measured", never zero.
-    result = log.verify(measure_drops=False)
-    entries = list(log.entries())
+    # One read pass for both halves: the verdict and the summary describe the
+    # same bytes, and reading the trail twice to produce them made a read-only
+    # command cost double on a large trail. dropped_writes stays None for the
+    # same reason verify uses measure_drops=False: a CLI process observed no
+    # writes, so it must report "not measured", never zero.
+    result, entries = log._verify_and_entries()
 
     # Anchors and witnesses are measured before the pin check, same reorder
     # as _verify and for the same reason: _pin_check needs what this run
@@ -1448,7 +2086,7 @@ def _report(
     observed_anchor_records: tuple[AnchorRecord, ...] | None = None
     observed_anchor_unreadable: bool | None = None
     if check_anchors and trail is not None:
-        anchors = _anchor_check(log, trail).summary
+        anchors = _anchor_check(log, trail, tsa_ca_file=tsa_ca_file).summary
         observed_anchor_sinks = _observed_anchor_sinks(trail)
         observed_anchor_records = _observed_anchor_records(trail)
         observed_anchor_unreadable = _observed_anchor_unreadable(trail)
@@ -1458,6 +2096,23 @@ def _report(
     if witnesses:
         witness_verdicts = tuple(_witness_verdicts(log, witnesses))
         observed_witness_consistent = _observed_witness_consistent(list(witness_verdicts))
+
+    # Ledger (waxseal-fg4.45), measured here — before the pin check, same
+    # reorder as _verify's and for the same reason: _pin_check needs THIS
+    # run's ledger result to compare against a declared_topology.ledger.
+    ledger_check: _Check | None = None
+    observed_ledger_ok: bool | None = None
+    if ledger_liveness is not None or ledger_registry is not None:
+        assert ledger_trail_id is not None  # main() always fills this in
+        ledger_check = _ledger_check(
+            entries,
+            rpc_urls=ledger_rpc_urls,
+            liveness=ledger_liveness,
+            registry=ledger_registry,
+            trail_id=ledger_trail_id,
+            now_fn=now_fn,
+        )
+        observed_ledger_ok = _observed_ledger_ok(ledger_check)
 
     pin: CheckSummary | None = None
     pending_pin: PinState | None = None
@@ -1476,6 +2131,7 @@ def _report(
             declare_expect_anchor_binding=declare_expect_anchor_binding,
             declare_max_anchor_age_s=declare_max_anchor_age_s,
             declare_topology=declare_topology,
+            observed_ledger_ok=observed_ledger_ok,
         )
         pin = pin_check.summary
     if trail is not None:
@@ -1485,10 +2141,22 @@ def _report(
         if count is not None:
             result = replace(result, dropped_writes=count, drops_source="sidecar")
 
+    # Unconditional, exactly as in `_verify`: there is nothing external to
+    # contact, and the absent case is the one an auditor most needs printed.
+    # `report` had no receipts dimension at all until this, so the document
+    # that outlives the terminal was the one place receipt coverage could not
+    # be read off (waxseal-fg4.24).
+    receipts = _receipts_check(log, trail).summary
+
     # τ (waxseal-mfi, closing conformance.md gap G1): `None` when no --pin was
     # given, or the pin carries no declared_topology: same rule as _verify's
     # own derivation, never inferred as 0 or 1 either way.
     declared_topology = pending_pin.declared_topology if pending_pin is not None else None
+
+    # ledger_check itself was already computed above, before the pin check
+    # (waxseal-fg4.45) — only its computation moved, matching `_verify`'s own
+    # anchor_check/witness_verdicts precedent; nothing below this line reads
+    # anything that was not already true before this bead.
 
     report = build_report(
         result,
@@ -1496,24 +2164,45 @@ def _report(
         anchors=anchors,
         pin=pin,
         witnesses=witness_verdicts,
+        receipts=receipts,
         declared_topology=declared_topology,
     )
+    # domain/report.py's AuditReport has no ledger field (F4 owns cli.py
+    # only, not domain/**), so the ledger dimension is layered on at this
+    # boundary instead: an extra top-level JSON key, additive and never
+    # overwriting anything build_report already produced, and an extra
+    # printed section after the markdown document for the text case.
     if as_json:
-        print(report.to_json())
+        payload = json.loads(report.to_json())
+        if ledger_check is not None:
+            payload["ledger"] = {
+                "ok": ledger_check.verdict is not Verdict.BROKEN,
+                "unverifiable": ledger_check.verdict is Verdict.UNVERIFIABLE,
+                "detail": ledger_check.line,
+            }
+        print(json.dumps(payload))
     else:
         # to_markdown() already ends with a newline.
         print(report.to_markdown(), end="")
+        if ledger_check is not None:
+            print("\n## Ledger\n")
+            print(ledger_check.line)
 
     codes = [0]
     if not result.ok:
         codes.append(1)
     elif result.unverifiable:
         codes.append(2)
-    for summary in (anchors, pin):
+    # receipts joins anchors/pin in the verdict, not only in the prose: a
+    # document that prints RECEIPTS BROKEN and exits 0 is the collapse this
+    # library exists to prevent, and `verify` has always counted it.
+    for summary in (anchors, pin, receipts):
         if summary is not None:
             codes.append(_Check(summary, "").exit_code)
     if witness_verdicts is not None:
         codes.append(_witness_exit_code(list(witness_verdicts)))
+    if ledger_check is not None:
+        codes.append(ledger_check.exit_code)
     code = _combine(codes)
     if pending_pin is not None and code != 1:
         # Same rule as _verify's write site: only exit 1 freezes the pin;
@@ -1708,6 +2397,111 @@ def _verify_handoff(delegate_log: AuditLog, *, origin_path: Path) -> int:
     return 1
 
 
+def _segments(directory: Path) -> int:
+    """`waxseal segments <dir>` (B4): every segment in a per-project trail
+    directory, its own chain verdict, and the rotation binding that links it
+    to its predecessor (SPEC section 20).
+
+    Read-only against every file it touches, appending nothing (CLAUDE.md's
+    CLI contract). Exit codes come from `Verdict.to_exit_code()` via
+    `Verdict.join`, never from comparing exit codes: 2 (unverifiable) is the
+    larger code but the weaker finding, so an unknown fingerprint in one
+    segment must never mask a real break in another.
+    """
+    from waxseal.domain.segments import (
+        SEGMENT_MISSING,
+        SEGMENT_OK,
+        verify_segments,
+    )
+    from waxseal.sources.rotation import discover_segments
+
+    paths = discover_segments(directory)
+    if not paths:
+        if not directory.is_dir():
+            print(f"error: no such segment directory: {directory}", file=sys.stderr)
+        else:
+            # Never rendered as "checked, all intact": an unrotated single
+            # trail was not checked here at all (rule 5).
+            print(
+                f"error: no sealed segments in {directory} — a trail that has "
+                "not rotated yet is verified with `waxseal verify <trail>`",
+                file=sys.stderr,
+            )
+        return 3
+
+    result = verify_segments([_read_segment(p) for p in paths])
+    for state in result.segments:
+        detail = ""
+        if state.reason is not None:
+            detail = f" — {state.reason}"
+            if state.broken_seq is not None:
+                detail += f" at seq={state.broken_seq}"
+        if state.state == SEGMENT_MISSING:
+            # Named by a surviving binding and not present. Positive evidence
+            # it existed, so it aggregates as a break (owner decision,
+            # 31/08/2026) — but it is never printed as tampering.
+            detail = " — segment_missing: named by a surviving rotation binding, not present"
+        print(f"  {state.identity}: {state.state}{detail}")
+
+    checked = [s for s in result.segments if s.state != SEGMENT_MISSING]
+    print(
+        f"{len(checked)} segment(s) in {directory}: {result.verdict.value} "
+        f"(segments are linked by rotation bindings, never by prev_hash)"
+    )
+    if result.verdict.value != SEGMENT_OK:
+        print(
+            "which segment was altered, and which is a legitimate archival "
+            "move, is an operator's decision (CLAUDE.md rule 4: verify "
+            "reports, never repairs)"
+        )
+    return result.verdict.to_exit_code()
+
+
+def _read_segment(path: Path) -> SegmentRead:
+    """One segment read off disk for `verify_segments` to judge.
+
+    A segment whose stored lines will not parse is reported with
+    ``chain=None`` -- "nothing was compared" -- rather than raising: a torn
+    first line is exactly what a crash mid-rotation leaves behind, and a
+    read-only command must print a state for it, not a traceback.
+    """
+    from waxseal.domain.segments import segment_identity
+
+    identity = segment_identity(path.name)
+    log = AuditLog.open(path)
+    try:
+        result, entries = log._verify_and_entries()
+    except (ValueError, KeyError, TypeError, OSError):
+        return SegmentRead(identity=identity, chain=None)
+    genesis_payload_type: str | None = None
+    genesis_payload: object | None = None
+    if entries:
+        genesis_payload_type = entries[0].header.payload_type
+        genesis_payload = _decode_payload(entries[0].payload)
+    return SegmentRead(
+        identity=identity,
+        chain=result,
+        entry_hashes=tuple(entry.entry_hash for entry in entries),
+        genesis_payload_type=genesis_payload_type,
+        genesis_payload=genesis_payload,
+    )
+
+
+def _decode_payload(payload: bytes | None) -> object | None:
+    """The seq-0 payload as JSON, or None when it is absent or will not
+    decode. None is the caller's "unreadable" input, which becomes
+    `rotation_binding_unreadable` -- unverifiable, never tampered."""
+    if payload is None:
+        return None
+    import json
+
+    try:
+        decoded: object = json.loads(payload)
+    except ValueError:
+        return None
+    return decoded
+
+
 def _is_hex(value: str) -> bool:
     # bytes.fromhex tolerates whitespace, which a root never contains, so a
     # "root" with spaces smuggled past the length check must not reach the
@@ -1721,16 +2515,37 @@ def _is_hex(value: str) -> bool:
 
 _DECLARED_TOPOLOGY_FIELDS: Final = ("seal_escrow", "anchor_sinks", "witness", "pin_separate")
 
+# `ledger` (waxseal-fg4.45's SeparationTopology.ledger, bool | None) is
+# deliberately NOT in _DECLARED_TOPOLOGY_FIELDS above: that tuple is the
+# required-together set the "missing" check walks, and every pin file (and
+# every CLI invocation) written before this field existed omits it and must
+# keep parsing unchanged. It gets its own optional slot instead, the same
+# "fifth field, never required" shape domain/pinning.py's
+# `_optional_bool_or_none` already gives it on the JSON side.
+_DECLARED_TOPOLOGY_OPTIONAL_FIELD: Final = "ledger"
+
 
 def _parse_declared_topology_spec(spec: str) -> SeparationTopology:
     """Parse ``--declare-topology``: comma-separated ``key=value`` pairs
     carrying all four ``SeparationTopology`` subfields together, e.g.
-    ``"seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true"``.
+    ``"seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true"``,
+    plus an OPTIONAL fifth ``ledger=true``/``ledger=false`` (waxseal-fg4.45's
+    ``SeparationTopology.ledger``, one more independent authority to declare).
 
-    Raises ``ValueError`` on anything else, including a partial spec: SPEC
-    13.1 says a partial ``declared_topology`` is ``malformed_pin``, never
-    silently defaulted, and the same rule holds one layer up, at the CLI
-    boundary that would otherwise have to guess the missing subfields.
+    ``ledger`` is never part of the required-together set: omitting it parses
+    exactly as it did before this subfield existed (``ledger=None``, "never
+    declared"), so every pre-fg4.45 spec string and every existing automation
+    around this flag keeps working unchanged (rule 5 — ``None`` is not the
+    same claim as a declared-false ledger).
+
+    Raises ``ValueError`` on anything else, including a partial spec over the
+    four required subfields: SPEC 13.1 says a partial ``declared_topology``
+    is ``malformed_pin``, never silently defaulted, and the same rule holds
+    one layer up, at the CLI boundary that would otherwise have to guess the
+    missing subfields. A malformed ``ledger`` value is rejected the same way
+    (``_parse_bool_field``'s "must be 'true' or 'false'" message) — being
+    optional changes only whether it must be present, never how a value
+    given for it is validated.
     """
     fields: dict[str, str] = {}
     for raw in spec.split(","):
@@ -1751,15 +2566,24 @@ def _parse_declared_topology_spec(spec: str) -> SeparationTopology:
             "declared_topology needs all four subfields together "
             f"({', '.join(_DECLARED_TOPOLOGY_FIELDS)}), missing: {', '.join(missing)}"
         )
-    extra = sorted(set(fields) - set(_DECLARED_TOPOLOGY_FIELDS))
+    allowed = {*_DECLARED_TOPOLOGY_FIELDS, _DECLARED_TOPOLOGY_OPTIONAL_FIELD}
+    extra = sorted(set(fields) - allowed)
     if extra:
         raise ValueError(f"unknown declared_topology field(s): {', '.join(extra)}")
+
+    ledger_raw = fields.get(_DECLARED_TOPOLOGY_OPTIONAL_FIELD)
+    ledger = (
+        _parse_bool_field(_DECLARED_TOPOLOGY_OPTIONAL_FIELD, ledger_raw)
+        if ledger_raw is not None
+        else None
+    )
 
     return SeparationTopology(
         seal_escrow=_parse_bool_field("seal_escrow", fields["seal_escrow"]),
         anchor_sinks=_parse_int_field("anchor_sinks", fields["anchor_sinks"]),
         witness=_parse_bool_field("witness", fields["witness"]),
         pin_separate=_parse_bool_field("pin_separate", fields["pin_separate"]),
+        ledger=ledger,
     )
 
 
@@ -1877,6 +2701,514 @@ def _cadence(
     return 0
 
 
+_PREFLIGHT_SCOPE: Final = (
+    "scope: this is a reading of CONFIGURATION, and not a verdict — nothing "
+    "here says the trail verifies, or that any mechanism named PRESENT "
+    "currently checks out. Run `waxseal verify <trail>` for that."
+)
+
+_PREFLIGHT_DOMAINS: Final = (
+    "  distinct administrative domains: NOT MEASURED — an `.anchors` record "
+    "names the sink TECHNOLOGY that wrote it (`rfc3161`, `ots`, `http`), "
+    "never who OPERATES it, so two records may be one authority or two. The "
+    "operator's own count is a pin's declared_topology.anchor_sinks "
+    "(declared, not measured)."
+)
+
+_PREFLIGHT_PIN_NOT_A_RUNG: Final = (
+    "  (the pin is not a stopper on this ladder: threat-model.md section 5 "
+    "names seals, anchors, an external anchor and the SPEC 15 binding. The "
+    "pin is section 4's table, and τ below.)"
+)
+
+_PREFLIGHT_WITNESS: Final = (
+    "preflight contacts no witness: it opens no network connection at all, "
+    "so a witness is never ABSENT here, only unmeasured; "
+    "`waxseal verify --witness URL` is what checks one (SPEC 14)"
+)
+
+_PREFLIGHT_LEDGER: Final = (
+    "preflight contacts no ledger: it opens no network connection at all, "
+    "so a ledger is never ABSENT here, only unmeasured; "
+    "`waxseal verify --rpc URL --liveness ADDR` is what checks one (F4)"
+)
+
+_PREFLIGHT_PREFIX_MECHANISM: Final = (
+    "DESIGN.md §11 names exactly two mechanisms that raise a prefix from "
+    "evidence to scoped proof — a finalized external ledger anchor (0.1.5 "
+    "Workstream F) or a WORM-locked archived segment (S3 Object Lock, "
+    "Workstream J1) — and preflight confirms neither: it opens no network "
+    "connection and holds no storage credentials"
+)
+
+
+def _declared_bool(value: bool) -> str:
+    # "true"/"false" rather than Python's True/False: this line sits beside
+    # `--declare-topology`'s own spec grammar, and an operator copying a value
+    # out of one into the other must not have to translate it.
+    return "true" if value else "false"
+
+
+def _observed_label(observed: Observed) -> str:
+    """PRESENT / ABSENT / NOT MEASURED for one observation, worded once.
+
+    Three states where a reader expects two, per CLAUDE.md rule 5: `None`
+    means this run did not look, which is neither of the other two and must
+    never be rendered as either.
+    """
+    if observed.found is None:
+        return "NOT MEASURED"
+    return "PRESENT" if observed.found else "ABSENT"
+
+
+@dataclass(frozen=True, slots=True)
+class _AnchorView:
+    """What the `.anchors` sidecar shows a preflight run, as the ternary
+    observations the ladder consumes plus the lines that report them.
+
+    ``latest_seq`` is ``None`` for two different reasons — no anchor record
+    exists, or the sidecar could not be read — and J4's immutable-prefix
+    lines (below) tell those apart from ``records.found`` rather than
+    guessing a checkpoint from an absent number.
+    """
+
+    lines: tuple[str, ...]
+    records: Observed
+    external: Observed
+    aggregate: Observed
+    latest_seq: int | None
+
+
+def _preflight_anchors(trail: Path) -> _AnchorView:
+    """Read the `.anchors` sidecar for what rungs 2, 3 and 4 name.
+
+    A sidecar this build cannot parse makes ALL THREE unmeasured, never zero.
+    This is the single easiest place in this command to lie by omission: a
+    file that would not read might have carried anything, and "0 external
+    sinks" is a measurement nobody took. Same conservative treatment
+    `_observed_anchor_unreadable` already gives the same failure.
+    """
+    import json
+
+    from waxseal.adapters.anchors import read_anchor_records
+
+    name = trail.name + ".anchors"
+    try:
+        sidecar = read_anchor_records(trail)
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+        unparsed = Observed(
+            None,
+            f"{name} is present but this build could not parse it — NOT zero "
+            "records (`waxseal verify --anchors` reports the parse failure "
+            "itself)",
+        )
+        return _AnchorView(
+            lines=(
+                f"  anchor sidecar (SPEC 9): NOT MEASURED — {unparsed.detail}",
+                f"  external anchor sinks: NOT MEASURED — {unparsed.detail}",
+                _PREFLIGHT_DOMAINS,
+                f"  aggregate binding (SPEC 15): NOT MEASURED — {unparsed.detail}",
+            ),
+            records=unparsed,
+            external=unparsed,
+            aggregate=unparsed,
+            latest_seq=None,
+        )
+
+    unreadable = Observed(
+        None,
+        f"{len(sidecar.unreadable_versions)} record(s) in {name} are in a "
+        f"format version this build cannot read "
+        f"({', '.join(sorted(set(sidecar.unreadable_versions)))}) — "
+        "unverifiable by name, NOT evidence of tampering, and NOT zero",
+    )
+    records = sidecar.records
+    sinks: tuple[str, ...] | None = tuple(
+        sorted({r.sink for r in records if r.sink != "file"})
+    )
+    bound = tuple(r for r in records if r.checkpoint.agg_commit is not None)
+
+    if records:
+        anchor_records = Observed(
+            True,
+            f"{len(records)} record(s) in {name}, latest at seq "
+            f"{records[-1].checkpoint.seq}",
+        )
+    elif sidecar.unreadable_versions:
+        anchor_records = unreadable
+    else:
+        anchor_records = Observed(False, f"no anchor record found in {name}")
+
+    if sinks:
+        external = Observed(
+            True,
+            f"{name} names {', '.join(sinks)} (the local `file` sink is "
+            "excluded: a trail anchored only to its own disk is not separated "
+            "from a writer who holds that disk)",
+        )
+    elif sidecar.unreadable_versions:
+        external, sinks = unreadable, None
+    else:
+        external = Observed(
+            False, f"no record in {name} names a sink other than `file`"
+        )
+
+    if bound:
+        aggregate = Observed(
+            True,
+            f"{len(bound)} record(s) in {name} carry `agg_commit` — present, "
+            "and NOT checked here: the CLI holds no seal key (use "
+            "AuditLog.verify_anchored_aggregates)",
+        )
+    elif sidecar.unreadable_versions:
+        aggregate = unreadable
+    else:
+        aggregate = Observed(False, f"no record in {name} carries `agg_commit`")
+
+    count = "NOT MEASURED" if sinks is None else f"{len(sinks)} observed"
+    return _AnchorView(
+        lines=(
+            f"  anchor sidecar (SPEC 9): {_observed_label(anchor_records)} — "
+            f"{anchor_records.detail}",
+            f"  external anchor sinks: {count} — {external.detail}",
+            _PREFLIGHT_DOMAINS,
+            f"  aggregate binding (SPEC 15): {_observed_label(aggregate)} — "
+            f"{aggregate.detail}",
+        ),
+        records=anchor_records,
+        external=external,
+        aggregate=aggregate,
+        latest_seq=records[-1].checkpoint.seq if records else None,
+    )
+
+
+def _preflight_immutable_prefix_lines(anchors: _AnchorView) -> tuple[str, str]:
+    """J4 (waxseal-p8s): the prefix/tail split threat-model.md section 1 and
+    DESIGN.md §11 both name, printed as trailing lines rather than folded
+    into the ladder above it. Deliberately not a rung: the ladder's PRESENT
+    means a mechanism is CONFIGURED (`domain/preflight.py`'s own docstring),
+    never that a ledger anchor is finalized or a segment is WORM-locked —
+    claims this command can never make, ladder or no ladder, because it
+    opens no network connection and holds no storage credentials.
+    """
+    if anchors.latest_seq is not None:
+        checkpoint = f"seq {anchors.latest_seq}"
+        tail = f"seq {anchors.latest_seq} onward"
+    elif anchors.records.found is None:
+        checkpoint = "UNMEASURED (the .anchors sidecar could not be read)"
+        tail = "the whole trail — no checkpoint could be read"
+    else:
+        checkpoint = "NONE (no anchor record on this trail)"
+        tail = "the whole trail — nothing is anchored"
+    prefix_line = (
+        f"immutable prefix: up to checkpoint {checkpoint}, mechanism NOT "
+        f"CONFIRMED this run (finalized ledger / WORM / none) — "
+        f"{_PREFLIGHT_PREFIX_MECHANISM}"
+    )
+    tail_line = (
+        f"tail from {tail}: tamper-evident only, never more — the live tail "
+        "and write-time honesty are limits DESIGN.md §11 says no mechanism "
+        "closes"
+    )
+    return prefix_line, tail_line
+
+
+@dataclass(frozen=True, slots=True)
+class _PinView:
+    """The pin state's own lines, plus the topology it declared (or None).
+
+    The topology travels separately because two later lines need it — τ, and
+    "pin on separate storage" — and re-deriving it from a rendered string is
+    how two surfaces start disagreeing about one fact.
+    """
+
+    lines: tuple[str, ...]
+    topology: SeparationTopology | None
+
+
+def _preflight_pin(pin_path: Path | None) -> _PinView:
+    """Re-present what the pin state file declares. Never writes it.
+
+    Every failure to read one is a labelled non-measurement, never a verdict
+    (CLAUDE.md rule 6, and rule 4: reporting is this command's whole job).
+    `verify --pin` is what turns a malformed state into a break; saying so
+    here keeps one finding in one place instead of two that could drift.
+    """
+    if pin_path is None:
+        return _PinView(
+            lines=(
+                "  pin state: NOT READ — no --pin given, so this run saw no "
+                "declaration at all, which is not the same as a pin that "
+                "declares nothing",
+            ),
+            topology=None,
+        )
+
+    from waxseal.adapters.pinstore import FilePinStore
+    from waxseal.domain.pinning import PinMalformed, PinVersionUnknown
+
+    try:
+        stored = FilePinStore(pin_path).load()
+    except PinVersionUnknown as e:
+        return _PinView(
+            lines=(
+                f"  pin state: NOT READ — pin_version_unknown ({e}): a state "
+                "file from a newer waxseal, unverifiable BY NAME and NOT "
+                "evidence of tampering",
+            ),
+            topology=None,
+        )
+    except PinMalformed as e:
+        return _PinView(
+            lines=(
+                f"  pin state: NOT READ — malformed_pin ({e}). Labelled, never "
+                "swallowed (rule 6); `waxseal verify --pin` is what reports it "
+                "as a break, preflight reports no verdict",
+            ),
+            topology=None,
+        )
+
+    if stored is None:
+        return _PinView(
+            lines=(
+                f"  pin state: {pin_path} — no pin recorded yet (trust not "
+                "established); NOT a declaration that nothing is separated",
+            ),
+            topology=None,
+        )
+
+    age = (
+        "not declared"
+        if stored.max_anchor_age_s is None
+        else str(stored.max_anchor_age_s)
+    )
+    return _PinView(
+        lines=(
+            f"  pin state: {pin_path} — target={stored.target}, pinned seq="
+            f"{stored.checkpoint.seq} at {stored.pinned_ts}",
+            "  pin declarations (declared, not measured — an operator's claim "
+            "about who holds what, which no run can corroborate from a trail):",
+            f"    expect_anchor_binding: "
+            f"{_declared_bool(stored.expect_anchor_binding)}",
+            f"    max_anchor_age_s: {age}",
+            f"    declared_topology: "
+            f"{_render_declared_topology(stored.declared_topology)}",
+        ),
+        topology=stored.declared_topology,
+    )
+
+
+def _render_declared_topology(topology: SeparationTopology | None) -> str:
+    if topology is None:
+        # Never "seal_escrow=false, anchor_sinks=0, ...": that reads as a
+        # measured floor, and it is the absence of a declaration.
+        return "not declared"
+    return (
+        f"seal_escrow={_declared_bool(topology.seal_escrow)}, "
+        f"anchor_sinks={topology.anchor_sinks}, "
+        f"witness={_declared_bool(topology.witness)}, "
+        f"pin_separate={_declared_bool(topology.pin_separate)}"
+    )
+
+
+def _preflight_trail_line(trail: Path) -> str:
+    """How much of the trail this run could actually read.
+
+    A trail whose lines will not parse is reported as NOT READ rather than
+    raising: an information command must print a state for a torn file, not a
+    traceback (`_read_segment` takes the same position for the same reason).
+    """
+    try:
+        hashes = AuditLog.open(str(trail)).entry_hashes()
+    except (ValueError, KeyError, TypeError, OSError):
+        return (
+            f"trail: {trail} — entries: NOT READ: this build could not read "
+            "this trail's lines; `waxseal verify` reports what is wrong with "
+            "them"
+        )
+    if not hashes:
+        return f"trail: {trail} — 0 recorded entries, no head yet"
+    return (
+        f"trail: {trail} — {len(hashes)} recorded entries, "
+        f"head seq={len(hashes) - 1}"
+    )
+
+
+def _preflight_segment_lines(trail: Path) -> tuple[str, ...]:
+    """Whether this trail is one segment of several, and what that does to
+    every rung below it.
+
+    Decided here rather than ignored: sidecars are PER SEGMENT (SPEC 20.1),
+    so a rung claim covering a whole directory would be an aggregate this
+    command never measured — and reporting the best-configured segment's
+    rung as the trail's would be exactly the collapse rule 5 forbids. So
+    preflight reports the segment it was pointed at, says so, and names
+    `waxseal segments` for the directory-wide walk it does not do.
+    """
+    from waxseal.domain.segments import SEGMENT_SUFFIX, segment_identity, segment_ordinal
+    from waxseal.sources.rotation import discover_segments
+
+    identity = segment_identity(trail.name)
+    head = identity.rpartition(".")[0]
+    # The same stem rule `sources/rotation.py` uses internally, spelled with
+    # the public domain helpers rather than importing its private one.
+    stem = head if head and segment_ordinal(trail.name, head) is not None else identity
+    group = [
+        path
+        for path in discover_segments(trail.parent)
+        if path.name == stem + SEGMENT_SUFFIX
+        or segment_ordinal(path.name, stem) is not None
+    ]
+    if not group:
+        return (
+            f'segments: not rotated — no numbered segment of "{stem}" in '
+            f"{trail.parent} (SPEC 20), so everything below describes this "
+            "one file.",
+        )
+    names = [path.name for path in group]
+    return (
+        f"segments: this trail is segment {names.index(trail.name) + 1} of "
+        f"{len(group)} ({identity}) under {trail.parent} — SPEC 20.",
+        "  Every segment carries its OWN sidecars (SPEC 20.1), so every rung "
+        "below describes THIS segment only, never the directory. `waxseal "
+        "segments <dir>` walks all of them and the rotation bindings between "
+        "them.",
+    )
+
+
+def _preflight(path: str, *, pin_path: Path | None) -> int:
+    """`waxseal preflight <trail>` (Workstream E): which rung of
+    docs/security/threat-model.md section 5's attacker-capability ladder this
+    configuration stops, in that table's own language.
+
+    Read-only and writes nothing at all — not even the two verifier-state
+    carve-outs the CLI contract allows (`--pin` here only READS).
+
+    Exit 0 always, because this is an information command and not a verdict:
+    a configuration that stops nobody is still a successful reading, and
+    spending exit 1 or 2 on it would create a second verdict source an
+    operator would then have to reconcile against `verify`. The one exception
+    is 3, "nothing was read", for a trail path that does not exist.
+
+    Every fact here is re-presented from what already computes it —
+    `adapters/anchors.py`'s records, `domain/pinning.py`'s state,
+    `domain/separation.py`'s τ — and nothing is recomputed for a second
+    opinion.
+    """
+    if path.startswith(("http://", "https://")):
+        # Local-sidecar-only, the same limit `verify-handoff --origin`
+        # carries: a remote trail has no `.anchors`/`.attest` location at all,
+        # so there is nothing here to read rather than something that failed.
+        print(
+            "error: preflight reads local sidecars; no URL/remote support "
+            f"(local trail path only): {path}",
+            file=sys.stderr,
+        )
+        return 3
+    trail = Path(path).expanduser()
+    if not trail.exists():
+        print(f"error: no such trail: {trail}", file=sys.stderr)
+        return 3
+
+    anchors = _preflight_anchors(trail)
+    pin = _preflight_pin(pin_path)
+
+    attest = trail.with_name(trail.name + ".attest")
+    seal = (
+        Observed(True, f"{attest.name} present beside this trail (SPEC 11)")
+        if attest.exists()
+        else Observed(
+            False,
+            f"no {attest.name} beside this trail (SPEC 11's own path; an "
+            "attestor that stores seals elsewhere is not visible to this "
+            "command)",
+        )
+    )
+    witness_detail = _PREFLIGHT_WITNESS
+    if pin.topology is not None and pin.topology.witness:
+        # A declaration is a weaker claim than a measurement, and printing the
+        # two alike is the collapse this repository exists to prevent — so it
+        # rides along in the SAME line that says the rung was not measured,
+        # never as a second line that could be quoted on its own.
+        witness_detail += "; this pin DECLARES witness=true (declared, not measured)"
+    witness = Observed(None, witness_detail)
+
+    # ledger (waxseal-fg4.45): same shape as witness immediately above, for
+    # the same reason — preflight opens no network connection, so this is
+    # NOT_MEASURED unconditionally, with a declared-but-not-measured pin
+    # topology riding along in the same line rather than a second one.
+    ledger_detail = _PREFLIGHT_LEDGER
+    if pin.topology is not None and pin.topology.ledger:
+        ledger_detail += "; this pin DECLARES ledger=true (declared, not measured)"
+    ledger = Observed(None, ledger_detail)
+
+    print(f"preflight: {trail}")
+    print(_preflight_trail_line(trail))
+    for line in _preflight_segment_lines(trail):
+        print(line)
+    print()
+    print(
+        "observed configuration (PRESENT means the mechanism is CONFIGURED, "
+        "not that it currently checks out)"
+    )
+    print(f"  seal (SPEC 11): {_observed_label(seal)} — {seal.detail}")
+    for line in anchors.lines:
+        print(line)
+    print(f"  witness (SPEC 14): {_observed_label(witness)} — {witness.detail}")
+    print(f"  ledger (F4): {_observed_label(ledger)} — {ledger.detail}")
+    for line in pin.lines:
+        print(line)
+    print(_preflight_separate_storage_line(pin.topology))
+    print(_PREFLIGHT_PIN_NOT_A_RUNG)
+    print(_tau_line(pin.topology))
+    print()
+    for line in render_ladder(
+        ladder_for(
+            PreflightObservation(
+                seal=seal,
+                anchor_records=anchors.records,
+                external_anchor=anchors.external,
+                aggregate_binding=anchors.aggregate,
+                witness=witness,
+                ledger=ledger,
+            )
+        )
+    ):
+        print(line)
+    # J4 (waxseal-p8s): the prefix/tail split, qualifying the ladder's PRESENT
+    # ("configured") rather than adding a rung — see
+    # `_preflight_immutable_prefix_lines`'s own docstring for why this reads
+    # from `anchors` alone and never opens the network/S3 connection a real
+    # ledger-finality or WORM-lock check would need.
+    print()
+    for line in _preflight_immutable_prefix_lines(anchors):
+        print(line)
+    print()
+    print(_PREFLIGHT_SCOPE)
+    return 0
+
+
+def _preflight_separate_storage_line(topology: SeparationTopology | None) -> str:
+    """Where the pin file lives is DECLARED and never measured.
+
+    `separation_shortfall` already refuses to compare against `pin_separate`
+    for this reason: nothing in a trail or its sidecars can corroborate or
+    contradict it, so a run that printed it as a finding would be inventing
+    evidence it never had.
+    """
+    if topology is None:
+        return (
+            "  pin on separate storage: NOT DECLARED — a declaration only; "
+            "nothing in a trail or its sidecars can corroborate where the pin "
+            "file lives (domain/separation.py)"
+        )
+    return (
+        f"  pin on separate storage: DECLARED "
+        f"{_declared_bool(topology.pin_separate)} — declared, not measured; "
+        "no run can corroborate it (domain/separation.py)"
+    )
+
+
 def _reconcile_tickets(
     log: AuditLog, *, issuer: str, lease_size: int, issued_spec: str | None, as_json: bool
 ) -> int:
@@ -1940,6 +3272,592 @@ def _reconcile_tickets(
             print(line)
 
     return verdict.to_exit_code()
+
+
+# ============================================================ ledger layer
+#
+# F4 (Workstream F, Phase 4): CLI surface for the on-chain ledger layer F1
+# (ports/domain), F2 (contracts/), and F3 (adapters/evm.py) shipped. Every
+# read here goes through `EvmLedgerReader`'s own ternary methods
+# (`liveness`, `registry_agreement`, `bond`), never around them, so a chain
+# disagreement or an unreachable RPC endpoint reaches the operator exactly
+# the way F1/F3 built it to: never silently absorbed into a verdict it did
+# not measure.
+#
+# `_ledger_check` (verify/report) and `_ledger_status` (its own subcommand)
+# share the same underlying reads but map them through DIFFERENT verdict
+# tables on purpose: `verify`/`report` answer "was the trail edited?", so a
+# delinquent or disagreeing ledger can only ever be exit 2 there
+# (`LivenessVerdict.to_verify_verdict()`/`RegistryFinding.to_verdict()` both
+# exclude BROKEN from their range by construction — this file does not
+# police that, the domain types do). `ledger-status` answers a different
+# question, "what does the chain say about this writer right now", so a
+# delinquent/slashed/unbonded finding there is POSITIVELY DETECTED and is
+# exit 1, the same sense `reconcile-tickets` gives its own exit 1.
+
+
+def _ledger_check(
+    entries: Iterable[Entry],
+    *,
+    rpc_urls: list[str] | None,
+    liveness: str | None,
+    registry: str | None,
+    trail_id: str,
+    now_fn: Callable[[], datetime] = _default_now,
+) -> _Check:
+    """`verify`/`report --rpc/--liveness/--registry` (F4, Phase 4).
+
+    Structurally incapable of contributing exit 1: `LivenessVerdict.
+    to_verify_verdict()` and `RegistryFinding.to_verdict()` both map onto
+    ``{OK, UNVERIFIABLE}`` only (domain/liveness.py, domain/registry.py), so
+    every new reason this dimension can print — ``ledger_delinquent``,
+    ``registry_disagreement``, ``registry_fingerprint_not_registered``
+    (waxseal-fg4.44: a firm "nobody registered this" answer, distinct from
+    ``registry_could_not_be_read``), ``ledger_unreachable`` — reaches exit 2
+    and only exit 2, by the shape of the tables it reads through, not by a
+    check written here.
+    """
+    from waxseal.adapters.evm import EvmContracts, EvmLedgerReader
+    from waxseal.domain.liveness import LEDGER_UNREACHABLE
+    from waxseal.domain.registry import RegistryCrossCheck, VersionRegistry
+    from waxseal.ports.ledger import LedgerDisagreement
+
+    lines: list[str] = []
+    verdict = Verdict.OK
+    reason: str | None = None
+
+    def _absorb(v: Verdict, r: str | None) -> None:
+        nonlocal verdict, reason
+        verdict = verdict.join(v)
+        if r is not None and reason is None:
+            reason = r
+
+    try:
+        reader = EvmLedgerReader(rpc_urls or [], EvmContracts(liveness=liveness, registry=registry))
+    except ValueError as e:
+        return _Check(
+            CheckSummary(ok=True, checked=0, reason=LEDGER_UNREACHABLE, unverifiable=True),
+            f"ledger: {e} — unverifiable, NOT evidence of tampering",
+        )
+
+    if liveness is not None:
+        try:
+            lv = reader.liveness(trail_id, now=now_fn())
+        except LedgerDisagreement as e:
+            lines.append(f"ledger liveness: DISAGREEMENT (not unreachable) — {e}")
+            _absorb(Verdict.UNVERIFIABLE, LEDGER_UNREACHABLE)
+        else:
+            line = f"ledger liveness: {lv.status}"
+            if lv.reason is not None:
+                line += f" ({lv.reason})"
+            lines.append(line)
+            _absorb(lv.to_verify_verdict(), lv.reason)
+
+    if registry is not None:
+        fingerprints = sorted({entry.header.hash_version for entry in entries})
+        if not fingerprints:
+            lines.append("ledger registry: no entries on this trail to cross-check")
+        cross_check = RegistryCrossCheck(VersionRegistry())
+        for fingerprint in fingerprints:
+            try:
+                finding = reader.registry_agreement(cross_check, fingerprint)
+            except LedgerDisagreement as e:
+                lines.append(f"ledger registry {fingerprint}: DISAGREEMENT (not unreachable) — {e}")
+                _absorb(Verdict.UNVERIFIABLE, LEDGER_UNREACHABLE)
+                continue
+            line = f"ledger registry {fingerprint}: {finding.status}"
+            if finding.reason is not None:
+                line += f" ({finding.reason})"
+            lines.append(line)
+            _absorb(finding.to_verdict(), finding.reason)
+
+    return _Check(
+        CheckSummary(
+            ok=True,  # BROKEN is unreachable for this dimension — see docstring.
+            checked=1,
+            reason=reason,
+            unverifiable=verdict is Verdict.UNVERIFIABLE,
+        ),
+        "\n".join(lines),
+    )
+
+
+def _ledger_status(
+    log: AuditLog,
+    *,
+    rpc_urls: list[str] | None,
+    liveness: str,
+    registry: str | None,
+    bond: str | None,
+    writer: str | None,
+    trail_id: str,
+    as_json: bool,
+    now_fn: Callable[[], datetime] = _default_now,
+) -> int:
+    """`waxseal ledger-status` (F4, Phase 4).
+
+    Exit codes reuse ``Verdict.to_exit_code()``, the SAME convention
+    ``_reconcile_tickets`` above already establishes (``cli.py:3003``):
+    0 = every configured dimension came back clean (live, and registry
+    agrees if ``--registry`` was given, and bonded if ``--bond`` was given);
+    1 = a POSITIVELY DETECTED finding — delinquent, slashed, or unbonded —
+    the same "detected, not tampered" sense ``reconcile-tickets`` gives its
+    own exit 1; 2 = unreachable, endpoints disagree, or malformed input
+    (nothing could be measured, never rendered as "0 findings" — CLAUDE.md
+    rule 5). The trail-missing case (exit 3) is handled by ``main()``'s
+    shared trail-opening plumbing before this function is ever called,
+    exactly as it already is for ``reconcile-tickets``.
+    """
+    import json
+
+    from waxseal.adapters.evm import EvmContracts, EvmLedgerReader
+    from waxseal.domain.registry import RegistryCrossCheck, VersionRegistry
+    from waxseal.ports.ledger import LedgerDisagreement
+
+    try:
+        reader = EvmLedgerReader(
+            rpc_urls or [], EvmContracts(liveness=liveness, registry=registry, bond=bond)
+        )
+    except ValueError as e:
+        print(f"unverifiable: {e} — nothing was checked")
+        return 2
+
+    findings: list[tuple[str, Verdict, str]] = []
+
+    try:
+        lv = reader.liveness(trail_id, now=now_fn())
+    except LedgerDisagreement as e:
+        findings.append(("liveness", Verdict.UNVERIFIABLE, f"liveness: DISAGREEMENT — {e}"))
+    else:
+        line = f"liveness: {lv.status}"
+        if lv.reason is not None:
+            line += f" ({lv.reason})"
+        if lv.age_s is not None:
+            line += f", age={lv.age_s}s"
+        if lv.deadline_s is not None:
+            line += f", deadline={lv.deadline_s}s"
+        findings.append(("liveness", lv.to_verdict(), line))
+
+    if registry is not None:
+        fingerprints = sorted({entry.header.hash_version for entry in log.entries()})
+        if not fingerprints:
+            findings.append(
+                ("registry", Verdict.OK, "registry: no entries on this trail to cross-check")
+            )
+        cross_check = RegistryCrossCheck(VersionRegistry())
+        for fingerprint in fingerprints:
+            try:
+                finding = reader.registry_agreement(cross_check, fingerprint)
+            except LedgerDisagreement as e:
+                findings.append(
+                    (
+                        f"registry:{fingerprint}",
+                        Verdict.UNVERIFIABLE,
+                        f"registry {fingerprint}: DISAGREEMENT — {e}",
+                    )
+                )
+                continue
+            line = f"registry {fingerprint}: {finding.status}"
+            if finding.reason is not None:
+                line += f" ({finding.reason})"
+            findings.append((f"registry:{fingerprint}", finding.to_verdict(), line))
+
+    if bond is not None:
+        assert writer is not None  # main() already refused --bond without --writer
+        try:
+            bs = reader.bond(writer)
+        except LedgerDisagreement as e:
+            findings.append(("bond", Verdict.UNVERIFIABLE, f"bond: DISAGREEMENT — {e}"))
+        else:
+            line = f"bond: {bs.status}"
+            if bs.reason is not None:
+                line += f" ({bs.reason})"
+            if bs.amount_wei is not None:
+                line += f", amount_wei={bs.amount_wei}"
+            findings.append(("bond", bs.to_verdict(), line))
+
+    overall = functools.reduce(Verdict.join, (v for _, v, _ in findings), Verdict.OK)
+
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "trail_id": trail_id,
+                    "verdict": overall.value,
+                    "findings": [
+                        {"dimension": label, "verdict": v.value, "detail": line}
+                        for label, v, line in findings
+                    ],
+                }
+            )
+        )
+    else:
+        for _, _, line in findings:
+            print(line)
+        print(f"ledger-status: {overall.value}")
+
+    return overall.to_exit_code()
+
+
+def _split_signer_command(command: str, *, windows: bool) -> list[str]:
+    """Split ``WAXSEAL_EVM_SIGNER_CMD`` into argv without mangling Windows paths.
+
+    ``shlex.split`` in its default POSIX mode treats a backslash as an escape,
+    so ``D:\\a\\waxseal\\.venv\\Scripts\\python.exe fake_signer.py`` came out
+    as ``DawaxsealvenvScriptspython.exe`` and every Windows CI job failed the
+    entire ledger-write surface with WinError 2 (0.1.5 MR, 01/09/2026 — masked
+    until then because an earlier failing step always stopped the suite first).
+    On Windows a backslash is a path separator, never an escape: split in
+    non-POSIX mode, which preserves it, then strip the double quotes non-POSIX
+    mode leaves attached so a spaced path is still one argv element.
+    """
+    import shlex
+
+    if not windows:
+        return shlex.split(command)
+    parts = shlex.split(command, posix=False)
+    return [
+        part[1:-1] if len(part) >= 2 and part[0] == '"' and part[-1] == '"' else part
+        for part in parts
+    ]
+
+
+class ExternalEvmSigner:
+    """A ``TransactionSigner`` (ports/ledger.py) that shells out to an
+    operator-supplied program named by ``WAXSEAL_EVM_SIGNER_CMD`` — never a
+    key on argv or in an env var carrying key material (CLAUDE.md; this
+    boundary is the same one ``WAXSEAL_API_KEY``/``WAXSEAL_WITNESS_API_KEY``
+    already draw for credentials). This process holds no crypto library
+    (rule 1), so it cannot sign anything itself; everything it needs from a
+    signer is three operations, and this class defines the small CLI
+    sub-protocol an external program must answer to supply them:
+
+      * ``<cmd> address``               -> the signer's 0x address, on stdout.
+      * ``<cmd> sign-digest 0x<hex>``    -> a 65-byte r‖s‖v signature over
+        exactly those 32 bytes (RAW, not re-hashed — ``cast wallet sign
+        --no-hash`` in Foundry's own terms: the contract recomputes its own
+        digest and must recover this signer's address from it directly),
+        0x-hex on stdout.
+      * ``<cmd> sign-tx``                -> the fields ``EvmLedgerSink``
+        assembles for a transaction (``type``, ``chainId``, ``nonce``,
+        ``to``, ``value``, ``data``, ``gas``, ``maxFeePerGas``,
+        ``maxPriorityFeePerGas``, ``accessList``), as a JSON object on
+        STDIN; a raw RLP-encoded signed transaction, 0x-hex, on stdout.
+
+    ``tests/adapters/test_evm_anvil.py``'s ``CastSigner`` shows the two
+    concrete operations a real signer needs to perform (``cast wallet sign
+    --no-hash`` and ``cast mktx``); this class is the three-verb CLI wrapper
+    an operator's own script sits behind, so waxseal itself never touches
+    ``cast`` or any other signing tool directly.
+    """
+
+    def __init__(self, command: str) -> None:
+        self._command = command
+        self.address = self._run("address")
+        self.public_id = self.address
+
+    def _argv(self, *args: str) -> list[str]:
+        import os
+
+        return [*_split_signer_command(self._command, windows=os.name == "nt"), *args]
+
+    def _run(self, *args: str, input_text: str | None = None) -> str:
+        import subprocess
+
+        from waxseal.ports.ledger import LedgerError
+
+        try:
+            completed = subprocess.run(  # noqa: S603
+                self._argv(*args),
+                input=input_text,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise LedgerError(
+                f"WAXSEAL_EVM_SIGNER_CMD ({self._command!r}) could not run {args[0]!r}: {exc}"
+            ) from exc
+        if completed.returncode != 0:
+            raise LedgerError(
+                f"WAXSEAL_EVM_SIGNER_CMD {args[0]!r} exited {completed.returncode}: "
+                f"{completed.stderr.strip()}"
+            )
+        return completed.stdout.strip()
+
+    def _run_hex(self, *args: str, input_text: str | None = None) -> bytes:
+        from waxseal.ports.ledger import LedgerError
+
+        out = self._run(*args, input_text=input_text)
+        text = out[2:] if out.startswith("0x") else out
+        try:
+            return bytes.fromhex(text)
+        except ValueError as exc:
+            raise LedgerError(
+                f"WAXSEAL_EVM_SIGNER_CMD {args[0]!r} printed {out!r}, which is not hex"
+            ) from exc
+
+    def sign(self, digest32: bytes) -> bytes:
+        return self._run_hex("sign-digest", "0x" + digest32.hex())
+
+    def sign_transaction(self, fields: Mapping[str, object]) -> bytes:
+        import json
+
+        return self._run_hex("sign-tx", input_text=json.dumps(dict(fields)))
+
+
+def _evm_signer() -> ExternalEvmSigner:
+    import os
+
+    from waxseal.ports.ledger import LedgerError
+
+    command = os.environ.get("WAXSEAL_EVM_SIGNER_CMD")
+    if not command:
+        raise LedgerError(_WAXSEAL_EVM_SIGNER_CMD_MISSING)
+    return ExternalEvmSigner(command)
+
+
+def _evm_write_sink(
+    rpc_urls: list[str] | None, contracts: EvmContracts, write_rpc: str | None
+) -> tuple[EvmLedgerSink, ExternalEvmSigner]:
+    """The sink every ledger WRITE command builds from: a reader (needed for
+    its own multi-endpoint invariant and contract-address bookkeeping, per
+    ``EvmLedgerSink``'s own constructor) plus the operator's external signer.
+    One signer instance plays both roles ``EvmAnchorSink`` keeps separate
+    (digest signer, transaction signer) — a real deployment wanting two
+    different keys runs two different ``WAXSEAL_EVM_SIGNER_CMD``-backed CLI
+    invocations instead, which this bead does not need to plumb through."""
+    from waxseal.adapters.evm import EvmLedgerReader, EvmLedgerSink
+
+    reader = EvmLedgerReader(rpc_urls or [], contracts)
+    signer = _evm_signer()
+    return EvmLedgerSink(reader, signer, rpc_url=write_rpc), signer
+
+
+def _evm_write_url(rpc_urls: list[str] | None, write_rpc: str | None) -> str:
+    if write_rpc is not None:
+        return write_rpc
+    assert rpc_urls  # _evm_write_sink's EvmLedgerReader construction already validated len>=2
+    return rpc_urls[0]
+
+
+def _eth_chain_id(url: str) -> int:
+    """The EVM numeric chain id at ``url``, fetched through the PUBLIC
+    Transport surface (adapters/remote.py) rather than by reaching into
+    ``EvmLedgerSink``'s own private request-building (``_send``/``_rpc`` are
+    internal to adapters/evm.py — the same encapsulation boundary the audit
+    trail's own backend attribute draws, extended here to the ledger
+    adapter). Printed
+    before every ledger write (see ``_describe_write``) so an operator can
+    confirm which network is about to receive a transaction before it does.
+    """
+    import json
+
+    from waxseal.adapters.remote import RemoteRequest, urllib_transport
+    from waxseal.ports.ledger import LedgerError
+
+    transport = urllib_transport(timeout=10.0)
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": []}).encode()
+    request = RemoteRequest("POST", url, {"content-type": "application/json"}, body)
+    try:
+        response = transport(request)
+        payload = json.loads(response.body)
+        if not isinstance(payload, dict) or "result" not in payload:
+            raise LedgerError(f"{url}: eth_chainId: unexpected response {payload!r}")
+        return int(payload["result"], 16)
+    except (OSError, ValueError) as exc:
+        raise LedgerError(f"{url}: could not determine chain id before sending: {exc}") from exc
+
+
+def _describe_write(*, rpc_url: str, contract: str, action: str) -> None:
+    """Print what is about to be sent before it is sent (CLAUDE.md's F4
+    plan: "mỗi lệnh ghi in rõ chain id + contract + tx trước khi gửi" —
+    every write command names its network, its contract, and its action
+    before broadcasting anything)."""
+    print(f"chain_id={_eth_chain_id(rpc_url)} contract={contract} action={action} rpc={rpc_url}")
+
+
+def _registry_publish(
+    *, descriptor_of: str, registry_addr: str, rpc_urls: list[str] | None, write_rpc: str | None
+) -> int:
+    """`waxseal registry publish` (F4). NOT a chain-entry append — the same
+    footing `anchor` already has (CLAUDE.md's CLI contract forbids the CLI
+    writing to the audit TRAIL, not to an external ledger). The descriptor
+    bytes come from this build's own ``VersionRegistry``, never from the
+    operator: ``--descriptor-of`` only names WHICH fingerprint to publish,
+    and the contract computes ``sha256(descriptor)`` itself, so there is no
+    argument here that could disagree with the bytes sent.
+    """
+    from waxseal.adapters.evm import EvmContracts
+    from waxseal.domain.registry import VersionRegistry, descriptor_frame
+    from waxseal.ports.ledger import LedgerError
+
+    registry = VersionRegistry()
+    if not registry.knows(descriptor_of):
+        print(
+            f"error: {descriptor_of!r} is not a fingerprint this build's VersionRegistry "
+            "holds field names for — nothing to publish",
+            file=sys.stderr,
+        )
+        return 1
+    descriptor = descriptor_frame(registry.fields(descriptor_of))
+
+    try:
+        sink, _signer = _evm_write_sink(rpc_urls, EvmContracts(registry=registry_addr), write_rpc)
+    except (ValueError, LedgerError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        _describe_write(
+            rpc_url=_evm_write_url(rpc_urls, write_rpc),
+            contract=registry_addr,
+            action=f"register(fingerprint={descriptor_of})",
+        )
+        tx_hash = sink.register_fingerprint(descriptor)
+    except (OSError, ValueError, LedgerError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(f"tx={tx_hash}")
+    return 0
+
+
+def _bond_deposit(
+    *, bond_addr: str, rpc_urls: list[str] | None, write_rpc: str | None, amount_wei: int
+) -> int:
+    """`waxseal bond deposit` (F4). NOT a chain-entry append (see
+    `_registry_publish`'s docstring — same footing as `anchor`)."""
+    from waxseal.adapters.evm import EvmContracts
+    from waxseal.ports.ledger import LedgerError
+
+    if amount_wei <= 0:
+        print(f"error: --amount-wei must be positive, got {amount_wei}", file=sys.stderr)
+        return 1
+    try:
+        sink, _signer = _evm_write_sink(rpc_urls, EvmContracts(bond=bond_addr), write_rpc)
+    except (ValueError, LedgerError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        _describe_write(
+            rpc_url=_evm_write_url(rpc_urls, write_rpc),
+            contract=bond_addr,
+            action=f"deposit(amount_wei={amount_wei})",
+        )
+        tx_hash = sink.deposit_bond(amount_wei)
+    except (OSError, ValueError, LedgerError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(f"tx={tx_hash}")
+    return 0
+
+
+def _strip_0x(value: str) -> str:
+    return value[2:] if value.startswith("0x") else value
+
+
+def _checkpoint_from_json(raw: Any) -> Checkpoint:
+    if not isinstance(raw, dict):
+        raise ValueError(f"a checkpoint must be a JSON object, got {type(raw).__name__}")
+    return Checkpoint(seq=int(raw["seq"]), entry_hash=raw["entry_hash"], root=raw["root"])
+
+
+def _divergent_leaf_from_json(raw: Any) -> DivergentLeaf:
+    if not isinstance(raw, dict):
+        raise ValueError(f"a leaf claim must be a JSON object, got {type(raw).__name__}")
+    return DivergentLeaf(
+        index=int(raw["index"]),
+        entry_hash=raw["entry_hash"],
+        proof=tuple(_strip_0x(p) for p in raw.get("proof", ())),
+    )
+
+
+def _bond_prove(
+    *, bond_addr: str, rpc_urls: list[str] | None, write_rpc: str | None, proof_path: Path
+) -> int:
+    """`waxseal bond prove <proof.json>` (F4). NOT a chain-entry append (see
+    `_registry_publish`'s docstring).
+
+    Two proof shapes, ONE entry point. Both are domain proof objects and both
+    go through `EvmLedgerSink.submit_fraud_proof`, which validates each
+    before spending gas. Through 0.1.5 the non-extension half could not:
+    `domain.bond.NonExtensionProof` then modelled a consistency-proof
+    challenge the deployed contract does not accept, so this path assembled
+    adapter-level leaf claims and called a second, unvalidated entry point.
+    The asymmetry domain/bond.py describes is between the two KINDS of
+    evidence, not between two ways out of this file.
+    """
+    import json
+
+    from waxseal.adapters.evm import EvmContracts
+    from waxseal.domain.bond import EquivocationProof, NonExtensionProof
+    from waxseal.ports.ledger import LedgerError
+
+    try:
+        raw = json.loads(proof_path.read_text())
+    except OSError as e:
+        print(f"error: cannot read {proof_path}: {e}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError as e:
+        print(f"error: {proof_path} is not valid JSON: {e}", file=sys.stderr)
+        return 1
+
+    kind = raw.get("kind") if isinstance(raw, dict) else None
+    if kind not in ("equivocation", "non_extension"):
+        print(
+            f"error: {proof_path}: 'kind' must be 'equivocation' or 'non_extension', "
+            f"got {kind!r}",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        if kind == "equivocation":
+            equivocation: EquivocationProof | None = EquivocationProof(
+                chain_id=raw["chain_id"],
+                checkpoint_a=_checkpoint_from_json(raw["checkpoint_a"]),
+                signature_a=bytes.fromhex(_strip_0x(raw["signature_a"])),
+                checkpoint_b=_checkpoint_from_json(raw["checkpoint_b"]),
+                signature_b=bytes.fromhex(_strip_0x(raw["signature_b"])),
+            )
+            non_extension: NonExtensionProof | None = None
+        else:
+            equivocation = None
+            non_extension = NonExtensionProof(
+                chain_id=raw["chain_id"],
+                older=_checkpoint_from_json(raw["older"]),
+                newer=_checkpoint_from_json(raw["newer"]),
+                older_signature=bytes.fromhex(_strip_0x(raw["older_signature"])),
+                newer_signature=bytes.fromhex(_strip_0x(raw["newer_signature"])),
+                in_older=_divergent_leaf_from_json(raw["in_older"]),
+                in_newer=_divergent_leaf_from_json(raw["in_newer"]),
+            )
+    except (KeyError, TypeError, ValueError) as e:
+        print(f"error: {proof_path}: malformed {kind} proof: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        sink, _signer = _evm_write_sink(rpc_urls, EvmContracts(bond=bond_addr), write_rpc)
+    except (ValueError, LedgerError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        write_url = _evm_write_url(rpc_urls, write_rpc)
+        if equivocation is not None:
+            _describe_write(rpc_url=write_url, contract=bond_addr, action="proveEquivocation")
+            tx_hash = sink.submit_fraud_proof(equivocation)
+        else:
+            assert non_extension is not None
+            _describe_write(rpc_url=write_url, contract=bond_addr, action="proveNonExtension")
+            tx_hash = sink.submit_fraud_proof(non_extension)
+    except (KeyError, TypeError, ValueError, OSError, LedgerError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(f"tx={tx_hash}")
+    return 0
 
 
 def _receipt_export(trail: Path, *, seq: int | None, out: Path) -> int:
@@ -2033,17 +3951,41 @@ def _anchor(
     witnesses: list[str] | None = None,
     tsa_url: str | None = None,
     ots_calendar: str | None = None,
+    evm_rpc: list[str] | None = None,
+    evm_liveness: str | None = None,
+    evm_write_rpc: str | None = None,
+    evm_trail_id: str | None = None,
+    evm_consistency_proof_file: Path | None = None,
 ) -> int:
     import json
 
     from waxseal.adapters.anchors import MultiAnchorSink
     from waxseal.adapters.attest import AggregateReader
+    from waxseal.ports.ledger import LedgerError
 
     # Read-only: binding the accumulator into the checkpoint needs the bytes
     # on disk, not the seal key the CLI deliberately never holds. Anchoring a
     # sealed trail without the binding would publish a chain shape nothing
     # ties back to the seals.
-    sink = _anchor_sink(trail, tsa_url=tsa_url, ots_calendar=ots_calendar)
+    try:
+        sink = _anchor_sink(
+            trail,
+            tsa_url=tsa_url,
+            ots_calendar=ots_calendar,
+            evm_rpc=evm_rpc,
+            evm_liveness=evm_liveness,
+            evm_write_rpc=evm_write_rpc,
+            evm_trail_id=evm_trail_id,
+            evm_consistency_proof_file=evm_consistency_proof_file,
+        )
+    except (ValueError, LedgerError, OSError, json.JSONDecodeError) as e:
+        # Preparing the EVM sink (bad --evm-rpc count, WAXSEAL_EVM_SIGNER_CMD
+        # missing or failing, an unreadable/malformed consistency-proof
+        # file) fails BEFORE any transaction exists to fail loudly later —
+        # nothing was sent, nothing recorded, same as the "no anchor_sink"
+        # ValueError case below.
+        print(f"error: could not prepare the anchor sink: {e}", file=sys.stderr)
+        return 1
     anchored = log.with_anchor_sink(sink, aggregate_source=AggregateReader(trail))
     try:
         cp = anchored.anchor()
@@ -2089,18 +4031,32 @@ def _anchor(
     return 1 if (failed or witness_rc) else 0
 
 
-def _anchor_sink(trail: Path, *, tsa_url: str | None, ots_calendar: str | None) -> object:
+def _anchor_sink(
+    trail: Path,
+    *,
+    tsa_url: str | None,
+    ots_calendar: str | None,
+    evm_rpc: list[str] | None = None,
+    evm_liveness: str | None = None,
+    evm_write_rpc: str | None = None,
+    evm_trail_id: str | None = None,
+    evm_consistency_proof_file: Path | None = None,
+) -> object:
     """The sink `anchor` publishes through.
 
     With no external target this stays the local sidecar it has always been.
     a queue and a local cross-check, explicitly not an independent witness
     (adapters/anchors.py says so). With one, the sidecar becomes the filing
     cabinet for a receipt somebody else issued, which is the only version of
-    this that survives an attacker holding the disk. With both (waxseal-4yk),
-    a ``MultiAnchorSink`` fans the SAME checkpoint (computed once by
-    ``AuditLog.anchor()``) out to both independently-recording sinks, so one
-    run reaches two independent trust domains instead of requiring two runs.
+    this that survives an attacker holding the disk. With more than one
+    (waxseal-4yk added --tsa-url + --ots-calendar; F4 adds --evm-liveness as
+    a third), a ``MultiAnchorSink`` fans the SAME checkpoint (computed once
+    by ``AuditLog.anchor()``) out to every independently-recording sink, so
+    one run reaches several independent trust domains instead of requiring
+    one run per domain.
     """
+    import json
+
     from waxseal.adapters.anchors import FileAnchorSink, MultiAnchorSink, RecordingAnchorSink
 
     sinks: list[object] = []
@@ -2112,7 +4068,46 @@ def _anchor_sink(trail: Path, *, tsa_url: str | None, ots_calendar: str | None) 
         from waxseal.adapters.ots import OtsAnchorSink
 
         sinks.append(RecordingAnchorSink(trail, OtsAnchorSink(ots_calendar)))
-    if len(sinks) == 2:
+    if evm_liveness is not None:
+        from waxseal.adapters.evm import EvmAnchorSink, EvmContracts
+
+        trail_id = evm_trail_id if evm_trail_id is not None else str(trail.resolve())
+        proof: tuple[str, ...] = ()
+        if evm_consistency_proof_file is not None:
+            proof = tuple(json.loads(evm_consistency_proof_file.read_text()))
+        ledger_sink, digest_signer = _evm_write_sink(
+            evm_rpc, EvmContracts(liveness=evm_liveness), evm_write_rpc
+        )
+
+        def _fixed_consistency_proof(
+            _cp: Checkpoint, _proof: tuple[str, ...] = proof
+        ) -> Sequence[str]:
+            # `_proof` is bound as a default argument, not read from the
+            # enclosing scope at call time: closing over a loop/branch
+            # variable directly is the classic late-binding bug, and this
+            # function is itself only ever built once per `_anchor_sink`
+            # call, but the default-argument form costs nothing and rules
+            # the bug class out rather than relying on that.
+            return _proof
+
+        sinks.append(
+            RecordingAnchorSink(
+                trail,
+                EvmAnchorSink(
+                    ledger_sink,
+                    trail_id,
+                    digest_signer,
+                    proof_fn=_fixed_consistency_proof if proof else None,
+                ),
+            )
+        )
+    # len(sinks) > 1, not == 2: --evm-liveness makes a THIRD independently-
+    # recording sink possible alongside --tsa-url/--ots-calendar, and
+    # MultiAnchorSink itself already accepts any number >= 2 (its own
+    # constructor only refuses fewer). The old `== 2` here would have
+    # silently dropped every sink past the first two once this bead added a
+    # third — never exercised until this bead, because only two existed.
+    if len(sinks) > 1:
         return MultiAnchorSink(sinks)
     if sinks:
         return sinks[0]
@@ -2148,8 +4143,14 @@ def _publish_to_witnesses(cp: Checkpoint, urls: list[str]) -> int:
 
 
 def _tail(log: AuditLog, n: int) -> int:
-    entries = list(log.entries())
-    for entry in entries[-n:]:
+    # A bounded deque, not list(log.entries())[-n:]: the slice discarded
+    # everything but the last n rows AFTER holding the whole decoded trail in
+    # memory at once, so a read-only command's peak allocation grew with the
+    # trail it was only printing the end of. Output is byte-identical.
+    window: deque[Entry] = deque(maxlen=n)
+    for entry in log.entries():
+        window.append(entry)
+    for entry in window:
         h = entry.header
         print(f"seq={h.seq} ts={h.ts} type={h.payload_type} hash={entry.entry_hash[:12]}")
     return 0

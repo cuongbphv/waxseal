@@ -18,9 +18,11 @@ the event on stdin.
 
 import base64
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from waxseal import AuditLog
 
@@ -29,8 +31,27 @@ HOOK_PATH = (
 )
 SRC = str(Path(__file__).parent.parent.parent / "src")
 
+def _spawn_env(**overrides: str) -> dict[str, str]:
+    """A scrubbed env that can still start CPython on Windows.
 
-def run_hook(event: dict | str, trail: Path, **env_overrides) -> subprocess.CompletedProcess:
+    SYSTEMROOT is how the CRT and OpenSSL find the OS (CryptGenRandom lives
+    under it); without it a spawned python.exe can fail interpreter-side
+    initialization in ways that look like library bugs — the 0.1.5 MR saw
+    SSLError 0xa080024 on windows/3.14 the moment an import chain touched
+    an SSL context. Passing it through is not a hole in the scrub: the vars
+    under test (HOME and friends) stay fully controlled by `overrides`.
+    """
+    base = {"PYTHONPATH": SRC}
+    if "SYSTEMROOT" in os.environ:  # POSIX has no such var; Windows needs it
+        base["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+    base.update(overrides)
+    return base
+
+
+
+def run_hook(
+    event: dict[str, Any] | str, trail: Path, **env_overrides: str
+) -> subprocess.CompletedProcess[str]:
     import os
 
     env = {**os.environ, "PYTHONPATH": SRC, "WAXSEAL_TRAIL": str(trail), **env_overrides}
@@ -41,8 +62,8 @@ def run_hook(event: dict | str, trail: Path, **env_overrides) -> subprocess.Comp
     )
 
 
-def pre_tool_use(**overrides) -> dict:
-    event = {
+def pre_tool_use(**overrides: object) -> dict[str, Any]:
+    event: dict[str, Any] = {
         "session_id": "sess-1",
         "transcript_path": "/tmp/transcript.jsonl",
         "cwd": "/work/project",
@@ -56,9 +77,12 @@ def pre_tool_use(**overrides) -> dict:
     return event
 
 
-def read_payload(trail: Path, line_no: int = 0) -> dict:
+def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
     line = trail.read_text().splitlines()[line_no]
-    return json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
+    result: dict[str, Any] = json.loads(
+        base64.b64decode(json.loads(line)["payload_b64"])
+    )
+    return result
 
 
 class TestObserveOnly:
@@ -174,8 +198,15 @@ class TestDefaultTrailLocation:
             [sys.executable, str(HOOK_PATH)],
             input=json.dumps(pre_tool_use()),
             capture_output=True, text=True, timeout=30,
-            env={"PYTHONPATH": SRC, "HOME": str(tmp_path)},
+            env=_spawn_env(HOME=str(tmp_path)),
         )
         assert proc.returncode == 0
-        trail = tmp_path / ".claude" / "waxseal" / "trail.jsonl"
+        # 0.1.5: the default is routed per project (the event's cwd), so the
+        # host directory rung is unchanged but a slug directory sits under it.
+        from waxseal.domain.segments import project_slug
+
+        trail = (
+            tmp_path / ".claude" / "waxseal" / "trails"
+            / project_slug("/work/project") / "trail.00000.jsonl"
+        )
         assert AuditLog.open(trail).verify(measure_drops=False).checked == 1

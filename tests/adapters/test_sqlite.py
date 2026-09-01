@@ -10,7 +10,7 @@ from tests.adapters.test_jsonl import build_entry, build_entry_v2
 from waxseal import AuditLog
 from waxseal.adapters.jsonl import JSONLBackend
 from waxseal.adapters.sqlite import SQLiteBackend
-from waxseal.domain.header import GENESIS_PREV_HASH
+from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 
 TS = "2026-08-21T06:00:00+00:00"
 PT = "application/vnd.test.event+json"
@@ -27,7 +27,7 @@ class TestAppend:
         backend = SQLiteBackend(tmp_path / "trail.db")
         seen: list[tuple[int, str]] = []
 
-        def build(seq: int, prev: str):
+        def build(seq: int, prev: str) -> Entry:
             seen.append((seq, prev))
             return build_entry(seq, prev)
 
@@ -103,6 +103,7 @@ class TestV2CrossBackendParity:
         from waxseal.adapters.memory import MemoryBackend
         from waxseal.adapters.postgres import PostgresBackend
         from waxseal.adapters.s3 import S3Backend
+        from waxseal.ports.backend import WriterBackend
 
         payload = b'{"event": "v2-parity"}'
         store = FakeStore()
@@ -110,7 +111,7 @@ class TestV2CrossBackendParity:
         def connect() -> FakeConn:
             return FakeConn(store)
 
-        backends = {
+        backends: dict[str, WriterBackend] = {
             "jsonl": JSONLBackend(tmp_path / "a.jsonl"),
             "sqlite": SQLiteBackend(tmp_path / "a.db"),
             "memory": MemoryBackend(),
@@ -139,7 +140,11 @@ class TestOpenUnderContention:
         blocker.execute("CREATE TABLE occupant (x)")
         blocker.execute("BEGIN IMMEDIATE")
         blocker.execute("INSERT INTO occupant VALUES (1)")
-        release = threading.Timer(0.05, lambda: (blocker.commit(), blocker.close()))
+        def release_blocker() -> None:
+            blocker.commit()
+            blocker.close()
+
+        release = threading.Timer(0.05, release_blocker)
         release.start()
         try:
             SQLiteBackend(path)  # must retry through the window, not raise
@@ -173,7 +178,7 @@ class TestOpenUnderContention:
 
 
 class TestTrailPermissions:
-    def test_database_file_is_created_owner_only(self, tmp_path) -> None:
+    def test_database_file_is_created_owner_only(self, tmp_path: Path) -> None:
         # Same exposure as the JSONL trail: the payload-bearing database must
         # not inherit a world-readable umask.
         import os

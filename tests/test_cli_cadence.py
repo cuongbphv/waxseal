@@ -76,9 +76,9 @@ class TestFeasibleCase:
         assert math.isclose(anchor_term, 3.1622776601683795, rel_tol=1e-6)
 
         band_line = next(line for line in out.splitlines() if "recommended band" in line)
-        band_low, band_high = (
-            float(x) for x in re.search(r"\[(-?\d+\.?\d*), (-?\d+\.?\d*)\]", band_line).groups()
-        )
+        band_match = re.search(r"\[(-?\d+\.?\d*), (-?\d+\.?\d*)\]", band_line)
+        assert band_match is not None
+        band_low, band_high = (float(x) for x in band_match.groups())
         # n_opt itself was parsed from a `.6g`-rounded string, so compare the
         # band against the recomputed expected value at looser tolerance
         # rather than compounding two roundings.

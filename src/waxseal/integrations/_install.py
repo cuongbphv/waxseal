@@ -17,6 +17,8 @@ import os
 import sys
 from pathlib import Path
 
+from waxseal.integrations._trail import home_base
+
 TARGETS = (
     "hermes",
     "hermes-gateway",
@@ -27,6 +29,7 @@ TARGETS = (
     "crewai",
     "openai-agents",
     "openclaw",
+    "agt",
 )
 
 _STDIN_HOOK_SHIM = '''#!/usr/bin/env python3
@@ -80,6 +83,19 @@ _LIBRARY_USAGE = {
         "from waxseal.integrations.openai_agents import WaxsealRunHooks\n"
         'result = await Runner.run(agent, "input", hooks=WaxsealRunHooks(trail_path))'
     ),
+    "agt": (
+        "from agentmesh.governance import AuditLog as AGTAuditLog\n"
+        "from waxseal.integrations.agt import WaxsealAuditSink\n\n"
+        "audit = AGTAuditLog(sink=WaxsealAuditSink(trail_path))\n"
+        'audit.log(event_type="policy_evaluation", agent_did="did:web:agent-1",\n'
+        '          action="read_file", outcome="allow", policy_decision="allow")\n\n'
+        "Note: govern()'s own wrapper builds its OWN AuditLog with no way to\n"
+        "attach a sink (agent-governance-toolkit-core 4.1.0 and 5.0.0, both\n"
+        "read — a confirmed upstream gap, not a waxseal limitation). Call\n"
+        "AGTAuditLog(sink=...) yourself at your governance checkpoints, or\n"
+        "reach into `governed._audit = AGTAuditLog(sink=...)` post-construction\n"
+        "(a private attribute; there is no public setter upstream)."
+    ),
 }
 
 # Targets that run on a timer rather than inside the host: nothing to place on
@@ -88,7 +104,7 @@ _RUNNER_USAGE = {
     "openclaw": (
         "OpenClaw keeps its own audit ledger but prunes it (30 days, 100k rows) and\n"
         "hashes no row. Chain it from a timer — nothing runs on the agent's path:\n\n"
-        "  */5 * * * * python -m waxseal.integrations.openclaw\n\n"
+        f"  */5 * * * * {sys.executable} -m waxseal.integrations.openclaw\n\n"
         "Trail: $OPENCLAW_HOME/audit/trail.jsonl (default ~/.openclaw/audit/trail.jsonl).\n"
         "Verify anytime: waxseal verify ~/.openclaw/audit/trail.jsonl\n"
         "Requires the `openclaw` CLI on PATH and a running gateway to answer it."
@@ -112,11 +128,20 @@ def _note_home_unused(target: str, home: Path | None) -> None:
 
 
 def _default_home(target: str) -> Path:
+    """Where a target's shim files go when `--home` names nothing.
+
+    `home_base()`, not ``Path.home()``: install placement has to agree with
+    the trail resolvers, which all read `HOME` first (the ntpath split is
+    documented on `home_base` itself). Placing a shim under the USERPROFILE
+    profile while the host that loads it was launched with `HOME` set means
+    the shim is never loaded and there is no trail at all — no short chain to
+    misread, no evidence of any kind (waxseal-fg4.19).
+    """
     if target.startswith("hermes"):
         env = os.environ.get("HERMES_HOME")
-        return Path(env) if env else Path.home() / ".hermes"
+        return Path(env) if env else home_base() / ".hermes"
     host_dir = {"claude-code": ".claude", "codex": ".codex", "cursor": ".cursor"}[target]
-    return Path.home() / host_dir
+    return home_base() / host_dir
 
 
 def _write(path: Path, content: str, force: bool) -> bool:
@@ -197,7 +222,15 @@ def _config_name(target: str) -> str:
 
 
 def _config_snippet(target: str, shim: Path) -> str:
-    cmd = f"python3 {shim}"
+    # sys.executable, never a bare `python3`: the interpreter on PATH is not
+    # necessarily the one that has waxseal installed. When it is not, every hook
+    # event is dropped with a label nobody reads and the trail stays empty while
+    # the hooks look installed — which is exactly what happened on the
+    # repository owner's machine (0.1.5 plan, Workstream D1). The interpreter
+    # running `waxseal install` demonstrably has waxseal, so it is the one to
+    # name. The shim keeps its `#!/usr/bin/env python3` shebang, which is a
+    # fail-open the host may deliberately override.
+    cmd = f"{sys.executable} {shim}"
     if target == "cursor":
         events = (
             "beforeShellExecution", "afterShellExecution", "beforeMCPExecution",

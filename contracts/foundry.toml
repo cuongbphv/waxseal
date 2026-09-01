@@ -1,0 +1,35 @@
+# waxseal contracts/ — a SEPARATE APPLICATION, never packaged into the wheel.
+#
+# It therefore carries its own toolchain (Foundry) without touching CLAUDE.md
+# rule 1: `[project] dependencies` stays `[]` because none of this is a Python
+# runtime dependency. It also carries NO Solidity dependencies: there is no
+# `lib/`, no forge-std, no git submodule. The tests declare the handful of
+# cheatcodes they use as a local interface (test/Vm.sol) and assert with
+# `require`. A registry that cannot be rewritten should not depend on a
+# library that can be re-pointed.
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = []
+# Pinned, not floating. These contracts hash the same bytes the Python side
+# hashes; "whatever solc CI happened to fetch" is not a basis for a
+# byte-for-byte claim.
+solc = "0.8.36"
+optimizer = true
+optimizer_runs = 200
+# Vector agreement is checked by explicit hash comparison, not by fuzzing, but
+# the RFC 9162 verifier also gets fuzzed over sizes; a fixed seed keeps a red
+# CI run reproducible.
+fuzz = { runs = 512, seed = "0x7761787365616c" }
+# The cross vectors are read from disk at test time rather than compiled into
+# the test bytecode: 270 vectors of proof and trace arrays would not fit under
+# EIP-170, and a JSON file in git is reviewable in a way a hex blob is not.
+# Read-only, and only this directory.
+fs_permissions = [{access = "read", path = "./vectors"}]
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = false
+int_types = "long"

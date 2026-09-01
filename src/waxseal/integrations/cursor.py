@@ -17,6 +17,22 @@ Contract verified against https://cursor.com/docs/hooks (2026-08-21):
   stdout, since printing even an explicit "allow" could override a real policy
   hook's decision. Diagnostics go to stderr.
 
+Per-project routing (SPEC 20, on by default): the trail is keyed by the hook
+event's cwd, so two projects never braid their histories into one file, and it
+rolls over into sealed segments once the active one passes 16 MiB. There is no
+new environment variable and no flag. `WAXSEAL_TRAIL` still wins on LOCATION
+and is NOT a rotation off-switch: a trail named through it rotates too, and on
+its first rotation it is adopted as the base segment.
+
+Off-box archiving (`domain/archive.py`) is opt-in and, until this was wired, was
+unreachable from any hook at all: `WAXSEAL_ARCHIVE` names where a SEALED
+segment is copied — `s3://bucket/prefix/`, or a chain server's `https://`
+base URL with `WAXSEAL_ARCHIVE_API_KEY` as its own import-write credential
+(deliberately neither `WAXSEAL_API_KEY` nor `WAXSEAL_WITNESS_API_KEY`; see
+`integrations/_archive.py`). Rotation itself still takes no environment
+variable and no flag — this configures only where its output goes, and unset
+means nothing is sent and the rotation line reads `archive_not_attempted`.
+
 Secrets are redacted BEFORE hashing/storage (RegexRedactor): a key leaked
 into a shell command, written into a file edit diff, or pasted into a
 prompt reaches this trail only as ***REDACTED***.
@@ -25,13 +41,18 @@ prompt reaches this trail only as ***REDACTED***.
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
 
-from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations._archive import archive_destination
+from waxseal.integrations._trail import home_base, resolve_trail, routed_trail
+from waxseal.sources.rotation import (
+    DEFAULT_MAX_SEGMENT_BYTES,
+    active_segment,
+    open_segmented,
+)
 
 # _sanitize redacts BEFORE clipping: a clip can split a secret across the
 # boundary (a PEM losing its END marker stops matching) and land it on disk.
@@ -57,16 +78,32 @@ _COMMON_FIELDS = (
 )
 
 
-def _trail_path() -> Path:
-    env = os.environ.get("WAXSEAL_TRAIL")
-    if env:
-        return Path(env)
-    # HOME before Path.home(): ntpath resolves "~" from USERPROFILE and
-    # ignores HOME, so a host that launches this hook with HOME set would
-    # strand the trail in the wrong profile on Windows.
-    home = os.environ.get("HOME")
-    base = Path(home) if home else Path.home()
-    return base / ".cursor" / "waxseal" / "trail.jsonl"
+def _trail_path(event: dict[str, Any]) -> Path:
+    return resolve_trail(
+        default=lambda: routed_trail(
+            home_base() / ".cursor" / "waxseal", _project_key(event)
+        )
+    )
+
+
+def _project_key(event: dict[str, Any]) -> str | None:
+    """The project key: `cwd` when Cursor sends one, else the FIRST of
+    `workspace_roots`.
+
+    Cursor sends `cwd` on the shell events and `workspace_roots` on the
+    others, so keying on `cwd` alone would leave a multi-project developer's
+    file edits and prompts braided into one shared trail while only their
+    shell commands got routed. The first root, not all of them: a trail has
+    one location, and a set-derived key would change the moment a second
+    folder was added to the workspace.
+    """
+    cwd = event.get("cwd")
+    if isinstance(cwd, str) and cwd:
+        return cwd
+    roots = event.get("workspace_roots")
+    if isinstance(roots, list) and roots and isinstance(roots[0], str) and roots[0]:
+        return roots[0]
+    return None
 
 
 def _clip(text: str) -> str:
@@ -106,15 +143,29 @@ def main() -> int:
     except Exception as e:
         print(f"[waxseal-audit] unreadable hook event (entry dropped): {e}", file=sys.stderr)
         return 0
+    target = _trail_path(event)
     try:
-        log = AuditLog.open(_trail_path(), redactor=RegexRedactor(), record_drops=True)
+        # The hook passes the built-in constant; the rotation notice says so,
+        # so nobody reads 16777216 as something they configured.
+        log = open_segmented(
+            target,
+            max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES,
+            # J3's off-box copy, opt-in through `WAXSEAL_ARCHIVE`. `None` (the
+            # unconfigured case) is passed through deliberately: rotation renders
+            # it as `archive_not_attempted`, which is the line an operator who
+            # believes they configured one needs to see.
+            archive=archive_destination(),
+            redactor=RegexRedactor(),
+            record_drops=True,
+        )
     except Exception as e:
         print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
         # No AuditLog to route this through, so record it directly, best-effort
-        # (FileDropRecorder.record() never raises).
+        # (FileDropRecorder.record() never raises). Beside the segment actually
+        # in play: a `.drops` file in the wrong directory is a loss nobody finds.
         from waxseal.adapters.drops import FileDropRecorder
 
-        FileDropRecorder(_trail_path()).record(
+        FileDropRecorder(active_segment(target)).record(
             reason=type(e).__name__, payload_type=PAYLOAD_TYPE
         )
         return 0

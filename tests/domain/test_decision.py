@@ -276,7 +276,7 @@ class TestFromPayloadRejectsMalformed:
     )
     def test_structurally_wrong_payload_raises_valueerror(self, payload: object) -> None:
         with pytest.raises(ValueError):
-            from_payload(payload)  # type: ignore[arg-type]
+            from_payload(payload)
 
     def test_model_of_the_wrong_type_raises_valueerror(self) -> None:
         payload = to_payload(minimal())
