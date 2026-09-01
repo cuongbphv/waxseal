@@ -55,10 +55,10 @@ from waxseal.domain.abi import encode_address, encode_bytes32, encode_call, enco
 from waxseal.domain.bond import (
     BONDED,
     UNBONDED,
-    Checkpoint,
     checkpoint_signing_digest,
     trail_id_for,
 )
+from waxseal.domain.checkpoint import Checkpoint
 from waxseal.domain.fingerprint import HEADER_FIELDS, fingerprint_for
 from waxseal.domain.liveness import DELINQUENT, LIVE, NO_CHECKPOINT_ON_LEDGER, UNREACHABLE
 from waxseal.domain.registry import (
