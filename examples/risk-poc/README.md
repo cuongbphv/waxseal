@@ -1,9 +1,9 @@
-# Banking PoC — a verifiable AI decision log
+# Risk PoC — a verifiable AI decision log
 
 *[Tiếng Việt](README.vi.md)*
 
 A runnable end-to-end demonstration of waxseal used as the **evidence layer under an AI
-agent that makes financial decisions**. An AML screening agent decides on payment
+agent that makes financial decisions**. A risk-scanning agent decides on payment
 instructions; every decision lands on a tamper-evident chain, and an auditor can later
 check any single decision without being given the rest of the log.
 
@@ -20,16 +20,16 @@ itself, and adds no dependency.
 ## Run it
 
 ```bash
-python examples/banking-poc/simulate.py --out examples/poc-out     # animated data-flow walkthrough
-python examples/banking-poc/simulate.py --out examples/poc-out --no-animation   # CI / piped output
-python examples/banking-poc/tamper_demo.py --out examples/poc-out  # the eight scenarios below
+python examples/risk-poc/simulate.py --out examples/poc-out     # animated data-flow walkthrough
+python examples/risk-poc/simulate.py --out examples/poc-out --no-animation   # CI / piped output
+python examples/risk-poc/tamper_demo.py --out examples/poc-out  # the eight scenarios below
 ```
 
 `--out` is recreated on every run. The animation disables itself automatically when
 stdout is not a terminal, and falls back to ASCII glyphs on a console that cannot encode
 box drawing (`NO_COLOR=1` or `WAXSEAL_DEMO_PLAIN=1` also force plain output).
 
-Both scripts are covered by `tests/test_examples_banking_poc.py`, which asserts the
+Both scripts are covered by `tests/test_examples_risk_poc.py`, which asserts the
 claims this page makes. An example that has silently drifted from the library teaches
 the wrong thing with a straight face, so this one is tested like code.
 

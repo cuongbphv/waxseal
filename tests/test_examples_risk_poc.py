@@ -1,4 +1,4 @@
-"""The banking PoC is documentation that runs, so it is tested like code.
+"""The risk PoC is documentation that runs, so it is tested like code.
 
 Its whole value to a reviewer is the claim "each of these attacks produces
 exactly this verdict". An example that has quietly drifted from the library
@@ -18,7 +18,7 @@ from types import ModuleType
 
 import pytest
 
-POC = Path(__file__).parents[1] / "examples" / "banking-poc"
+POC = Path(__file__).parents[1] / "examples" / "risk-poc"
 
 
 def load_module(name: str) -> ModuleType:

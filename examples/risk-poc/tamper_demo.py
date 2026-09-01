@@ -11,7 +11,7 @@ what a hash chain cannot resist — and needs the anchor. The sixth is not
 caught by either and needs the forward-secure seal. The seventh is not an
 attack at all, and the point is that it is not reported as one.
 
-    python examples/banking-poc/tamper_demo.py --out examples/poc-out
+    python examples/risk-poc/tamper_demo.py --out examples/poc-out
 """
 
 from __future__ import annotations

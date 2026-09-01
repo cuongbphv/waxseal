@@ -56,7 +56,7 @@ nhiệm tín dụng của thể nhân hoặc thiết lập điểm tín dụng c
 AI dùng cho mục đích phát hiện gian lận tài chính**".
 
 Ngoại lệ đó rất quan trọng và rất dễ bị đọc lệch, theo hướng có lợi hoặc bất lợi cho tổ
-chức triển khai. Trường hợp sàng lọc AML/gian lận trong [PoC](../../examples/banking-poc/README.vi.md)
+chức triển khai. Trường hợp quét rủi ro/gian lận trong [PoC](../../examples/risk-poc/README.vi.md)
 theo cách đọc thông thường nằm trong nhóm được loại trừ, còn chấm điểm tín dụng thì không.
 Việc xác định một hệ thống cụ thể rơi vào nhóm nào là câu hỏi pháp lý, không phải kỹ thuật
 — các bảng dưới đây áp dụng ở nơi Đạo luật áp dụng.
@@ -109,7 +109,7 @@ Việc xác định một hệ thống cụ thể rơi vào nhóm nào là câu 
 Mức phủ giống Điều 19. Điểm hữu ích về mặt vận hành là cụm "**trong phạm vi các log đó nằm
 dưới quyền kiểm soát của họ**": bên triển khai vận hành tầng agent thì kiểm soát nhật ký
 quyết định ngay cả khi mô hình là của bên thứ ba — nên đây đúng là lớp mà bên triển khai có
-thể tự sở hữu. [Kiến trúc tham chiếu](../architecture/banking-deployment.vi.md#6-lưu-trữ-dr-và-dung-lượng)
+thể tự sở hữu. [Kiến trúc tham chiếu](../architecture/deployment.vi.md#6-lưu-trữ-dr-và-dung-lượng)
 trình bày việc xoay vòng chuỗi như là cơ chế lưu trữ.
 
 ### Căng thẳng: chỉ-ghi-thêm và quyền được xoá
@@ -180,7 +180,7 @@ văn bản nào đang áp dụng trước khi dựa vào phần này.
 |---|---|---|
 | Kiểm kê mô hình (model inventory) | **Một phần** | `system_id` + tên/phiên bản/digest mô hình trên từng quyết định cho ra một bản kiểm kê *suy từ thực tế sử dụng* — cái gì thực sự đã chạy, đối lập với cái mà sổ đăng ký nói đáng lẽ phải chạy. Đối chiếu hai bản này là một biện pháp kiểm soát thực sự hữu ích |
 | Tài liệu đủ để một bên độc lập hiểu được việc đã làm | **Một phần** | nguồn gốc từng quyết định, không phải tài liệu phát triển mô hình |
-| Effective challenge / kiểm định độc lập | **Một phần** | kiểm định cần một bản ghi không thể chối cãi về việc môi trường sản xuất thực sự đã quyết định gì; một nhật ký mà chủ sở hữu mô hình sửa được thì không đỡ nổi việc phản biện. Phần phân tách nhiệm vụ trong [kiến trúc](../architecture/banking-deployment.vi.md#3-phân-tách-nhiệm-vụ) mới là thứ làm điều này thành thật |
+| Effective challenge / kiểm định độc lập | **Một phần** | kiểm định cần một bản ghi không thể chối cãi về việc môi trường sản xuất thực sự đã quyết định gì; một nhật ký mà chủ sở hữu mô hình sửa được thì không đỡ nổi việc phản biện. Phần phân tách nhiệm vụ trong [kiến trúc](../architecture/deployment.vi.md#3-phân-tách-nhiệm-vụ) mới là thứ làm điều này thành thật |
 | Giám sát liên tục và phân tích kết quả | **Một phần** | cung cấp bản ghi kết quả; phần phân tích thuộc về tổ chức |
 | Kiểm soát thay đổi theo phiên bản mô hình | **Một phần** | một thay đổi phiên bản hiện ra trong nhật ký ngay khi quyết định đầu tiên dưới phiên bản đó được ghi |
 

@@ -33,7 +33,7 @@ def minimal() -> DecisionRecord:
     return DecisionRecord(
         decision_id="d-1",
         decision_type="transaction_approval",
-        system_id="aml-agent",
+        system_id="risk-agent",
         model=ModelRef(name="risk-llm", version="2026.08"),
         input_commitment=HEX64,
         outcome="approve",
@@ -52,13 +52,13 @@ class TestPayloadShape:
     def test_every_field_round_trips_when_populated(self) -> None:
         record = DecisionRecord(
             decision_id="d-2",
-            decision_type="aml_screening",
-            system_id="aml-agent",
+            decision_type="risk_scanning",
+            system_id="risk-agent",
             model=ModelRef(name="risk-llm", version="2026.08", digest="b" * 64),
             input_commitment=HEX64,
             outcome="escalate",
             rationale="sanctions list near-match",
-            policy_version="aml-policy-7",
+            policy_version="risk-policy-7",
             confidence=0.91,
             human_oversight=HumanOversight(
                 mode="reviewed", reviewer_ref="analyst-42", action="confirmed"

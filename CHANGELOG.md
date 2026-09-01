@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A terminal animation for the AI-decision section of the READMEs**
+  (`docs/assets/risk-poc{,.vi,.zh}.gif`, built by
+  `tools/gen_poc_terminal_animation.py`): the risk PoC run end to end, then
+  `waxseal verify` against the trail and against a copy of it with one approval flipped —
+  `ok` / exit 0 beside `BROKEN at seq=2: payload_hash_mismatch` / exit 1. Nothing on the
+  terminal is authored. The generator runs `simulate.py`, calls the example's own
+  `stages_for()` for the pipeline boxes and their hashes, and calls `waxseal.cli.main`
+  for both verify runs, so a frame cannot drift from the code — there is no copy of the
+  output for it to drift from. Same stdlib-SVG -> `qlmanage` -> `ffmpeg` pipeline as the
+  workflow animation, and no new dependency. The terminal body stays English in all three
+  languages for the reason commands and identifiers already do: it is what the reader's
+  own machine prints. Only the caption under the window is translated.
+
+### Changed
+
+- **`examples/banking-poc/` is now `examples/risk-poc/`, and the demo's `aml_screening`
+  decision type is now `risk_scanning`** (owner decision, 02/09/2026). The scenario is
+  unchanged: the same six synthetic payment instructions, the same eight tamper cases,
+  the same asserted exit codes. Only the naming moved off a named regulatory regime and
+  onto the generic risk-scanning framing the demo actually implements. Renamed with it:
+  `tests/test_examples_banking_poc.py` -> `tests/test_examples_risk_poc.py`, the
+  `risk-scanning-agent` / `risk-scanning-llm` / `risk-policy-2026.07` identifiers, and
+  the `risk_scanning` fixtures the library's own decision, report and CLI tests use.
+  No golden vector carried either string, so nothing frozen moved. The 0.1.3 entry below
+  is left exactly as written: it records what shipped under the old name, and rewriting
+  release history to match a later rename is not a fix.
+
+- **`docs/architecture/banking-deployment{,.vi}.md` is now
+  `docs/architecture/deployment{,.vi}.md`** (owner rename, 02/09/2026), same reasoning
+  one directory over: the document describes four trust domains, separation of duties,
+  retention and DR, none of which is specific to banking. Every link into it was
+  repointed — the READMEs, the two language cross-links inside the pair, and the four
+  deep links from `docs/compliance/mapping{,.vi}.md`, whose section anchors are
+  unchanged. `TestDocumentationLinks` is what caught the stragglers.
+
 ## [0.1.5] - 2026-09-01
 
 ### Added

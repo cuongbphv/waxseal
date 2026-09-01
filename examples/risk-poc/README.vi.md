@@ -1,9 +1,9 @@
-# PoC ngân hàng — nhật ký quyết định AI có thể kiểm chứng
+# PoC quét rủi ro — nhật ký quyết định AI có thể kiểm chứng
 
 *[English](README.md)*
 
 Bản trình diễn end-to-end chạy được, dùng waxseal làm **lớp bằng chứng bên dưới một AI
-agent ra quyết định tài chính**. Một agent sàng lọc AML quyết định trên các lệnh thanh
+agent ra quyết định tài chính**. Một agent quét rủi ro quyết định trên các lệnh thanh
 toán; mọi quyết định được ghi vào chuỗi chống sửa đổi, và về sau kiểm toán viên có thể
 kiểm tra một quyết định đơn lẻ mà không cần được trao toàn bộ nhật ký.
 
@@ -20,16 +20,16 @@ waxseal, và không thêm dependency nào.
 ## Cách chạy
 
 ```bash
-python examples/banking-poc/simulate.py --out examples/poc-out     # có animation minh hoạ luồng dữ liệu
-python examples/banking-poc/simulate.py --out examples/poc-out --no-animation   # CI / khi pipe output
-python examples/banking-poc/tamper_demo.py --out examples/poc-out  # tám kịch bản bên dưới
+python examples/risk-poc/simulate.py --out examples/poc-out     # có animation minh hoạ luồng dữ liệu
+python examples/risk-poc/simulate.py --out examples/poc-out --no-animation   # CI / khi pipe output
+python examples/risk-poc/tamper_demo.py --out examples/poc-out  # tám kịch bản bên dưới
 ```
 
 `--out` được tạo lại ở mỗi lần chạy. Animation tự tắt khi stdout không phải terminal, và
 tự lùi về ký tự ASCII trên console không encode được ký tự khung (`NO_COLOR=1` hoặc
 `WAXSEAL_DEMO_PLAIN=1` cũng buộc chế độ văn bản thuần).
 
-Cả hai script đều được phủ bởi `tests/test_examples_banking_poc.py`, test này kiểm chứng
+Cả hai script đều được phủ bởi `tests/test_examples_risk_poc.py`, test này kiểm chứng
 đúng những khẳng định trang này đưa ra. Một ví dụ đã lệch khỏi thư viện mà không ai biết
 thì còn tệ hơn không có ví dụ — nó dạy sai một cách rất tự tin — nên nó được test như code.
 

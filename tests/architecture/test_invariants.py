@@ -314,7 +314,10 @@ class TestDocumentationLinks:
       without it `--no-index` would be an unproven edit.
     - the widened trees: `[x](gone.md)` appended to
       `integrations/openclaw/README.md` fails naming that file, and again from
-      `server/README.md` and `examples/banking-poc/README.md`.
+      `server/README.md` and `examples/risk-poc/README.md` (that receipt was run
+      on 01/09/2026, when the directory was still `examples/banking-poc/`; the
+      path is updated here so it names a file that exists, not to claim the run
+      happened under the new name).
     - `CHANGELOG.md`: rewriting its `docs/research/landscape.md` link to
       `docs/research/landscape-moved.md` fails naming `CHANGELOG.md`.
     """

@@ -56,7 +56,7 @@ creditworthiness of natural persons or establish their credit score, **with the 
 of AI systems used for the purpose of detecting financial fraud**".
 
 That exception matters and is easy to over-read in the deploying institution's favour or
-against it. The AML/fraud-screening use case in the [PoC](../../examples/banking-poc/README.md)
+against it. The risk/fraud-screening use case in the [PoC](../../examples/risk-poc/README.md)
 sits in the excepted category on a plain reading, and credit scoring does not. Determining
 which category a given system falls into is a legal question, not a technical one — the
 tables below apply where the Act applies.
@@ -110,7 +110,7 @@ tables below apply where the Act applies.
 Same coverage as Art. 19. The operationally useful point is "**to the extent such logs are
 under their control**": a deployer running the agent tier controls the decision log even
 when the model is a third party's, so this is precisely the layer a deployer can own. The
-[reference architecture](../architecture/banking-deployment.md#6-retention-dr-and-capacity)
+[reference architecture](../architecture/deployment.md#6-retention-dr-and-capacity)
 covers chain rotation as the retention mechanism.
 
 ### Tension: append-only vs. erasure
@@ -180,7 +180,7 @@ Against SR 11-7's themes:
 |---|---|---|
 | Model inventory | **Partial** | `system_id` + model name/version/digest per decision yields a *usage-derived* inventory — what actually ran, as opposed to what the register says should have run. Reconciling the two is a genuinely useful control |
 | Documentation sufficient for an independent party to understand what was done | **Partial** | per-decision provenance, not model development documentation |
-| Effective challenge / independent validation | **Partial** | validation needs an unimpeachable record of what production actually decided; a log the model owner can revise cannot support challenge. Separation of duties in the [architecture](../architecture/banking-deployment.md#3-separation-of-duties) is the part that makes this real |
+| Effective challenge / independent validation | **Partial** | validation needs an unimpeachable record of what production actually decided; a log the model owner can revise cannot support challenge. Separation of duties in the [architecture](../architecture/deployment.md#3-separation-of-duties) is the part that makes this real |
 | Ongoing monitoring and outcomes analysis | **Partial** | supplies the outcome record; the analysis is the institution's |
 | Change control over model versions | **Partial** | a version change is visible in the log the moment the first decision under it is written |
 

@@ -1,4 +1,4 @@
-"""Banking PoC: an AI screening agent writing a verifiable decision log.
+"""Risk PoC: an AI risk-scanning agent writing a verifiable decision log.
 
 Simulates the shape of a real deployment — a model decides on payment
 instructions, and every decision lands on a tamper-evident chain with its
@@ -10,8 +10,8 @@ no real model: the "agent" is a deterministic rule set, so the demo produces
 the same decisions on every run and the trail can be reasoned about. That is
 the point — what is being demonstrated is the evidence layer, not the model.
 
-    python examples/banking-poc/simulate.py --out /tmp/poc
-    python examples/banking-poc/simulate.py --no-animation   # CI / piped output
+    python examples/risk-poc/simulate.py --out /tmp/poc
+    python examples/risk-poc/simulate.py --no-animation   # CI / piped output
 
 Everything it writes goes under --out (default: a temp directory it prints).
 """
@@ -40,13 +40,13 @@ from waxseal.domain.report import CheckSummary, build_report  # noqa: E402
 from waxseal.domain.sealing import generate_key  # noqa: E402
 from waxseal.sources.decisions import commit_input, record_decision  # noqa: E402
 
-SYSTEM_ID = "aml-screening-agent"
-MODEL = ModelRef(name="aml-screening-llm", version="2026.08.1", digest="c" * 64)
-POLICY_VERSION = "aml-policy-2026.07"
+SYSTEM_ID = "risk-scanning-agent"
+MODEL = ModelRef(name="risk-scanning-llm", version="2026.08.1", digest="c" * 64)
+POLICY_VERSION = "risk-policy-2026.07"
 ANCHOR_EVERY = 4
 
-# A large-value reporting threshold, in the same spirit as the ones AML
-# regimes set. The number is invented for the demo.
+# A large-value reporting threshold, in the same spirit as the ones a
+# reporting regime sets. The number is invented for the demo.
 LARGE_VALUE = 500_000_000
 WATCHLISTED = {"CP-SANCTION-01"}
 
@@ -95,7 +95,7 @@ def screen(txn: Txn) -> Verdict:
             outcome="deny",
             rationale="counterparty matches an internal watchlist entry",
             confidence=0.97,
-            decision_type="aml_screening",
+            decision_type="risk_scanning",
             oversight=HumanOversight(
                 mode="reviewed", reviewer_ref="analyst-queue-2", action="confirmed"
             ),
@@ -105,7 +105,7 @@ def screen(txn: Txn) -> Verdict:
             outcome="escalate",
             rationale="above the large-value reporting threshold",
             confidence=0.88,
-            decision_type="aml_screening",
+            decision_type="risk_scanning",
             oversight=HumanOversight(
                 mode="reviewed", reviewer_ref="analyst-queue-1", action="released"
             ),
@@ -115,7 +115,7 @@ def screen(txn: Txn) -> Verdict:
             outcome="escalate",
             rationale="high value to a counterparty first seen in the last 30 days",
             confidence=0.74,
-            decision_type="aml_screening",
+            decision_type="risk_scanning",
             # Deliberately left unrecorded on one path. The report must show
             # this as "oversight not recorded" and NOT as "automated" — the
             # two are different claims (CLAUDE.md rule 5).

@@ -1,6 +1,6 @@
 # Reference architecture — verifiable AI decision logs in a regulated institution
 
-*[Tiếng Việt](banking-deployment.vi.md)*
+*[Tiếng Việt](deployment.vi.md)*
 
 How to deploy waxseal as the evidence layer under AI systems that make or assist
 financial decisions. This document describes a topology, a trust model, and the
@@ -63,7 +63,7 @@ under someone else's control.
 | Verifier | A₀, the verification job, the reports | write access to the trail |
 
 If the chain server also owns the anchor destination, scenario 5 of the
-[PoC walkthrough](../../examples/banking-poc/README.md) stops being detectable: an
+[PoC walkthrough](../../examples/risk-poc/README.md) stops being detectable: an
 attacker who can rewrite the trail can rewrite the roots that would have contradicted it.
 
 ---

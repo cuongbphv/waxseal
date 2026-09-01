@@ -2,6 +2,8 @@
 
 **English** | [Tiếng Việt](README.vi.md) | [中文](README.zh.md)
 
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/waxseal?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/waxseal)
+
 **Tamper-evident, schema-evolution-safe audit hash chain for AI agent frameworks.**
 Zero dependencies. MIT. Python ≥ 3.11.
 
@@ -315,6 +317,10 @@ current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None (neve
 
 ## AI decision logs
 
+![waxseal risk PoC](https://raw.githubusercontent.com/cuongbphv/waxseal/main/docs/assets/risk-poc.gif)
+
+*Every line in that terminal is real output: [examples/risk-poc/](examples/risk-poc/README.md) run end to end, then `waxseal verify` against the trail and against a copy of it with one approval flipped. Regenerate with `python tools/gen_poc_terminal_animation.py --render`.*
+
 `DecisionRecord` is a decision-shaped payload for AI systems that decide or assist:
 which system, which model version, what it decided and why, and whether a human was
 involved. The input is committed by hash after redaction rather than stored.
@@ -366,10 +372,10 @@ A proof bundle is one entry plus its Merkle path, so answering a question about 
 subject does not disclose every other decision in the trail. The report prints a check
 that was **not run** as *not checked*, never as a pass.
 
-- [examples/banking-poc/](examples/banking-poc/README.md) is a runnable end-to-end demo
+- [examples/risk-poc/](examples/risk-poc/README.md) is a runnable end-to-end demo
   with an animated data-flow walkthrough and eight tamper scenarios, each asserting its
   own exit code.
-- [docs/architecture/banking-deployment.md](docs/architecture/banking-deployment.md) is a
+- [docs/architecture/deployment.md](docs/architecture/deployment.md) is a
   reference deployment covering four trust domains, separation of duties, retention and
   disaster recovery.
 - [docs/compliance/mapping.md](docs/compliance/mapping.md) sets out what this evidences
@@ -640,6 +646,17 @@ witness key, and a credential-free public read point with no write route at
 all. Operators, roles, and API keys live in PostgreSQL — trails themselves
 stay plain JSONL files a third party can verify with the stock `waxseal
 verify`, never something only this server can read.
+
+![waxseal server portal — dashboard](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/01-dashboard.png)
+
+| | |
+|---|---|
+| ![verify output, verbatim from the CLI](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/03-trail-output.png) | ![on-chain ledger status](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/12-ledger.png) |
+| **Trail** — every verdict carries the `argv` that produced it, so an operator can reproduce it. | **Ledger** — liveness, registry and bond readings; `unreachable` is its own value, never "0 findings". |
+| ![anchoring cadence](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/11-cadence.png) | ![consistency proof](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/08-consistency.png) |
+| **Cadence** — cost-optimal anchoring interval from the operator's own measurements. Opens no trail. | **Consistency** — RFC 9162 proof that a later head extends an earlier one, without replaying the log. |
+
+<sub>Read-only portal. Every verdict on these screens is the exit code of a `python -m waxseal.cli` run, printed verbatim. Full sets, desktop and phone, in [`server/docs/screenshots/en/`](server/docs/screenshots/en/) and [`server/docs/screenshots/vi/`](server/docs/screenshots/vi/); regenerate with `server/scripts/screenshots.sh`.</sub>
 
 ```bash
 docker compose -f server/docker-compose.yml up --build   # http://127.0.0.1:8000
