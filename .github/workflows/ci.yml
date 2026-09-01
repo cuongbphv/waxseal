@@ -19,6 +19,17 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: ${{ matrix.python-version }}
+      # tests/domain/test_abi.py cross-checks the frozen ABI selectors against
+      # `cast sig`/`cast calldata` (Python's stdlib has no keccak256, so the
+      # selectors are frozen constants — see domain/abi.py's docstring). Without
+      # `cast` on PATH those tests self-label UNMEASURED and skip rather than
+      # fail, which is correct behaviour but leaves the cross-check unrun here.
+      # Installed on both matrix OSes for the same reason the job runs on both:
+      # a claimed check nobody performs is the one thing this project must
+      # never ship.
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: "1.8.1"
       # CLAUDE.md: all green + coverage floor (100%) before any "done" claim.
       # Both operating systems, because filelock.py's two lock branches each
       # carry a `# pragma: no cover` naming the CI that runs the other one. A
