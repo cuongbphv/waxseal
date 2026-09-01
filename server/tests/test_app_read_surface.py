@@ -9,12 +9,14 @@ convention only holds until someone adds one more handler.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from conftest import PAYLOAD_TYPE
+from conftest import NO_ABSENT_COMMAND, PAYLOAD_TYPE, planned_but_absent, withhold
 from fastapi.testclient import TestClient
+from waxseal_server.api.chains import CHAIN_READS
 from waxseal_server.api.deps import Services
 from waxseal_server.app import Settings, create_app
 from waxseal_server.runtime.cli import READ_ONLY_COMMANDS
@@ -46,17 +48,29 @@ def _lacking(client: TestClient, monkeypatch: pytest.MonkeyPatch, command: str) 
     """Make this server's waxseal build lack `command`, whatever it really ships.
 
     Naming a planned command as the stand-in for "absent" is what expired four
-    tests the day Workstream B shipped `segments` (waxseal-fg4.16). The property
-    under test is not about any one command: it is that a capability this build
-    cannot run is REPORTED, not omitted, and that its screen says so instead of
-    borrowing argparse's exit 2 as a verdict. Controlling the condition rather
-    than picking a name states that property in a form the release calendar
-    cannot invalidate.
+    tests the day Workstream B shipped `segments` (waxseal-fg4.16) and five more
+    when Workstream E shipped `preflight` the next batch (waxseal-fg4.36). The
+    property under test is not about any one command: it is that a capability
+    this build cannot run is REPORTED, not omitted, and that its screen says so
+    instead of borrowing argparse's exit 2 as a verdict. Controlling the
+    condition rather than picking a name states that property in a form the
+    release calendar cannot invalidate. Shared with the runner and import suites
+    (`conftest.withhold`) so all three state it the same way.
     """
-    cli = _services(client).cli
-    shipped = cli.available()
-    assert command in shipped, f"{command!r} must really ship, or this proves nothing"
-    monkeypatch.setattr(cli, "available", lambda: shipped - {command})
+    withhold(monkeypatch, _services(client).cli, command)
+
+
+def _absent_read_or_skip(client: TestClient, offered: Iterable[str]) -> str:
+    """One read this server offers that the wheel behind it really lacks.
+
+    Derived, never named: this is the shape the portal renders for an operator
+    whose wheel is older than their server, and the two agents before this one
+    both hardcoded the name of a command that shipped days later.
+    """
+    absent = sorted(planned_but_absent(_services(client).cli, offered))
+    if not absent:
+        pytest.skip(NO_ABSENT_COMMAND)
+    return absent[0]
 
 
 def _rotate(trail: Path, times: int = 2) -> None:
@@ -82,16 +96,19 @@ class TestCapabilities:
         self, client: TestClient
     ) -> None:
         # Omitting it would leave the UI unable to distinguish "this build lacks
-        # preflight" from "the server forgot to answer". Present-and-false is the
-        # measured answer; a missing key is not.
+        # that command" from "the server forgot to answer". Present-and-false is
+        # the measured answer; a missing key is not. This is the surface the
+        # portal's FeatureGate reads, so it is the one case kept in the REAL
+        # shape rather than the withheld one.
         #
-        # `preflight` (Workstream E), not `segments`: B shipped `segments` in
-        # 0.1.5 and this assertion inverted overnight. The REAL name is kept on
-        # purpose — it is the one the portal renders a workstream notice for —
-        # and the build-independent statement of the same property is below, so
-        # the day E ships this case can be re-pointed without losing coverage.
+        # The name is DERIVED from the build, not written down. Written down it
+        # was `segments` until Workstream B shipped it, then `preflight` until
+        # Workstream E shipped it one batch later — twice red, for a fact about
+        # the release calendar rather than about this server (waxseal-fg4.36).
+        command = _absent_read_or_skip(client, READ_ONLY_COMMANDS)
         commands = client.get("/v1/capabilities").json()["commands"]
-        assert commands["preflight"] is False
+        assert command in commands, "an absent capability must be reported, not omitted"
+        assert commands[command] is False
 
     def test_a_command_this_build_lacks_is_present_and_false_whatever_it_is(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -110,14 +127,18 @@ class TestCapabilities:
         assert set(commands) == set(READ_ONLY_COMMANDS)
         assert all(isinstance(value, bool) for value in commands.values())
 
+    @pytest.mark.parametrize("command", ["segments", "preflight"])
     def test_a_planned_command_that_has_shipped_is_reported_available(
-        self, client: TestClient
+        self, client: TestClient, command: str
     ) -> None:
-        # The other half of the gate, untested until B landed: `available()` is
-        # parsed from `--help`, so the flag has to turn true on its own. A stale
-        # false would hand an operator the "not yet" notice for a command their
-        # build can run.
-        assert client.get("/v1/capabilities").json()["commands"]["segments"] is True
+        # The other half of the gate: `available()` is parsed from `--help`, so
+        # the flag has to turn true on its own. A stale false would hand an
+        # operator the "not yet" notice for a command their build can run —
+        # which is a false negative about their own deployment, not a cosmetic
+        # one. `segments` was covered when B shipped it (waxseal-fg4.16);
+        # `preflight` is here because E shipped it in the very next batch and
+        # nothing asserted its available side.
+        assert client.get("/v1/capabilities").json()["commands"][command] is True
 
 
 class TestVerifyEndpoint:
@@ -217,15 +238,19 @@ class TestExportProofEndpoint:
 
 
 class TestPlannedCommandsDegradeHonestly:
-    @pytest.mark.parametrize("command", ["preflight"])
     def test_a_planned_screen_says_unavailable_rather_than_faking_a_verdict(
-        self, stocked: TestClient, command: str
+        self, stocked: TestClient
     ) -> None:
-        # Workstream E ships `preflight`. Until then the screen must say the
-        # capability is missing — never draw a verdict from argparse's exit 2.
-        # `segments` was the other parameter here until B shipped it; the list is
-        # the set of names the portal still renders a notice for, and the
-        # build-independent case below is what keeps shrinking it safe.
+        # A screen for a read this wheel does not have must say the capability
+        # is missing — never draw a verdict from argparse's exit 2.
+        #
+        # The command is DERIVED from CHAIN_READS minus what the build ships,
+        # because a parametrize list of real planned names went red twice: once
+        # when B shipped `segments`, once when E shipped `preflight`. The
+        # withheld-command case below states the same property with no
+        # dependence on the build at all, and runs whether or not this one has a
+        # live instance to point at.
+        command = _absent_read_or_skip(stocked, CHAIN_READS)
         body = stocked.get(f"/v1/chains/default/{command}").json()
         assert body["status"] == "unavailable"
         assert body["verdict"] is None
@@ -280,6 +305,36 @@ class TestSegmentsIsShippedNow:
         assert body["status"] == "absent"
         assert body["verdict"] is None
         assert "no sealed segments" in body["stderr"]
+
+
+class TestPreflightIsShippedNow:
+    """`preflight` landed in 0.1.5 Workstream E, and this read had never run.
+
+    Its available side is what the five expired fixtures were standing in front
+    of: while the command was planned, every assertion about this route was
+    about the placeholder, so nothing checked what an operator now actually
+    sees. Unlike `segments` it reads the trail FILE — its subject is that
+    trail's sidecars — so it is deliberately not in `DIRECTORY_READS`.
+    """
+
+    def test_the_read_is_handed_the_trail_file(
+        self, stocked: TestClient, tmp_path: Path
+    ) -> None:
+        body = stocked.get("/v1/chains/default/preflight").json()
+        assert body["argv"][-1] == str(_trail(tmp_path))
+
+    def test_a_live_chain_gets_the_command_reading(self, stocked: TestClient) -> None:
+        # exit 0 from `preflight` means A READING WAS PRINTED, not that anything
+        # was verified: the command opens no network connection and checks no
+        # hash. The assertions stay on what was observed — status, exit code and
+        # the ladder text — and deliberately do not bless the `verdict` the
+        # shared classifier derives from exit 0 for a command that computes
+        # none; that question is filed separately, not settled here.
+        body = stocked.get("/v1/chains/default/preflight").json()
+        assert body["status"] == "ok"
+        assert body["exit_code"] == 0
+        assert "observed configuration" in body["stdout"]
+        assert "NOT MEASURED" in body["stdout"]
 
 
 class TestPublicReceiptRecords:

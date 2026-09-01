@@ -13,7 +13,8 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import PAYLOAD_TYPE
+from conftest import NO_ABSENT_COMMAND, PAYLOAD_TYPE, planned_but_absent, withhold
+from waxseal_server.runtime import cli as cli_module
 from waxseal_server.runtime.cli import READ_ONLY_COMMANDS, WaxsealCli, _classify
 
 from waxseal import AuditLog, Verdict
@@ -50,31 +51,62 @@ class TestAvailability:
         # is the condition — a name absent from `available()` — and a server
         # pointed at an older or newer waxseal is exactly how that arises in
         # production.
-        shipped = cli.available()
-        assert "verify" in shipped
-        monkeypatch.setattr(cli, "available", lambda: shipped - {"verify"})
+        withhold(monkeypatch, cli, "verify")
         outcome = cli.run("verify", str(trail))
         assert outcome.status == "unavailable"
         assert outcome.verdict is None
         assert outcome.exit_code is None
 
-    def test_a_real_planned_command_is_absent_from_this_build(self, cli: WaxsealCli) -> None:
-        # The name the portal renders a workstream notice for. When Workstream E
-        # ships `preflight` this assertion inverts, and the fix is to re-point it
-        # at the next planned command — never to drop the case.
-        assert "preflight" not in cli.available()
-
-    def test_a_planned_command_that_has_shipped_is_reported_available(
-        self, cli: WaxsealCli
-    ) -> None:
-        # `segments` shipped in 0.1.5 Workstream B. `available()` parses `--help`
-        # precisely so the flag flips with the build and not with a frozen list.
-        assert "segments" in cli.available()
-
-    def test_an_unavailable_command_is_never_executed(
+    def test_every_read_this_build_really_lacks_is_reported_unavailable(
         self, cli: WaxsealCli, trail: Path
     ) -> None:
-        assert cli.run("preflight", str(trail)).stdout == ""
+        # The real, unmonkeypatched gate: whatever this server offers that the
+        # wheel behind it does not have, parsed from `--help` and refused before
+        # argv is built. The SET is derived, so nothing here inverts when a
+        # planned command ships — that is precisely what happened to this test
+        # twice, as `assert "segments" not in available()` and then as
+        # `assert "preflight" not in available()` (waxseal-fg4.16, -fg4.36).
+        #
+        # When the set is empty the case is SKIPPED with a label rather than
+        # passing vacuously: a green tick standing for zero invocations is the
+        # unmeasured-reported-as-measured collapse this library exists to make
+        # unrepresentable. The withheld form above covers the property meanwhile.
+        absent = planned_but_absent(cli)
+        if not absent:
+            pytest.skip(NO_ABSENT_COMMAND)
+        for command in sorted(absent):
+            outcome = cli.run(command, str(trail))
+            assert outcome.status == "unavailable"
+            assert outcome.verdict is None
+            assert outcome.exit_code is None
+
+    @pytest.mark.parametrize("command", ["segments", "preflight"])
+    def test_a_planned_command_that_has_shipped_is_reported_available(
+        self, cli: WaxsealCli, command: str
+    ) -> None:
+        # `segments` shipped in 0.1.5 Workstream B and `preflight` in Workstream
+        # E one batch later. `available()` parses `--help` precisely so the flag
+        # flips with the build and not with a frozen list; this is the assertion
+        # that the flip really happens, for both.
+        assert command in cli.available()
+
+    def test_an_unavailable_command_is_never_executed(
+        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # "Never executed" asserted literally, not inferred from empty stdout:
+        # the subprocess call is replaced by one that fails the test if it is
+        # reached. Running the command anyway would hand argparse's exit 2 up as
+        # the verifier's exit 2 — "unverifiable", a verdict nobody computed.
+        withhold(monkeypatch, cli, "verify")
+        monkeypatch.setattr(
+            cli_module.subprocess,
+            "run",
+            lambda *a, **k: pytest.fail("an unavailable command reached the CLI"),
+        )
+        outcome = cli.run("verify", str(trail))
+        assert outcome.stdout == ""
+        assert outcome.exit_code is None
+        assert "no 'verify' subcommand" in outcome.stderr
 
     def test_a_command_outside_the_read_only_set_is_refused(self, cli: WaxsealCli) -> None:
         # `install` and `anchor` write. They must not be reachable from an HTTP

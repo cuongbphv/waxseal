@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import PAYLOAD_TYPE
+from conftest import PAYLOAD_TYPE, cli_of, withhold
 from fastapi.testclient import TestClient
 from waxseal_server.app import Settings, create_app
 from waxseal_server.domain.errors import UnsupportedTrailFormat
@@ -198,19 +198,37 @@ class TestImportEndpoints:
         assert [e["header"]["seq"] for e in body["entries"]] == [0, 1, 2, 3]
 
     def test_a_planned_read_on_an_import_degrades_honestly(
-        self, client: TestClient, tmp_path: Path
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Was `test_segments_on_an_import_degrades_honestly` until Workstream B
-        # shipped `segments` (waxseal-fg4.16). KEPT, re-pointed at `preflight`
-        # (Workstream E): the property belongs to the import surface, not to one
-        # command — a read this build cannot run says so, and never borrows
-        # argparse's exit 2 as a verdict. The shipped half of the same surface is
-        # the case below, so both directions are now covered here.
+        # Was `test_segments_on_an_import_degrades_honestly` until B shipped
+        # `segments` (waxseal-fg4.16), then `..._preflight_...` in all but name
+        # until E shipped `preflight` one batch later (waxseal-fg4.36). KEPT,
+        # and re-pointed at the CONDITION this time: the property belongs to the
+        # import surface, not to any one command — a read this build cannot run
+        # says so, and never borrows argparse's exit 2 as a verdict. Withholding
+        # a command the build really ships is the same state an older wheel
+        # behind this server produces, and no release can invalidate it.
         import_id = self._upload(client, tmp_path).json()["import_id"]
-        body = client.get(f"/v1/imports/{import_id}/preflight").json()
+        withhold(monkeypatch, cli_of(client), "verify")
+        body = client.get(f"/v1/imports/{import_id}/verify").json()
         assert body["status"] == "unavailable"
         assert body["verdict"] is None
         assert body["exit_code"] is None
+        assert body["stdout"] == ""
+
+    def test_preflight_on_an_import_gets_the_command_reading(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        # The available side of the same surface, never asserted while the
+        # command was planned. `preflight` shipped in 0.1.5 Workstream E and
+        # reads the trail FILE and its sidecars, so on the import surface that
+        # is the uploaded file itself. exit 0 means a reading was printed — it
+        # is not a verdict about the import, and nothing here claims one.
+        import_id = self._upload(client, tmp_path).json()["import_id"]
+        body = client.get(f"/v1/imports/{import_id}/preflight").json()
+        assert body["status"] == "ok"
+        assert body["exit_code"] == 0
+        assert "observed configuration" in body["stdout"]
 
     def test_segments_on_an_imported_sealed_segment_gets_a_real_verdict(
         self, client: TestClient, tmp_path: Path
