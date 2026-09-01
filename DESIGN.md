@@ -292,8 +292,9 @@ memory copies are best-effort, stated plainly.
 
 Every hook/callback integration under `integrations/` (Claude Code, Codex CLI, Cursor,
 LangChain, CrewAI, OpenAI Agents SDK, hermes-agent) implements the same observer
-contract — the OpenClaw integration is an audit-ledger exporter with no hook, so
-nothing below applies to it —
+contract — the OpenClaw integration is an audit-ledger exporter with no hook, and the
+Microsoft AGT integration attaches as an `AuditSink` Protocol to a governance layer
+that owns its own logging call, so nothing below applies to either —
 derived from how each host actually treats hook failures — verified per host and
 pinned to a version in each integration's README:
 

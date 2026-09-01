@@ -579,9 +579,10 @@ claim from a measured `0`.
 
 ## Integrations
 
-Audit hooks for seven agent frameworks and coding tools, plus one exporter for a
-host that already keeps its own ledger (OpenClaw). Each one is
-verified against the target's current hook contract (version noted in its README),
+Audit hooks for seven agent frameworks and coding tools, one exporter for a
+host that already keeps its own ledger (OpenClaw), and one audit-sink Protocol
+implementation for a governance layer that owns its own logging (Microsoft
+AGT). Each one is verified against the target's current hook contract (version noted in its README),
 records dispatch *before* execution, redacts secrets before hashing, clips huge
 outputs visibly, and **can never block or veto the host's work**, since every failure
 degrades to a labelled, counted dropped write.
@@ -596,9 +597,9 @@ waxseal install hermes        # or claude-code / codex / cursor / hermes-gateway
 `install` writes thin shims into the host's config directory (importing
 `waxseal.integrations.*`, so `pip install -U waxseal` upgrades hook behavior in
 place) and prints any settings snippet the host still needs. The LangChain,
-CrewAI, and OpenAI Agents integrations need no install step at all; import them
-directly, for example `from waxseal.integrations.langchain import
-WaxsealCallbackHandler`.
+CrewAI, OpenAI Agents, and Microsoft AGT integrations need no install step at
+all; import them directly, for example `from waxseal.integrations.langchain
+import WaxsealCallbackHandler`.
 
 | Target | Mechanism | Directory |
 |---|---|---|
@@ -610,6 +611,7 @@ WaxsealCallbackHandler`.
 | OpenAI Agents SDK | `RunHooks` | [integrations/openai-agents/](integrations/openai-agents/) |
 | hermes-agent | plugin + gateway hook | [integrations/hermes/](integrations/hermes/) |
 | OpenClaw | audit-ledger exporter (`openclaw audit --json`, no hook) | [integrations/openclaw/](integrations/openclaw/) |
+| Microsoft AGT | `AuditSink` Protocol (attach to AGT's own `AuditLog`) | [`waxseal.integrations.agt`](src/waxseal/integrations/agt.py) |
 
 Scope note for the coding tools: these hooks give you a parallel,
 tamper-evident, **secret-free** record of every action. They do not (and cannot)
