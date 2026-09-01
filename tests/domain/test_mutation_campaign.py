@@ -22,7 +22,7 @@ argument (threat-model.md section 1): entry_hash is a pure function of the
 header and prev_hash is the previous entry_hash, so an attacker who can
 rewrite the suffix can always re-link it into something verify_chain calls
 `ok` — that is why anchoring/witnessing/sealing exist as SEPARATE mechanisms
-(banking-poc scenarios 5 and 6, examples/banking-poc/README.md) and is not a
+(risk-poc scenarios 5 and 6, examples/risk-poc/README.md) and is not a
 gap in verify_chain to fix. This file asserts that limitation explicitly
 (never silently drops it) and keeps it out of the 100% floor asserted for
 in-scope classes.
@@ -261,7 +261,7 @@ def _tail_truncation_cases() -> list[MutationCase]:
     # deleting an interior one is: nothing downstream references the removed
     # row's header.seq, so no positional or hash mismatch exists for
     # verify_chain to find. This is the exact class docs/security/threat-
-    # model.md section 1 and banking-poc scenario 6 (examples/banking-poc/
+    # model.md section 1 and risk-poc scenario 6 (examples/risk-poc/
     # README.md) name as needing a SEPARATE mechanism (the forward-secure
     # seal, SPEC 11) — not a bug in verify_chain, and not something a chain-
     # only verifier can ever close, because a shorter-but-internally-
@@ -290,7 +290,7 @@ def _whole_trail_rewrite_cases() -> list[MutationCase]:
     # row and mechanically re-link every row after it. The re-chained suffix
     # is a genuinely self-consistent chain; verify_chain reporting `ok` here
     # is CORRECT, not a miss — closing this requires a copy the attacker
-    # cannot write (anchor/witness/pin, banking-poc scenario 5), which is a
+    # cannot write (anchor/witness/pin, risk-poc scenario 5), which is a
     # different mechanism entirely, not a verify_chain defect.
     cases = []
     for i in range(N):

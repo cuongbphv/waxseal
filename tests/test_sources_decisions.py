@@ -192,7 +192,7 @@ class TestIterDecisions:
 
     def test_filters_by_decision_type(self, tmp_path: Path) -> None:
         log = open_log(tmp_path / "trail.jsonl")
-        record_decision(log, a_record(decision_id="d-a", decision_type="aml_screening"))
+        record_decision(log, a_record(decision_id="d-a", decision_type="risk_scanning"))
         record_decision(log, a_record(decision_id="d-b", decision_type="payment"))
         found = list(iter_decisions(log, decision_type="payment"))
         assert [r.decision_id for _, r in found] == ["d-b"]  # type: ignore[union-attr]

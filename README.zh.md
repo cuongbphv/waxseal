@@ -2,6 +2,8 @@
 
 [English](README.md) | [Tiếng Việt](README.vi.md) | **中文**
 
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/waxseal?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/waxseal)
+
 > **关于本页的链接：** 这份中文 README 是一个入口页。它链接到的文档 —— `SPEC.md`、
 > `DESIGN.md`、`REMOTE.md`、`CHANGELOG.md`、`docs/` 下的各篇，以及 `integrations/`
 > 和 `examples/` 里的 README —— **目前只有英文版**。这是一个刻意的决定，不是遗漏：
@@ -184,8 +186,8 @@ pip install waxseal
 `S3Backend` 和 `PostgresBackend` 就是这个模式，extras 存在只是为了让 `pip` 替你取一个
 兼容的客户端，而不是因为 waxseal 需要它。
 
-今天已发布的是三个 extra：`pip install waxseal[s3]`、`pip install waxseal[postgres]`
-和 `pip install waxseal[rfc3161]`。
+今天已发布的是四个 extra：`pip install waxseal[s3]`、`pip install waxseal[postgres]`、
+`pip install waxseal[rfc3161]` 和 `pip install waxseal[evm]`。
 
 `rfc3161` 是 waxseal 唯一自己 import 的 extra，而且只在一个函数里
 （`adapters/rfc3161_verify.py`）—— 所以它没有任何东西需要你注入。它开启的是
@@ -195,19 +197,24 @@ extra 缺失）是 exit 2 并附上说明是哪一种的标签，绝不会是一
 参数则一切照旧：receipt 仍按结构校验，和以前完全一样。参见 [SPEC.md](SPEC.md) 第
 17.1 节。
 
-（`dev` 也存在，用于运行测试套件。它不是一个能力 extra。）
+`evm`（链上 ledger 层）已经发布，而它的"空"正是设计本身，不是一个没做完的功能：
+`ports/ledger.py`、`domain/bond.py`、`domain/liveness.py`、`domain/abi.py`、
+`domain/registry.py`、`adapters/evm.py` 读合约走的是 `RemoteBackend` 已经在用的
+那套纯标准库 JSON-RPC `Transport`（`eth_call`，没有客户端要装），写则通过运维方
+自己构造并注入的 `Signer` —— 所以根本没有东西需要 `pip` 拉进来。
+`pyproject.toml` 里 `evm = []` 为空，**不代表"尚未发布"**：这个 extra 存在只是为了
+让 `pip install waxseal[evm]` 是一条合法命令、让这项能力在 metadata 里有名字，
+它永远不会变成加密库进入内核的通道。这一层在 port 之后是链无关的 —— EVM 是第一个
+适配器，不是设计本身。CLI 界面：`waxseal ledger-status`、`waxseal registry publish`、
+`waxseal bond deposit`/`bond prove`，以及 `verify`/`report --rpc/--liveness/--registry`、
+`anchor --evm-liveness`（见下文[使用](#使用)一节的 CLI 清单）—— 已针对两条真实运行的
+anvil 链、跑真实 Foundry 合约做过端到端核验
+（`contracts/src/AnchoringLiveness.sol`、`BondedCheckpoints.sol`、
+`FingerprintRegistry.sol`；提交 `26b074c`/`c21e0e6`/`20f2762`/`26e3e91`）。
+[docs/paper/conformance.md](docs/paper/conformance.md) 逐行记着这一层，包括两个仍然
+开放、但不阻塞发布的缺口 —— 记在那里，而不是被抹平。
 
-`evm`（链上 ledger 层）已经发布：`ports/ledger.py`、`domain/bond.py`、
-`domain/liveness.py`、`domain/abi.py`、`domain/registry.py`、`adapters/evm.py`，
-以及 CLI 命令 `ledger-status`、`registry publish`、`bond deposit`/`bond prove`、
-`verify`/`report --rpc/--liveness/--registry`、`anchor --evm-*`。
-`pyproject.toml` 里 `evm = []` 为空，**不代表"尚未发布"**——它的意思是：读路径纯用
-`eth_call`（走 `adapters/remote.py` 已有的那套 stdlib Transport），写路径把交易
-字段交给运维方自己构造并注入的 `Signer`，所以没有任何客户端需要 `pip` 去装；这个
-extra 存在只是为了让 `pip install waxseal[evm]` 是一条合法命令、让这项能力在
-metadata 里有名字，而不是因为代码没写。
-[docs/paper/conformance.md](docs/paper/conformance.md) 逐行记着这一层哪些部分
-已发布、还剩下哪些已知缺口。
+（`dev` 也存在，用于运行测试套件。它不是一个能力 extra。）
 
 增加一个**硬**依赖是另一个问题，答案是不。extras 才是被许可的那条路。
 
@@ -253,9 +260,16 @@ waxseal head trail.jsonl       # 打印链头（seq + entry_hash），用于外�
 waxseal checkpoint trail.jsonl # 打印 {seq, entry_hash, root} —— root 是批量根，不只是链头
 waxseal anchor trail.jsonl     # 把一个 checkpoint 追加到本地 .anchors 边车文件
 waxseal verify --anchors trail.jsonl  # 额外用 .anchors 校验 trail 历史
+waxseal preflight trail.jsonl  # 当前配置挡住攻击者能力的哪一档；恒为退出码 0（3：路径不存在）
+waxseal segments trail-dir/    # 校验目录内每个已封存段与轮转绑定；只读
 
 # 除 `anchor` 外，以上命令都可以接受一个远程 chain server 的 URL：
 waxseal verify http://chain.example.com/v1/chains/default
+
+# 链上 ledger 层（waxseal[evm]；见上文「能力扩展」）：
+waxseal ledger-status trail.jsonl --liveness 0xADDR --rpc https://rpc1 --rpc https://rpc2
+waxseal registry publish --descriptor-of FINGERPRINT --registry 0xADDR --rpc https://rpc1 --rpc https://rpc2
+waxseal bond deposit --bond 0xADDR --amount-wei 1000000000000000000 --rpc https://rpc1 --rpc https://rpc2
 ```
 
 ## 存储后端
@@ -328,6 +342,10 @@ current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None（从
 
 ## AI 决策日志
 
+![waxseal risk PoC](https://raw.githubusercontent.com/cuongbphv/waxseal/main/docs/assets/risk-poc.zh.gif)
+
+*终端里的每一行都是真实输出：完整跑一遍 [examples/risk-poc/](examples/risk-poc/README.md)，再分别对轨迹本身、以及一份被改掉一次批准的副本执行 `waxseal verify`。重新生成：`python tools/gen_poc_terminal_animation.py --render`。*
+
 `DecisionRecord` 是面向"做决策或辅助决策"的 AI 系统的决策型 payload：哪个系统、
 哪个模型版本、决定了什么、依据是什么，以及是否有人参与。输入在脱敏之后以哈希
 形式承诺，而不是被存下来。
@@ -378,9 +396,9 @@ waxseal verify-proof proof.json             # 离线核验；不需要 trail
 不会泄露 trail 中其他所有决策。报告会把**没有执行**的检查打印为 *not checked*，
 绝不会打印成通过。
 
-- [examples/banking-poc/](examples/banking-poc/README.md) —— 可运行的端到端 demo，
+- [examples/risk-poc/](examples/risk-poc/README.md) —— 可运行的端到端 demo，
   带数据流动画演示和八个篡改场景，每个场景都会断言自己的退出码
-- [docs/architecture/banking-deployment.md](docs/architecture/banking-deployment.md) ——
+- [docs/architecture/deployment.md](docs/architecture/deployment.md) ——
   参考部署：四个信任域、职责分离、留存与容灾
 - [docs/compliance/mapping.md](docs/compliance/mapping.md) —— 对照 EU AI Act、
   NIST AI RMF、DORA RTS 等框架，这一层能证明什么，**并附诚实的差距分析**。
@@ -426,8 +444,10 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 
 - **RFC 3161** 让 `ts` 从"自己声称"变成"有外部作证"。waxseal 只对回执做*结构性*检查
   —— status、message imprint、nonce、digest 算法 —— 并且在它打印的每一行里都写明这一点。
-  它**不**验证 CMS/X.509 签名；那一步被委托给 `openssl ts -verify`，具体做法见文档。
+  它默认**不**验证 CMS/X.509 签名；那一步被委托给 `openssl ts -verify`，具体做法见文档。
   它读不懂的回执算*不可验证*（exit 2）；只有为不同字节作证的回执才算*断链*（exit 1）。
+  装上 `rfc3161` extra 并用 `--tsa-ca-file` 指名一份 CA bundle 之后，签名这一维也会被
+  校验 —— 而校验不成的 token 是 exit 2 并附标签，绝不会是一次沉默的放行。
 - **OpenTimestamps** 存的是一份*待定（pending）*的比特币证明，不透明是有意为之。
   日后用 `ots upgrade` / `ots verify` 把它补完。
 - 这两者**可以在同一次 `anchor` 运行中一起使用**，把同一个 checkpoint 同时发布到两边
@@ -606,6 +626,38 @@ waxseal install hermes        # 或 claude-code / codex / cursor / hermes-gatewa
 对编码工具类集成的范围说明：这些 hook 给你一份并行的、篡改可检测（tamper-evident）的、**不含密钥**的
 行动记录。它们不会（也无法）改写工具自身的 transcript 文件 —— 如果密钥已经落入
 transcript，请轮换密钥；waxseal 的 trail 才是你可以保留、分享与验证的那份记录。
+
+## 自建服务器
+
+`server/` 是一套可自建的 chain server、witness 与公开读取端点，附带一个只读的
+Vue 3 网页门户 —— 它是跑在自己 FastAPI + uvicorn 栈上的独立应用，不属于
+`waxseal` wheel（CLAUDE.md 的第 1 条约束的是库的依赖，不是这个目录；这里没有
+任何东西会被打包进 wheel）。它的写路径把 `waxseal` 当作库来用；每一条读取/校验
+路由都调用 `python -m waxseal.cli` 并如实报告退出码，所以 CLI 始终是唯一的裁决
+方，没有任何一条路由会修改、删除、重排或"修复"某条 entry。三份凭据彼此分离：
+chain 的 API key、witness 的 key，以及一个不需要凭据、也完全没有写入路由的公开
+读取端点。运维方、角色与 API key 存放在 PostgreSQL 里 —— 而 trail 本身仍是普通
+JSONL 文件，第三方用标准的 `waxseal verify` 就能校验，绝不是只有这台服务器读得懂
+的东西。
+
+![waxseal 服务器门户 —— Dashboard](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/01-dashboard.png)
+
+| | |
+|---|---|
+| ![verify 的输出，逐字来自 CLI](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/03-trail-output.png) | ![链上 ledger 状态](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/12-ledger.png) |
+| **Trail** —— 每个裁决都带着产生它的那条 `argv`，运维方可以自己复现。 | **Ledger** —— liveness、registry 与 bond 的读数；`unreachable` 是独立的一个值，绝不印成「0 条发现」。 |
+| ![锚定节奏](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/11-cadence.png) | ![consistency proof](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/08-consistency.png) |
+| **Cadence** —— 由运维方自己的测量算出的成本最优锚定间隔。不打开任何 trail。 | **Consistency** —— RFC 9162 证明：后来的链头是早先链头的延伸，无需重放整个日志。 |
+
+<sub>只读门户。这些画面上的每一个裁决，都是一次 `python -m waxseal.cli` 运行的退出码，逐字打印。完整截图集（桌面与手机）在 [`server/docs/screenshots/en/`](server/docs/screenshots/en/) 与 [`server/docs/screenshots/vi/`](server/docs/screenshots/vi/)；用 `server/scripts/screenshots.sh` 重新生成。门户只有英文与越南语两种界面语言。</sub>
+
+```bash
+docker compose -f server/docker-compose.yml up --build   # http://127.0.0.1:8000
+```
+
+[server/README.md](server/README.md) 讲目录结构；
+[server/docs/deployment.md](server/docs/deployment.md) 讲配置、数据布局、在反向
+代理处终结 TLS，以及自建这件事买到了什么、又买不到什么。
 
 ## 保证与不保证
 

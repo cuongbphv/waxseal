@@ -2,6 +2,8 @@
 
 [English](README.md) | **Tiếng Việt** | [中文](README.zh.md)
 
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/waxseal?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/waxseal)
+
 **Audit hash chain chống giả mạo, an toàn khi schema tiến hóa, dành cho các AI agent framework.**
 Zero dependency. MIT. Python ≥ 3.11.
 
@@ -147,8 +149,8 @@ bạn khởi tạo nó, bạn truyền nó vào, và bản thân waxseal không 
 đó, và extras tồn tại để `pip` lấy giúp bạn một client tương thích, chứ không phải vì
 waxseal cần một client nào.
 
-Đã ship hôm nay là ba extra: `pip install waxseal[s3]`, `pip install waxseal[postgres]`
-và `pip install waxseal[rfc3161]`.
+Đã ship hôm nay là bốn extra: `pip install waxseal[s3]`, `pip install waxseal[postgres]`,
+`pip install waxseal[rfc3161]` và `pip install waxseal[evm]`.
 
 `rfc3161` là extra DUY NHẤT mà waxseal tự import, bên trong đúng một hàm
 (`adapters/rfc3161_verify.py`) — vì thế nó không có gì để bạn inject. Nó bật chiều kiểm
@@ -158,20 +160,28 @@ gì không kiểm được — kể cả vì thiếu extra — là exit 2 kèm n
 bao giờ là một exit 0 im lặng. Không có cờ đó thì không gì đổi: receipt vẫn được kiểm về
 mặt cấu trúc, đúng như trước. Xem [SPEC.md](SPEC.md) mục 17.1.
 
-(`dev` cũng tồn tại, để chạy test suite. Nó không phải một extra năng lực.)
-
-`evm` — lớp ledger on-chain — đã ship: `ports/ledger.py`, `domain/bond.py`,
-`domain/liveness.py`, `domain/abi.py`, `domain/registry.py`, `adapters/evm.py`,
-cùng các lệnh CLI `ledger-status`, `registry publish`, `bond deposit`/`bond
-prove`, `verify`/`report --rpc/--liveness/--registry`, và `anchor --evm-*`.
-`evm = []` rỗng trong `pyproject.toml` KHÔNG có nghĩa "chưa ship" — nó có nghĩa
-đường đọc dùng `eth_call` thuần qua JSON-RPC (cùng Transport stdlib mà
-`adapters/remote.py` đã dùng), còn đường ghi truyền transaction cho một
-`Signer` do operator tự cài và inject, nên không có client nào để `pip` kéo về
-cả; extra tồn tại chỉ để `pip install waxseal[evm]` là một lệnh hợp lệ và để
-năng lực này có tên trong metadata, không phải vì thiếu code.
+`evm` — lớp ledger on-chain — đã ship, và cái rỗng của nó là thiết kế chứ không
+phải một tính năng làm dở: `ports/ledger.py`, `domain/bond.py`,
+`domain/liveness.py`, `domain/abi.py`, `domain/registry.py`, `adapters/evm.py`
+đọc contract qua đúng cái `Transport` JSON-RPC thuần stdlib mà `RemoteBackend`
+đã dùng (`eth_call`, không có client nào để kéo về) và ghi qua một `Signer` do
+operator tự dựng rồi inject — nên không có gì cho `pip` cài cả. `evm = []` rỗng
+trong `pyproject.toml` KHÔNG có nghĩa "chưa ship": extra tồn tại chỉ để
+`pip install waxseal[evm]` là một lệnh hợp lệ và để năng lực này có tên trong
+metadata, chứ không bao giờ trở thành con đường để một thư viện crypto lọt vào
+lõi. Bản thân lớp này trung lập với chain ở sau port — EVM là adapter đầu tiên,
+không phải là thiết kế. Bề mặt CLI: `waxseal ledger-status`, `waxseal registry
+publish`, `waxseal bond deposit`/`bond prove`, và `verify`/`report
+--rpc/--liveness/--registry`, `anchor --evm-liveness` (xem danh sách CLI ở mục
+[Sử dụng](#sử-dụng) bên dưới) — đã kiểm end-to-end với hai chain anvil chạy thật
+cùng contract Foundry thật (`contracts/src/AnchoringLiveness.sol`,
+`BondedCheckpoints.sol`, `FingerprintRegistry.sol`; commit
+`26b074c`/`c21e0e6`/`20f2762`/`26e3e91`).
 [docs/paper/conformance.vi.md](docs/paper/conformance.vi.md) giữ sổ theo từng
-dòng cho phần nào của lớp này đã ship và những khoảng trống đã biết còn lại.
+dòng cho lớp này, gồm cả hai khoảng trống còn mở, không chặn phát hành, được
+ghi ở đó thay vì bị làm mờ đi.
+
+(`dev` cũng tồn tại, để chạy test suite. Nó không phải một extra năng lực.)
 
 Thêm một dependency CỨNG là câu hỏi khác, và câu trả lời là không. Extras là con đường
 được phép.
@@ -218,9 +228,16 @@ waxseal head trail.jsonl       # in head của chain (seq + entry_hash) để an
 waxseal checkpoint trail.jsonl # in {seq, entry_hash, root} — root là batch root, không chỉ tip
 waxseal anchor trail.jsonl     # append 1 checkpoint vào sidecar .anchors cục bộ
 waxseal verify --anchors trail.jsonl  # kiểm cả lịch sử trail so với .anchors
+waxseal preflight trail.jsonl  # cấu hình này chặn được nấc năng lực nào của attacker; luôn exit 0 (exit 3: không có trail)
+waxseal segments trail-dir/    # verify mọi segment đã seal + ràng buộc rotation trong một thư mục; chỉ đọc
 
 # Mọi lệnh trên trừ `anchor` đều nhận được URL của một remote chain server:
 waxseal verify http://chain.example.com/v1/chains/default
+
+# Lớp ledger on-chain (waxseal[evm]; xem mục Extras mở rộng năng lực ở trên):
+waxseal ledger-status trail.jsonl --liveness 0xADDR --rpc https://rpc1 --rpc https://rpc2
+waxseal registry publish --descriptor-of FINGERPRINT --registry 0xADDR --rpc https://rpc1 --rpc https://rpc2
+waxseal bond deposit --bond 0xADDR --amount-wei 1000000000000000000 --rpc https://rpc1 --rpc https://rpc2
 ```
 
 ## Storage backends
@@ -298,6 +315,10 @@ current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None (chư
 
 ## Nhật ký quyết định AI
 
+![waxseal risk PoC](https://raw.githubusercontent.com/cuongbphv/waxseal/main/docs/assets/risk-poc.vi.gif)
+
+*Mọi dòng trong terminal đó đều là output thật: [examples/risk-poc/](examples/risk-poc/README.vi.md) chạy end-to-end, rồi `waxseal verify` trên chính trail và trên một bản sao bị sửa một phê duyệt. Tạo lại bằng `python tools/gen_poc_terminal_animation.py --render`.*
+
 `DecisionRecord` là payload mang hình dạng một quyết định, dành cho hệ thống AI ra quyết
 định hoặc hỗ trợ ra quyết định: hệ thống nào, phiên bản mô hình nào, quyết định gì và vì
 sao, và có con người tham gia hay không. Input được cam kết bằng hash sau khi redact, chứ
@@ -351,10 +372,10 @@ Một proof bundle là một entry cộng đường Merkle của nó, nên trả
 không làm lộ mọi quyết định khác trong trail. Báo cáo in kiểm tra **không được chạy** thành
 *not checked*, không bao giờ in thành đã đạt.
 
-- [examples/banking-poc/](examples/banking-poc/README.vi.md) là một demo end-to-end chạy
+- [examples/risk-poc/](examples/risk-poc/README.vi.md) là một demo end-to-end chạy
   được, có animation minh hoạ luồng dữ liệu và tám kịch bản tấn công, mỗi kịch bản tự
   assert đúng exit code của nó.
-- [docs/architecture/banking-deployment.vi.md](docs/architecture/banking-deployment.vi.md)
+- [docs/architecture/deployment.vi.md](docs/architecture/deployment.vi.md)
   là một triển khai tham chiếu, bao gồm bốn miền tin cậy, phân tách nhiệm vụ, lưu trữ và
   khôi phục thảm hoạ.
 - [docs/compliance/mapping.vi.md](docs/compliance/mapping.vi.md) trình bày lớp này chứng
@@ -404,9 +425,12 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 
 - **RFC 3161** biến `ts` từ chỗ tự khai thành được chứng thực. waxseal kiểm tra reply
   *về mặt cấu trúc* (status, message imprint, nonce, thuật toán digest) và nói rõ điều đó
-  trong mọi dòng nó in ra. Nó **không** verify chữ ký CMS/X.509; việc đó được ủy quyền cho
-  `openssl ts -verify`, công thức nằm trong docs. Receipt mà nó không đọc được là
-  *unverifiable* (exit 2); chỉ receipt chứng thực cho bytes khác mới là *gãy* (exit 1).
+  trong mọi dòng nó in ra. Mặc định nó **không** verify chữ ký CMS/X.509; việc đó được
+  ủy quyền cho `openssl ts -verify`, công thức nằm trong docs. Receipt mà nó không đọc
+  được là *unverifiable* (exit 2); chỉ receipt chứng thực cho bytes khác mới là *gãy*
+  (exit 1). Nếu đã cài extra `rfc3161` và bạn nêu tên một CA bundle
+  (`--tsa-ca-file`), chiều chữ ký cũng được kiểm — và token không kiểm được là exit 2
+  kèm nhãn nói rõ, không bao giờ là một lần lọt im lặng.
 - **OpenTimestamps** lưu một proof Bitcoin ở trạng thái *pending*, mờ đục và có chủ ý. Hoàn
   tất nó về sau bằng `ots upgrade` / `ots verify`.
 - Hai cái này **có thể dùng cùng nhau trong một lần chạy `anchor`**, publish cùng một
@@ -601,6 +625,41 @@ Ghi chú phạm vi cho nhóm coding tool: các hook này cho bạn một bản g
 song song, tamper-evident, **không chứa secret** của mọi hành động. Chúng không (và
 không thể) sửa file transcript của chính tool. Nếu key đã lọt vào đó, hãy rotate key.
 Trail của waxseal là bản ghi bạn có thể giữ, chia sẻ và verify.
+
+## Server tự vận hành
+
+`server/` là một chain server, witness và điểm đọc công khai tự vận hành, kèm
+một portal web Vue 3 chỉ đọc — một ứng dụng riêng trên stack FastAPI + uvicorn
+của nó, không nằm trong wheel `waxseal` (luật 1 của CLAUDE.md ràng buộc
+dependency của thư viện, không ràng buộc thư mục này; không có gì ở đây được
+đóng gói vào wheel). Đường ghi của nó dùng `waxseal` như một thư viện; mọi route
+đọc/verify đều gọi ra `python -m waxseal.cli` và báo lại exit code, nên CLI vẫn
+là nơi duy nhất ra kết luận và không route nào sửa, xóa, đảo thứ tự hay "vá" một
+entry. Ba credential nằm tách nhau: API key của chain, key của witness, và một
+điểm đọc công khai không cần credential, cũng không có route ghi nào. Operator,
+role và API key nằm trong PostgreSQL — còn bản thân trail vẫn là các file JSONL
+thuần mà bên thứ ba verify được bằng đúng lệnh `waxseal verify` tiêu chuẩn, chứ
+không phải thứ chỉ server này mới đọc nổi.
+
+![portal server waxseal — dashboard](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/vi/01-dashboard.png)
+
+| | |
+|---|---|
+| ![output của verify, nguyên văn từ CLI](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/vi/03-trail-output.png) | ![trạng thái ledger on-chain](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/vi/12-ledger.png) |
+| **Trail** — mỗi kết luận đi kèm đúng `argv` đã sinh ra nó, nên operator tái lập lại được. | **Ledger** — đọc liveness, registry và bond; `unreachable` là một giá trị riêng, không bao giờ in thành "0 phát hiện". |
+| ![nhịp anchor](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/vi/11-cadence.png) | ![consistency proof](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/vi/08-consistency.png) |
+| **Cadence** — nhịp anchor tối ưu chi phí, tính từ số đo của chính operator. Không mở trail nào. | **Consistency** — chứng minh RFC 9162 rằng head sau mở rộng từ head trước, không cần replay cả log. |
+
+<sub>Portal chỉ đọc. Mọi kết luận trên các màn hình này là exit code của một lượt `python -m waxseal.cli`, in ra nguyên văn. Bộ ảnh đầy đủ, cả desktop lẫn điện thoại, ở [`server/docs/screenshots/vi/`](server/docs/screenshots/vi/) và [`server/docs/screenshots/en/`](server/docs/screenshots/en/); sinh lại bằng `server/scripts/screenshots.sh`.</sub>
+
+```bash
+docker compose -f server/docker-compose.yml up --build   # http://127.0.0.1:8000
+```
+
+[server/README.md](server/README.md) mô tả bố cục;
+[server/docs/deployment.vi.md](server/docs/deployment.vi.md) nói về cấu hình, bố
+trí dữ liệu, TLS terminate ở reverse proxy, và việc tự vận hành mua được gì và
+không mua được gì.
 
 ## Đảm bảo và KHÔNG đảm bảo
 

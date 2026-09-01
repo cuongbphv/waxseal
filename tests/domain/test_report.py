@@ -129,13 +129,13 @@ class TestDecisionSummary:
     def test_counts_decisions_by_type(self) -> None:
         entries = chain(
             entry(0, decision_bytes(decision_type="payment"), DECISION_PAYLOAD_TYPE),
-            entry(1, decision_bytes(decision_type="aml_screening"), DECISION_PAYLOAD_TYPE),
+            entry(1, decision_bytes(decision_type="risk_scanning"), DECISION_PAYLOAD_TYPE),
             entry(2, decision_bytes(decision_type="payment"), DECISION_PAYLOAD_TYPE),
             entry(3, b"not a decision", TOOL_TYPE),
         )
         report = build_report(OK, entries)
         assert report.decisions_total == 3
-        assert dict(report.by_decision_type) == {"payment": 2, "aml_screening": 1}
+        assert dict(report.by_decision_type) == {"payment": 2, "risk_scanning": 1}
 
     def test_counts_oversight_modes(self) -> None:
         entries = chain(
@@ -400,14 +400,14 @@ class TestMarkdownRendering:
             entry(
                 1,
                 decision_bytes(
-                    decision_type="aml_screening",
+                    decision_type="risk_scanning",
                     human_oversight=HumanOversight(mode="reviewed"),
                 ),
                 DECISION_PAYLOAD_TYPE,
             ),
         )
         md = build_report(OK, entries).to_markdown()
-        assert "payment" in md and "aml_screening" in md and "reviewed" in md
+        assert "payment" in md and "risk_scanning" in md and "reviewed" in md
 
     def test_unrecorded_oversight_is_named_in_the_markdown(self) -> None:
         entries = chain(entry(0, decision_bytes(), DECISION_PAYLOAD_TYPE))
@@ -421,7 +421,7 @@ class TestMarkdownRendering:
 
     def test_markdown_omits_the_decision_section_when_there_are_none(self) -> None:
         md = build_report(OK, chain(entry(0, b"a", TOOL_TYPE))).to_markdown()
-        assert "aml_screening" not in md
+        assert "risk_scanning" not in md
 
     def test_undeclared_tau_renders_as_not_declared_never_zero_or_one(self) -> None:
         md = build_report(OK, []).to_markdown()

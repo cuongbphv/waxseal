@@ -47,8 +47,8 @@ def make_decision_trail(path: Path) -> AuditLog:
         log,
         DecisionRecord(
             decision_id="d-2",
-            decision_type="aml_screening",
-            system_id="aml-agent",
+            decision_type="risk_scanning",
+            system_id="risk-agent",
             model=ModelRef(name="risk-llm", version="2026.08"),
             input_commitment=commit_input({"amount": 900000}),
             outcome="escalate",

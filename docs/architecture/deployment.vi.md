@@ -1,6 +1,6 @@
 # Kiến trúc tham chiếu — nhật ký quyết định AI kiểm chứng được trong tổ chức được quản lý
 
-*[English](banking-deployment.md)*
+*[English](deployment.md)*
 
 Cách triển khai waxseal làm lớp bằng chứng bên dưới các hệ thống AI ra quyết định hoặc hỗ
 trợ ra quyết định tài chính. Tài liệu này mô tả một topology, một mô hình tin cậy, và các
@@ -62,7 +62,7 @@ sống sót vì có thứ mà kẻ đó cần lại nằm dưới quyền kiểm
 | Verifier | A₀, job kiểm chứng, các báo cáo | quyền ghi vào trail |
 
 Nếu chain server đồng thời sở hữu đích neo, kịch bản 5 trong
-[bài trình diễn PoC](../../examples/banking-poc/README.vi.md) không còn phát hiện được:
+[bài trình diễn PoC](../../examples/risk-poc/README.vi.md) không còn phát hiện được:
 kẻ viết lại được trail cũng viết lại được chính các root lẽ ra sẽ mâu thuẫn với nó.
 
 ---
