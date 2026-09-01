@@ -21,12 +21,15 @@ import pytest
 
 from tests.adapters.test_s3 import FakeClientError, FakeS3Client
 from waxseal.adapters.s3 import (
+    _STORAGE_REFUSAL_PROMISE,
     _WORM_LABEL,
+    RETENTION_MODE_STRENGTH,
     RETENTION_MODES,
     SegmentUpload,
     WormReport,
     WormRetention,
     WormState,
+    WormStrength,
     WormSubject,
     bucket_worm_state,
     object_worm_state,
@@ -508,7 +511,56 @@ class TestBucketWormState:
         assert "get_object_lock_configuration" in report.detail
 
 
-ALL_FINDINGS = [(subject, state) for subject in WormSubject for state in WormState]
+ALL_TRIPLES = [
+    (subject, state, strength)
+    for subject in WormSubject
+    for state in WormState
+    for strength in WormStrength
+]
+
+
+def finding(
+    subject: WormSubject,
+    state: WormState,
+    strength: WormStrength,
+    detail: str = "d",
+) -> WormReport | None:
+    """The report for this triple, or ``None`` when it is not representable.
+
+    ``WormReport`` refuses a strength on anything but an in-force retention, so
+    the renderable surface is discovered here rather than listed by hand: a new
+    state or a new strength shows up in these sweeps without anyone
+    remembering to add it.
+    """
+    try:
+        return WormReport(subject=subject, state=state, strength=strength, detail=detail)
+    except ValueError:
+        return None
+
+
+REPRESENTABLE = [triple for triple in ALL_TRIPLES if finding(*triple) is not None]
+
+
+class TestReportRefusesIncoherentFindings:
+    """A strength belongs to a retention that is in force. Anything else would
+    let a finding that established nothing carry the strong claim."""
+
+    def test_only_a_locked_finding_may_carry_a_strength(self) -> None:
+        for subject, state, strength in ALL_TRIPLES:
+            report = finding(subject, state, strength)
+            if state is WormState.LOCKED or strength is WormStrength.UNESTABLISHED:
+                assert report is not None, (subject, state, strength)
+            else:
+                assert report is None, (subject, state, strength)
+
+    def test_the_refusal_names_both_halves_of_the_mismatch(self) -> None:
+        with pytest.raises(ValueError, match="worm_unlocked.*strength_irreversible"):
+            WormReport(
+                subject=WormSubject.OBJECT_VERSION,
+                state=WormState.UNLOCKED,
+                strength=WormStrength.IRREVERSIBLE,
+                detail="d",
+            )
 
 
 class TestRendering:
@@ -516,23 +568,31 @@ class TestRendering:
     its scope — DESIGN.md §11: no output prints a tamper-proof claim without
     naming what it covers."""
 
-    def test_every_subject_and_state_pair_has_a_label(self) -> None:
+    def test_every_representable_finding_has_a_label(self) -> None:
         # Exhaustive over the FULL PRODUCT with no silent default: a fourth
-        # state, or a third subject, fails here rather than rendering as a
-        # blank line or inheriting somebody else's claim.
-        for subject, state in ALL_FINDINGS:
-            lines = render_worm_state(WormReport(subject=subject, state=state, detail="d"))
-            assert lines, (subject, state)
-            assert any(state.value in line for line in lines), (subject, state)
-            assert any(subject.value in line for line in lines), (subject, state)
+        # state, a third subject, or a fourth strength fails here rather than
+        # rendering as a blank line or inheriting somebody else's claim.
+        for subject, state, strength in ALL_TRIPLES:
+            report = finding(subject, state, strength)
+            if report is None:
+                continue
+            lines = render_worm_state(report)
+            assert lines, (subject, state, strength)
+            text = " ".join(lines)
+            assert subject.value in text, (subject, state, strength)
+            assert state.value in text, (subject, state, strength)
+            assert strength.value in text, (subject, state, strength)
 
-    def test_the_label_map_covers_the_product_and_nothing_else(self) -> None:
-        assert set(_WORM_LABEL) == set(ALL_FINDINGS)
+    def test_the_label_map_covers_the_representable_surface_and_nothing_else(self) -> None:
+        assert set(_WORM_LABEL) == set(REPRESENTABLE)
 
-    def test_the_object_locked_line_scopes_its_claim(self) -> None:
+    def test_the_irreversible_object_line_scopes_its_claim(self) -> None:
         lines = render_worm_state(
             WormReport(
-                subject=WormSubject.OBJECT_VERSION, state=WormState.LOCKED, detail="COMPLIANCE"
+                subject=WormSubject.OBJECT_VERSION,
+                state=WormState.LOCKED,
+                strength=WormStrength.IRREVERSIBLE,
+                detail="COMPLIANCE",
             )
         )
         text = " ".join(lines)
@@ -543,7 +603,12 @@ class TestRendering:
         for subject in WormSubject:
             text = " ".join(
                 render_worm_state(
-                    WormReport(subject=subject, state=WormState.UNLOCKED, detail="d")
+                    WormReport(
+                        subject=subject,
+                        state=WormState.UNLOCKED,
+                        strength=WormStrength.UNESTABLISHED,
+                        detail="d",
+                    )
                 )
             )
             assert "tamper-evident only" in text, subject
@@ -551,35 +616,83 @@ class TestRendering:
     def test_the_unknown_line_refuses_both_binary_readings_for_both_subjects(self) -> None:
         for subject in WormSubject:
             text = " ".join(
-                render_worm_state(WormReport(subject=subject, state=WormState.UNKNOWN, detail="d"))
+                render_worm_state(
+                    WormReport(
+                        subject=subject,
+                        state=WormState.UNKNOWN,
+                        strength=WormStrength.UNESTABLISHED,
+                        detail="d",
+                    )
+                )
             )
             assert "not" in text.lower(), subject
             assert "unmeasured" in text.lower(), subject
 
     def test_the_detail_is_always_carried_into_the_output(self) -> None:
-        for subject, state in ALL_FINDINGS:
-            text = " ".join(
-                render_worm_state(WormReport(subject=subject, state=state, detail="BECAUSE-X"))
-            )
-            assert "BECAUSE-X" in text, (subject, state)
+        for triple in REPRESENTABLE:
+            report = finding(*triple, detail="BECAUSE-X")
+            assert report is not None
+            assert "BECAUSE-X" in " ".join(render_worm_state(report)), triple
 
-    def test_only_the_object_locked_finding_promises_storage_refusal(self) -> None:
+    def test_only_the_irreversible_object_finding_promises_storage_refusal(self) -> None:
         # The invariant over the WHOLE renderable surface, not over the one
-        # function I happened to be thinking about: exactly one of the six
-        # findings may promise that storage refuses a write.
-        promising = [
-            (subject, state)
-            for subject, state in ALL_FINDINGS
-            if "REFUSED by storage"
-            in " ".join(render_worm_state(WormReport(subject=subject, state=state, detail="d")))
-        ]
-        assert promising == [(WormSubject.OBJECT_VERSION, WormState.LOCKED)]
+        # function I happened to be thinking about: exactly ONE of the ten
+        # findings may promise that storage refuses a write. Asserted against
+        # the named promise constant AND against the bare phrase, so neither a
+        # copy of the sentence nor a paraphrase of it can spread quietly.
+        for marker in (_STORAGE_REFUSAL_PROMISE, "REFUSED by storage"):
+            promising = [
+                triple
+                for triple in REPRESENTABLE
+                if marker in " ".join(render_worm_state(finding(*triple)))  # type: ignore[arg-type]
+            ]
+            assert promising == [
+                (WormSubject.OBJECT_VERSION, WormState.LOCKED, WormStrength.IRREVERSIBLE)
+            ], marker
+
+    def test_no_bypassable_finding_claims_storage_level_protection(self) -> None:
+        # The defect in one line: GOVERNANCE is retained but overridable by the
+        # account's own operator, so no bypassable finding may read as a
+        # storage guarantee, and every one of them must name the escape hatch
+        # rather than leaving an operator to infer it.
+        bypassable = [t for t in REPRESENTABLE if t[2] is WormStrength.BYPASSABLE]
+        assert bypassable, "the bypassable strength must be renderable at all"
+        for triple in bypassable:
+            text = " ".join(render_worm_state(finding(*triple)))  # type: ignore[arg-type]
+            assert "REFUSED by storage" not in text, triple
+            assert "s3:BypassGovernanceRetention" in text, triple
+            assert "BYPASSABLE" in text, triple
+
+    def test_the_three_locked_strengths_are_three_different_sentences(self) -> None:
+        # The SENTENCE, with the grep prefix stripped off. Comparing whole
+        # lines would pass on prefixes alone while three identical claims sat
+        # underneath them — which is the shape of the bug being fixed, so the
+        # test must not be satisfiable by the prefix.
+        for subject in WormSubject:
+            sentences = {
+                render_worm_state(finding(subject, WormState.LOCKED, strength))[  # type: ignore[arg-type]
+                    0
+                ].split(": ", 1)[1]
+                for strength in WormStrength
+            }
+            assert len(sentences) == len(WormStrength), subject
 
     def test_only_object_level_findings_talk_about_this_object_version(self) -> None:
-        for subject, state in ALL_FINDINGS:
-            text = " ".join(render_worm_state(WormReport(subject=subject, state=state, detail="d")))
-            if subject is WormSubject.BUCKET:
-                assert "this object version" not in text, (subject, state)
+        for triple in REPRESENTABLE:
+            text = " ".join(render_worm_state(finding(*triple)))  # type: ignore[arg-type]
+            if triple[0] is WormSubject.BUCKET:
+                assert "this object version" not in text, triple
+
+    def test_every_locked_bucket_line_disclaims_object_retention_at_every_strength(self) -> None:
+        # The J1 invariant must survive the widening: adding the strength axis
+        # tripled the bucket/locked labels, and all three must still refuse the
+        # object-level reading.
+        for strength in WormStrength:
+            text = " ".join(
+                render_worm_state(finding(WormSubject.BUCKET, WormState.LOCKED, strength))  # type: ignore[arg-type]
+            )
+            assert "does NOT establish" in text, strength
+            assert "REFUSED by storage" not in text, strength
 
 
 class TestUnknownCanNeverPrintAsLocked:
@@ -658,7 +771,10 @@ class TestResultShape:
 
     def test_the_report_is_immutable(self) -> None:
         report = WormReport(
-            subject=WormSubject.OBJECT_VERSION, state=WormState.UNKNOWN, detail="d"
+            subject=WormSubject.OBJECT_VERSION,
+            state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
+            detail="d",
         )
         with pytest.raises(AttributeError):
             report.state = WormState.LOCKED  # type: ignore[misc]
@@ -734,3 +850,161 @@ class TestBucketEvidenceNeverClaimsObjectRetention:
             )
         )
         assert bucket != obj
+
+
+# The exact clause the strong line must keep. Weakening it into something vague
+# enough to be true of GOVERNANCE too would "fix" this bug by destroying the
+# one line in the module that carries a real guarantee.
+UNDILUTED = "an overwrite or delete is REFUSED by storage"
+
+
+class TestGovernanceRetentionIsNotAStorageGuarantee:
+    """GOVERNANCE is retained but BYPASSABLE, and the two must not share a line.
+
+    AWS: a COMPLIANCE-retained version "can't be overwritten or deleted by any
+    user, including the root user"; a GOVERNANCE-retained one is overridable by
+    a caller holding ``s3:BypassGovernanceRetention`` who sends
+    ``x-amz-bypass-governance-retention:true``. So the storage-refusal promise
+    is false under GOVERNANCE against exactly the adversary an archive is kept
+    against — the account's own operator, who is also the party that could
+    tamper.
+
+    This is the same collapse ``WormSubject`` was introduced to fix, one level
+    down: two claims of different strength sharing one state value.
+    """
+
+    def governance(self) -> WormReport:
+        return object_worm_state(
+            FakeWormS3Client(retention=retained(mode="GOVERNANCE")),
+            bucket="audit",
+            key="k",
+            now_fn=now_fn,
+        )
+
+    def compliance(self) -> WormReport:
+        return object_worm_state(
+            FakeWormS3Client(retention=retained(mode="COMPLIANCE")),
+            bucket="audit",
+            key="k",
+            now_fn=now_fn,
+        )
+
+    def test_a_governance_retention_does_not_promise_storage_refuses_an_overwrite(self) -> None:
+        assert "REFUSED by storage" not in " ".join(render_worm_state(self.governance()))
+
+    def test_a_governance_retention_names_the_bypass_that_makes_it_weaker(self) -> None:
+        text = " ".join(render_worm_state(self.governance()))
+        assert "s3:BypassGovernanceRetention" in text
+        assert "x-amz-bypass-governance-retention:true" in text
+
+    def test_a_governance_retention_is_still_locked_and_not_unlocked(self) -> None:
+        # It IS retained. Calling it unlocked would be a different lie:
+        # worm_unlocked means "asked, and the answer was a definite no".
+        assert self.governance().state is WormState.LOCKED
+
+    def test_the_two_modes_are_told_apart_by_the_report_not_by_its_prose(self) -> None:
+        # A caller branching on the state alone got the strong promise for the
+        # weak mode. The strength is a field, so no one has to parse `detail`.
+        assert self.governance().strength is WormStrength.BYPASSABLE
+        assert self.compliance().strength is WormStrength.IRREVERSIBLE
+
+    def test_the_strength_reaches_the_rendered_prefix_for_grep(self) -> None:
+        assert render_worm_state(self.governance())[0].startswith(
+            "object_version/worm_locked/strength_bypassable: "
+        )
+        assert render_worm_state(self.compliance())[0].startswith(
+            "object_version/worm_locked/strength_irreversible: "
+        )
+
+    def test_the_compliance_line_keeps_its_promise_undiluted(self) -> None:
+        text = " ".join(render_worm_state(self.compliance()))
+        assert UNDILUTED in text
+        assert "including the account's root user" in text
+
+    def test_the_two_modes_do_not_render_the_same_line(self) -> None:
+        assert render_worm_state(self.governance()) != render_worm_state(self.compliance())
+
+    def test_an_expired_governance_retention_is_unlocked_with_no_strength(self) -> None:
+        report = object_worm_state(
+            FakeWormS3Client(retention=retained(mode="GOVERNANCE", until=PAST)),
+            bucket="audit",
+            key="k",
+            now_fn=now_fn,
+        )
+        assert report.state is WormState.UNLOCKED
+        assert report.strength is WormStrength.UNESTABLISHED
+
+    def test_an_upload_under_governance_reports_the_weaker_strength(self) -> None:
+        result = upload_sealed_segment(
+            FakeWormS3Client(retention=retained(mode="GOVERNANCE")),
+            bucket="audit",
+            key="k",
+            body=b"x",
+            retention=WormRetention(mode="GOVERNANCE", retain_until=FUTURE),
+            now_fn=now_fn,
+        )
+        assert result.worm.strength is WormStrength.BYPASSABLE
+        assert "REFUSED by storage" not in " ".join(render_worm_state(result.worm))
+
+
+class TestRetentionModeStrengthIsTheSingleSourceOfTruth:
+    """The allowlist is derived from the strength table, so a mode cannot be
+    admitted without someone stating what it promises."""
+
+    def test_the_allowlist_is_exactly_the_keys_of_the_strength_table(self) -> None:
+        assert frozenset(RETENTION_MODE_STRENGTH) == RETENTION_MODES
+
+    def test_every_documented_mode_declares_a_real_strength(self) -> None:
+        for mode, strength in RETENTION_MODE_STRENGTH.items():
+            assert strength is not WormStrength.UNESTABLISHED, mode
+
+    def test_the_two_documented_modes_map_to_the_aws_documented_strengths(self) -> None:
+        assert RETENTION_MODE_STRENGTH == {
+            "COMPLIANCE": WormStrength.IRREVERSIBLE,
+            "GOVERNANCE": WormStrength.BYPASSABLE,
+        }
+
+    def test_an_operator_declaration_exposes_its_strength_as_a_value(self) -> None:
+        # waxseal does not overrule the operator's compliance decision — both
+        # modes stay declarable — but the weaker one must never READ as the
+        # stronger one anywhere, including here.
+        assert WormRetention(mode="COMPLIANCE", retain_until=FUTURE).strength is (
+            WormStrength.IRREVERSIBLE
+        )
+        assert WormRetention(mode="GOVERNANCE", retain_until=FUTURE).strength is (
+            WormStrength.BYPASSABLE
+        )
+
+
+class TestBucketDefaultRetentionCarriesItsStrength:
+    """``bucket_worm_state`` reads a default-retention Mode, so it can classify
+    the strength NEW objects inherit — while still establishing nothing about
+    any stored version."""
+
+    def bucket(self, rule: Any) -> WormReport:
+        config: dict[str, Any] = {"ObjectLockConfiguration": {"ObjectLockEnabled": "Enabled"}}
+        if rule is not None:
+            config["ObjectLockConfiguration"]["Rule"] = rule
+        return bucket_worm_state(FakeWormS3Client(lock_config=config), bucket="audit")
+
+    def test_a_compliance_default_is_irreversible(self) -> None:
+        report = self.bucket({"DefaultRetention": {"Mode": "COMPLIANCE", "Days": 7}})
+        assert report.state is WormState.LOCKED
+        assert report.strength is WormStrength.IRREVERSIBLE
+
+    def test_a_governance_default_is_bypassable_and_says_so(self) -> None:
+        report = self.bucket({"DefaultRetention": {"Mode": "GOVERNANCE", "Days": 7}})
+        assert report.state is WormState.LOCKED
+        assert report.strength is WormStrength.BYPASSABLE
+        assert "s3:BypassGovernanceRetention" in " ".join(render_worm_state(report))
+
+    def test_an_unreadable_default_rule_establishes_no_strength(self) -> None:
+        # Enabled is still enabled; no mode was read, so no strength was
+        # established. That is a value, not an omission (rule 5).
+        report = self.bucket(None)
+        assert report.state is WormState.LOCKED
+        assert report.strength is WormStrength.UNESTABLISHED
+
+    def test_an_unrecognized_default_mode_establishes_no_strength(self) -> None:
+        report = self.bucket({"DefaultRetention": {"Mode": "FUTUREMODE", "Days": 7}})
+        assert report.strength is WormStrength.UNESTABLISHED

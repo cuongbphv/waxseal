@@ -14,10 +14,12 @@ tail-discovery hint; correctness never depends on it.
 Object Lock / WORM (Workstream J1)
 ----------------------------------
 The lower half of this module puts a SEALED segment under S3 Object Lock
-retention, so that storage REFUSES an overwrite instead of merely letting the
-chain detect one afterwards. This is the scoped half of the "tamper-proof"
+retention, so that storage can REFUSE an overwrite instead of merely letting
+the chain detect one afterwards. This is the scoped half of the "tamper-proof"
 claim (DESIGN.md §11): it covers an archived object version, never the live
-tail and never write-time honesty.
+tail and never write-time honesty -- and, since the two retention modes hold
+against different adversaries, only a COMPLIANCE-mode retention covers it
+against the account's own operator.
 
 VERIFIED 31/08/2026 against official AWS documentation. The plan carried all
 of this as "[Unverified - semantics Object Lock compliance mode from AWS
@@ -33,7 +35,10 @@ re-check settled, each with the page that settled it:
   caller holding ``s3:BypassGovernanceRetention`` who also sends
   ``x-amz-bypass-governance-retention:true``. So only COMPLIANCE is a WORM
   guarantee against the account's own operator -- which is exactly why the
-  OPERATOR declares the mode here and this library ships no default.
+  OPERATOR declares the mode here and this library ships no default. That
+  asymmetry is now ENFORCED and not merely documented: see the ``WormStrength``
+  paragraph below. The first version of this half stated it here in prose and
+  then printed one sentence for both modes.
 * A retention period can be EXTENDED by anyone holding
   ``s3:PutObjectRetention``, and never shortened (same page). Both directions
   matter to a verifier: "locked" can silently become "locked for longer",
@@ -71,11 +76,21 @@ re-check settled, each with the page that settled it:
   still says nothing about whether a given object version got a retention
   period, so ``bucket_worm_state`` is never used to answer for an object.
   That asymmetry is enforced rather than merely documented: every
-  ``WormReport`` carries a ``WormSubject``, and ``_WORM_LABEL`` is keyed on
-  the (subject, state) PAIR, so bucket evidence structurally cannot print the
-  object-version guarantee. The first version of this module keyed the label
-  on state alone and did exactly that -- a ternary can be correct in every
-  value and still lie in its renderer.
+  ``WormReport`` carries a ``WormSubject``, so bucket evidence structurally
+  cannot print the object-version guarantee. The first version of this module
+  keyed the label on state alone and did exactly that -- a ternary can be
+  correct in every value and still lie in its renderer.
+* Which ADVERSARY a lock holds against -- the same lesson, one level down, and
+  the reason ``_WORM_LABEL`` is keyed on the (subject, state, strength) TRIPLE
+  rather than the pair. Adding ``WormSubject`` left COMPLIANCE and GOVERNANCE
+  sharing ``OBJECT_VERSION``/``LOCKED`` and therefore sharing one sentence, so
+  a bypassable GOVERNANCE retention printed "an overwrite or delete is REFUSED
+  by storage" -- false against precisely the account operator the archive
+  exists to constrain, and invisible to any caller branching on the state.
+  ``WormStrength`` is ``WormSubject``'s shape applied to that axis: a required
+  field with no default, an exhaustive table keyed on it, and
+  ``RETENTION_MODE_STRENGTH`` replacing the flat mode allowlist so a mode
+  cannot be admitted without declaring what it promises.
 
 CORRECTION to the plan, measured while verifying: the plan and its bead state
 that Object Lock "must be enabled at bucket creation". The S3 User Guide
@@ -273,11 +288,55 @@ class WormState(enum.Enum):
     UNKNOWN = "worm_unknown"
 
 
-# The two modes AWS documents for Object Lock retention. An ALLOWLIST, not a
-# check against known-bad values: a mode invented after this build shipped
-# must read as UNKNOWN, never be waved through as a guarantee. Same reasoning
-# as an unknown hash_version being unverifiable rather than recomputed.
-RETENTION_MODES: Final[frozenset[str]] = frozenset({"GOVERNANCE", "COMPLIANCE"})
+class WormStrength(enum.Enum):
+    """HOW STRONG an in-force retention is -- against WHICH adversary.
+
+    Not a fourth ``WormState`` and not a severity: the ternary is unchanged.
+    This is ``WormSubject``'s move applied to the other axis. ``WormSubject``
+    exists because the same three states asked about two different SUBJECTS
+    produced a false guarantee; this exists because ``LOCKED`` covered two
+    retention modes of different STRENGTH, and AWS documents them as different
+    in exactly the way the threat model cares about. COMPLIANCE cannot be
+    overwritten or deleted by any user "including the root user in your AWS
+    account"; GOVERNANCE is overridable by a caller holding
+    ``s3:BypassGovernanceRetention`` who sends
+    ``x-amz-bypass-governance-retention:true`` -- i.e. by the account's own
+    operator, the party an archive is kept against. Printing one promise for
+    both told an operator that storage would refuse a write it would in fact
+    accept.
+
+    Required on every ``WormReport``, with no default, for ``WormSubject``'s
+    reason: a default would let a call site inherit the stronger claim
+    silently, which is the whole failure being fixed.
+
+    ``UNESTABLISHED`` is a value, not an absence (the ``human_oversight.mode``
+    idiom in ``domain/decision.py``: "unrecorded" is a value). It is the
+    honest answer wherever this finding asserts no retention strength -- there
+    is no retention (``UNLOCKED``), the retention question went unmeasured
+    (``UNKNOWN``), or a retention is in force but its mode was not read.
+    """
+
+    IRREVERSIBLE = "strength_irreversible"
+    BYPASSABLE = "strength_bypassable"
+    UNESTABLISHED = "strength_unestablished"
+
+
+# The two modes AWS documents for Object Lock retention, each mapped to WHAT IT
+# PROMISES. A mapping and not a bare set, so a mode cannot be added to the
+# allowlist without someone stating the strength it confers -- the defect this
+# replaces was a flat set whose two members reached one ``LOCKED`` return and
+# one sentence. Still an ALLOWLIST, not a check against known-bad values: a
+# mode invented after this build shipped must read as UNKNOWN, never be waved
+# through as a guarantee. Same reasoning as an unknown hash_version being
+# unverifiable rather than recomputed.
+RETENTION_MODE_STRENGTH: Final[dict[str, WormStrength]] = {
+    "COMPLIANCE": WormStrength.IRREVERSIBLE,
+    "GOVERNANCE": WormStrength.BYPASSABLE,
+}
+
+# Derived, never a second literal: the allowlist and the strength table cannot
+# drift apart if there is only one of them.
+RETENTION_MODES: Final[frozenset[str]] = frozenset(RETENTION_MODE_STRENGTH)
 
 # [Unverified] -- see the module docstring. Neither the S3 API reference nor
 # botocore's service model documents the error code for "no Object Lock
@@ -314,10 +373,21 @@ class WormRetention:
     ``--tsa-ca-file``: a retention period is a compliance decision with a
     cost (COMPLIANCE mode cannot be shortened by anyone, including the
     account root), so guessing one is not a convenience.
+
+    Both documented modes stay accepted. GOVERNANCE is a legitimate compliance
+    decision and waxseal does not overrule the operator who made it; what
+    waxseal must never do is let the weaker mode read as the stronger one, so
+    ``strength`` exposes the difference as a value rather than leaving it to be
+    inferred from the mode string at each call site.
     """
 
     mode: str
     retain_until: datetime
+
+    @property
+    def strength(self) -> WormStrength:
+        """What this declaration will actually promise once it is in force."""
+        return RETENTION_MODE_STRENGTH[self.mode]
 
     def __post_init__(self) -> None:
         if self.mode not in RETENTION_MODES:
@@ -340,11 +410,31 @@ class WormReport:
     nothing to act on, and "no permission to ask" and "the SDK is not
     installed" call for different fixes (CLAUDE.md rule 6: a degradation is
     recorded in the output, never swallowed).
+
+    ``subject`` and ``strength`` are the two axes that stop the ternary from
+    lying through its renderer: WHICH question was answered, and HOW STRONG
+    the answer is. Both are required, both are read straight off the report by
+    a caller, and neither may be recovered by parsing ``detail`` -- free text
+    is not an interface.
     """
 
     subject: WormSubject
     state: WormState
+    strength: WormStrength
     detail: str
+
+    def __post_init__(self) -> None:
+        # A strength is a property of a retention that is IN FORCE. "Not
+        # retained" and "could not tell" have no strength to report, and
+        # letting either carry IRREVERSIBLE would smuggle the strong claim
+        # into a finding that established nothing. Refusing the combination
+        # here is what keeps _WORM_LABEL exhaustive over the states that can
+        # actually exist rather than over invented prose for ones that cannot.
+        if self.state is not WormState.LOCKED and self.strength is not WormStrength.UNESTABLISHED:
+            raise ValueError(
+                f"a {self.state.value} finding cannot carry {self.strength.value}: "
+                "only an in-force retention has a strength"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -420,6 +510,7 @@ def object_worm_state(
         return WormReport(
             subject=WormSubject.OBJECT_VERSION,
             state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
             detail="the injected client has no get_object_retention method, so the "
             "retention state of this object version could not be asked for",
         )
@@ -435,6 +526,7 @@ def object_worm_state(
             return WormReport(
                 subject=WormSubject.OBJECT_VERSION,
                 state=WormState.UNLOCKED,
+                strength=WormStrength.UNESTABLISHED,
                 detail=f"S3 reports no Object Lock retention for this object ({_describe(exc)})",
             )
         # AccessDenied lands here, and must: a caller without
@@ -442,6 +534,7 @@ def object_worm_state(
         return WormReport(
             subject=WormSubject.OBJECT_VERSION,
             state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
             detail=f"the retention question could not be answered ({_describe(exc)})",
         )
 
@@ -449,6 +542,7 @@ def object_worm_state(
         return WormReport(
             subject=WormSubject.OBJECT_VERSION,
             state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
             detail=f"get_object_retention returned {type(reply).__name__}, not a mapping",
         )
     retention = reply.get("Retention")
@@ -458,6 +552,7 @@ def object_worm_state(
         return WormReport(
             subject=WormSubject.OBJECT_VERSION,
             state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
             detail="the reply carried no Retention block, which a 200 is documented to "
             "require, so it did not answer whether this version is retained",
         )
@@ -467,6 +562,7 @@ def object_worm_state(
         return WormReport(
             subject=WormSubject.OBJECT_VERSION,
             state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
             detail=f"retention mode {mode!r} is not one of {sorted(RETENTION_MODES)}; this "
             "build cannot say what protection it confers",
         )
@@ -475,6 +571,7 @@ def object_worm_state(
         return WormReport(
             subject=WormSubject.OBJECT_VERSION,
             state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
             detail=f"RetainUntilDate is {type(retain_until).__name__}, not a timestamp, so "
             "the retention period could not be placed on a clock",
         )
@@ -483,6 +580,7 @@ def object_worm_state(
         return WormReport(
             subject=WormSubject.OBJECT_VERSION,
             state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
             detail="RetainUntilDate arrived without a timezone, so it cannot be compared "
             "against now without inventing one",
         )
@@ -492,12 +590,18 @@ def object_worm_state(
         return WormReport(
             subject=WormSubject.OBJECT_VERSION,
             state=WormState.UNLOCKED,
+            strength=WormStrength.UNESTABLISHED,
             detail=f"the {mode} retention period expired at {retain_until.isoformat()}; "
             "storage will accept an overwrite of this version again",
         )
+    # The mode is allowlisted above, so its strength is known here. Carrying it
+    # on the report rather than only inside `detail` is the point: a caller
+    # branching on LOCKED alone once got the COMPLIANCE promise for a
+    # GOVERNANCE retention, which the account's own operator can bypass.
     return WormReport(
         subject=WormSubject.OBJECT_VERSION,
         state=WormState.LOCKED,
+        strength=RETENTION_MODE_STRENGTH[mode],
         detail=f"{mode} retention in force until {retain_until.isoformat()}",
     )
 
@@ -516,6 +620,7 @@ def bucket_worm_state(client: Any, *, bucket: str) -> WormReport:
         return WormReport(
             subject=WormSubject.BUCKET,
             state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
             detail="the injected client has no get_object_lock_configuration method, so "
             "the bucket's Object Lock configuration could not be asked for",
         )
@@ -526,12 +631,14 @@ def bucket_worm_state(client: Any, *, bucket: str) -> WormReport:
             return WormReport(
                 subject=WormSubject.BUCKET,
                 state=WormState.UNLOCKED,
+                strength=WormStrength.UNESTABLISHED,
                 detail=f"S3 reports no Object Lock configuration on {bucket!r} "
                 f"({_describe(exc)})",
             )
         return WormReport(
             subject=WormSubject.BUCKET,
             state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
             detail=f"the bucket's Object Lock configuration could not be read "
             f"({_describe(exc)})",
         )
@@ -541,6 +648,7 @@ def bucket_worm_state(client: Any, *, bucket: str) -> WormReport:
         return WormReport(
             subject=WormSubject.BUCKET,
             state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
             detail="the reply carried no ObjectLockConfiguration block, which a 200 is "
             "documented to require, so it did not answer whether the bucket locks",
         )
@@ -549,6 +657,7 @@ def bucket_worm_state(client: Any, *, bucket: str) -> WormReport:
         return WormReport(
             subject=WormSubject.BUCKET,
             state=WormState.UNKNOWN,
+            strength=WormStrength.UNESTABLISHED,
             detail=f"ObjectLockEnabled is {enabled!r}, not one of "
             f"{sorted(_LOCK_ENABLED_VALUES)}; this build cannot interpret that reply",
         )
@@ -557,17 +666,25 @@ def bucket_worm_state(client: Any, *, bucket: str) -> WormReport:
     default = rule.get("DefaultRetention") if isinstance(rule, dict) else None
     mode = default.get("Mode") if isinstance(default, dict) else None
     if mode in RETENTION_MODES:
+        # A bucket default names the mode NEW objects inherit, so its strength
+        # is a real fact worth reporting -- but it is still bucket evidence and
+        # still establishes no retention on any stored version. Both halves are
+        # kept: the strength is carried, and the label refuses the object-level
+        # reading at every strength.
         return WormReport(
             subject=WormSubject.BUCKET,
             state=WormState.LOCKED,
+            strength=RETENTION_MODE_STRENGTH[mode],
             detail=f"Object Lock is enabled on {bucket!r} with a {mode} default retention",
         )
     # Enabled without a readable default rule is still enabled: per-object
     # retention (what upload_sealed_segment sets) is the mechanism, and a
-    # bucket default is only a convenience on top of it.
+    # bucket default is only a convenience on top of it. No mode was read, so
+    # no strength was established -- which is a value here, not an omission.
     return WormReport(
         subject=WormSubject.BUCKET,
         state=WormState.LOCKED,
+        strength=WormStrength.UNESTABLISHED,
         detail=f"Object Lock is enabled on {bucket!r}; no default retention rule was "
         "readable, so per-object retention is the only mechanism in play",
     )
@@ -609,6 +726,7 @@ def upload_sealed_segment(
             worm=WormReport(
                 subject=WormSubject.OBJECT_VERSION,
                 state=WormState.UNKNOWN,
+                strength=WormStrength.UNESTABLISHED,
                 detail=origin,
             ),
         )
@@ -632,48 +750,103 @@ def upload_sealed_segment(
     )
 
 
-# Exhaustive over the FULL PRODUCT of subject x state, spelled out rather than
-# derived (matching domain.verdict's _EXIT_CODE tables) and keyed by both:
-# a missing pair raises KeyError in render_worm_state instead of quietly
-# rendering the wrong claim. Keying on state ALONE was the defect this table
-# replaces -- bucket_worm_state's LOCKED then printed object_worm_state's
-# guarantee, telling an operator a segment was WORM-protected on evidence that
-# established no such thing. Every line names its own SCOPE, because DESIGN.md
-# §11 forbids printing a tamper-proof claim without saying what it covers, and
-# the two subjects cover very different things.
-_WORM_LABEL: Final[dict[tuple[WormSubject, WormState], str]] = {
-    (WormSubject.OBJECT_VERSION, WormState.LOCKED): (
-        "S3 Object Lock retention is IN FORCE on this object version ({detail}). For the "
-        "retention period, an overwrite or delete is REFUSED by storage rather than merely "
-        "detected afterwards by the chain. Scope: this object version only, only until "
-        "the retain-until date, and it says nothing about whether what was written was "
-        "true (DESIGN.md §11)."
+# The ONE sentence in this module that promises storage-level refusal, named so
+# that a test can sweep the whole label surface and assert exactly one finding
+# is allowed to say it. Two findings of different strength sharing this
+# sentence is precisely the defect this constant exists to make detectable.
+_STORAGE_REFUSAL_PROMISE: Final[str] = (
+    "an overwrite or delete is REFUSED by storage rather than merely detected afterwards "
+    "by the chain, and refused for EVERY principal including the account's root user"
+)
+
+# Exhaustive over every (subject, state, strength) a WormReport can legally
+# hold, spelled out rather than derived (matching domain.verdict's _EXIT_CODE
+# tables) and keyed by all three: a missing key raises KeyError in
+# render_worm_state instead of quietly rendering the wrong claim. The table has
+# been widened twice by the same bug in two different clothes.
+#
+#   Keying on state ALONE was the first: bucket_worm_state's LOCKED printed
+#   object_worm_state's guarantee, telling an operator a segment was
+#   WORM-protected on evidence that established no such thing. WormSubject
+#   fixed it.
+#
+#   Keying on (subject, state) was the second: COMPLIANCE and GOVERNANCE both
+#   reached OBJECT_VERSION/LOCKED and shared one sentence, so a GOVERNANCE
+#   retention -- which the account's own operator can bypass with
+#   s3:BypassGovernanceRetention -- printed a storage-refusal promise that is
+#   false against exactly that operator. WormStrength fixes it, the same way.
+#
+# Every line names its own SCOPE, because DESIGN.md §11 forbids printing a
+# tamper-proof claim without saying what it covers -- and the strength axis
+# says WHO it covers it against, which is half of what a scope is.
+_WORM_LABEL: Final[dict[tuple[WormSubject, WormState, WormStrength], str]] = {
+    (WormSubject.OBJECT_VERSION, WormState.LOCKED, WormStrength.IRREVERSIBLE): (
+        "S3 Object Lock retention is IN FORCE on this object version, in an irreversible "
+        "mode ({detail}). For the retention period, " + _STORAGE_REFUSAL_PROMISE + ". "
+        "Scope: this object version only, only until the retain-until date, and it says "
+        "nothing about whether what was written was true (DESIGN.md §11)."
     ),
-    (WormSubject.OBJECT_VERSION, WormState.UNLOCKED): (
+    (WormSubject.OBJECT_VERSION, WormState.LOCKED, WormStrength.BYPASSABLE): (
+        "S3 Object Lock retention is in force on this object version, but in a BYPASSABLE "
+        "mode ({detail}). This is NOT a storage-level guarantee: a caller holding "
+        "s3:BypassGovernanceRetention who sends x-amz-bypass-governance-retention:true can "
+        "delete or overwrite this version before the retain-until date, and that caller is "
+        "the account's own operator — precisely the party an archive is kept against. The "
+        "retention is real and raises the cost of a quiet overwrite, but this segment stays "
+        "tamper-evident by the chain rather than tamper-proof by storage (DESIGN.md §11)."
+    ),
+    (WormSubject.OBJECT_VERSION, WormState.LOCKED, WormStrength.UNESTABLISHED): (
+        "S3 Object Lock retention is in force on this object version, but its STRENGTH was "
+        "not established ({detail}). The documented modes differ in the way that decides "
+        "this claim — one is refused for every principal including the account root, the "
+        "other is overridable by an operator holding s3:BypassGovernanceRetention — so a "
+        "mode this build did not read licenses no storage-level claim at all. Retained, "
+        "strength unmeasured: that is a third answer, not a quiet vote for either "
+        "(CLAUDE.md rule 5)."
+    ),
+    (WormSubject.OBJECT_VERSION, WormState.UNLOCKED, WormStrength.UNESTABLISHED): (
         "checked, and no S3 Object Lock retention is in force ({detail}). This segment is "
         "tamper-evident only: an overwrite would be detected by the chain, not refused by "
         "storage. This is a measured answer, not a failure."
     ),
-    (WormSubject.OBJECT_VERSION, WormState.UNKNOWN): (
+    (WormSubject.OBJECT_VERSION, WormState.UNKNOWN, WormStrength.UNESTABLISHED): (
         "could not determine whether S3 Object Lock retention is in force ({detail}). This "
         "is NOT 'locked' and NOT 'unlocked': the WORM claim is unmeasured this run and "
         "must be rendered as unmeasured, never collapsed into either binary (CLAUDE.md "
         "rule 5). Silence is not confidence, and it is not an alarm either."
     ),
-    (WormSubject.BUCKET, WormState.LOCKED): (
-        "S3 Object Lock is CONFIGURED on this bucket ({detail}). Bucket-level evidence "
-        "ONLY: it does NOT establish that any particular object version carries a "
-        "retention period, because Object Lock protects only the version named in the "
-        "request. No segment may be called WORM-protected on this evidence — ask "
-        "object_worm_state about the object version that matters."
+    (WormSubject.BUCKET, WormState.LOCKED, WormStrength.IRREVERSIBLE): (
+        "S3 Object Lock is CONFIGURED on this bucket, and its default retention mode is "
+        "the irreversible one ({detail}). Bucket-level evidence ONLY: it does NOT "
+        "establish that any particular object version carries a retention period, because "
+        "Object Lock protects only the version named in the request and a default governs "
+        "what NEW objects inherit, not what stored ones already have. No segment may be "
+        "called WORM-protected on this evidence — ask object_worm_state about the object "
+        "version that matters."
     ),
-    (WormSubject.BUCKET, WormState.UNLOCKED): (
+    (WormSubject.BUCKET, WormState.LOCKED, WormStrength.BYPASSABLE): (
+        "S3 Object Lock is CONFIGURED on this bucket, but its default retention mode is "
+        "the BYPASSABLE one ({detail}): retention inherited from that default is "
+        "overridable by an operator holding s3:BypassGovernanceRetention. Bucket-level "
+        "evidence ONLY, and the weaker of the two strengths — it does NOT establish that "
+        "any particular object version carries a retention period, and it would promise no "
+        "refusal against the account's own operator even if one did. Ask object_worm_state "
+        "about the object version that matters."
+    ),
+    (WormSubject.BUCKET, WormState.LOCKED, WormStrength.UNESTABLISHED): (
+        "S3 Object Lock is CONFIGURED on this bucket; no default retention mode was "
+        "readable, so no retention strength is established here either ({detail}). "
+        "Bucket-level evidence ONLY: it does NOT establish that any particular object "
+        "version carries a retention period. Per-object retention is the mechanism in "
+        "play — ask object_worm_state about the object version that matters."
+    ),
+    (WormSubject.BUCKET, WormState.UNLOCKED, WormStrength.UNESTABLISHED): (
         "checked, and this bucket has no S3 Object Lock configuration ({detail}). "
         "Retention cannot be set without it, so nothing stored here is under retention: "
         "segments archived to this bucket are tamper-evident only. This is a measured "
         "answer, not a failure."
     ),
-    (WormSubject.BUCKET, WormState.UNKNOWN): (
+    (WormSubject.BUCKET, WormState.UNKNOWN, WormStrength.UNESTABLISHED): (
         "could not determine whether S3 Object Lock is configured on this bucket "
         "({detail}). This is NOT 'configured' and NOT 'unconfigured': unmeasured this "
         "run, and it must be rendered as unmeasured rather than collapsed into either "
@@ -686,14 +859,17 @@ _WORM_LABEL: Final[dict[tuple[WormSubject, WormState], str]] = {
 def render_worm_state(report: WormReport) -> list[str]:
     """Human-readable lines for the CLI, in ``domain.tickets``'s style.
 
-    Prefixed with BOTH the subject and the state, so the six possible
+    Prefixed with the subject, the state AND the strength, so the ten possible
     findings are distinguishable in a log by grep and can never be told apart
     only by prose. preflight (J4) prints these. Only the
-    ``OBJECT_VERSION``/``LOCKED`` line claims storage-level immutability for a
-    segment, and it carries its scope inline; the ``BUCKET``/``LOCKED`` line
-    explicitly disclaims that stronger reading.
+    ``OBJECT_VERSION``/``LOCKED``/``IRREVERSIBLE`` line claims storage-level
+    immutability for a segment, and it carries its scope inline; the
+    ``BUCKET``/``LOCKED`` lines disclaim the object-level reading and the
+    ``BYPASSABLE`` lines disclaim the refusal promise, each explicitly.
     """
     return [
-        f"{report.subject.value}/{report.state.value}: "
-        + _WORM_LABEL[(report.subject, report.state)].format(detail=report.detail)
+        f"{report.subject.value}/{report.state.value}/{report.strength.value}: "
+        + _WORM_LABEL[(report.subject, report.state, report.strength)].format(
+            detail=report.detail
+        )
     ]
