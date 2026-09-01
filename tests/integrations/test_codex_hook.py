@@ -22,6 +22,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from waxseal import AuditLog
 
@@ -29,7 +30,9 @@ HOOK_PATH = Path(__file__).parent.parent.parent / "src" / "waxseal" / "integrati
 SRC = str(Path(__file__).parent.parent.parent / "src")
 
 
-def run_hook(event: dict | str, trail: Path, **env_overrides) -> subprocess.CompletedProcess:
+def run_hook(
+    event: dict[str, Any] | str, trail: Path, **env_overrides: str
+) -> subprocess.CompletedProcess[str]:
     import os
 
     env = {**os.environ, "PYTHONPATH": SRC, "WAXSEAL_TRAIL": str(trail), **env_overrides}
@@ -40,8 +43,8 @@ def run_hook(event: dict | str, trail: Path, **env_overrides) -> subprocess.Comp
     )
 
 
-def pre_tool_use(**overrides) -> dict:
-    event = {
+def pre_tool_use(**overrides: object) -> dict[str, Any]:
+    event: dict[str, Any] = {
         "session_id": "sess-1",
         "turn_id": "turn-1",
         "transcript_path": None,
@@ -57,9 +60,12 @@ def pre_tool_use(**overrides) -> dict:
     return event
 
 
-def read_payload(trail: Path, line_no: int = 0) -> dict:
+def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
     line = trail.read_text().splitlines()[line_no]
-    return json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
+    result: dict[str, Any] = json.loads(
+        base64.b64decode(json.loads(line)["payload_b64"])
+    )
+    return result
 
 
 class TestObserveOnly:
