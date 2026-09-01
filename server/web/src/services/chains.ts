@@ -114,13 +114,14 @@ export async function runTrailAction(
   return api.exportProof(id, headSeq)
 }
 
-/** The segments command, for when Workstream B lands. Nothing calls this until
- * `/v1/capabilities` reports the command present. */
+/** The segments command, landed by Workstream B in 0.1.5. The trail's Segments
+ * tab calls this once `/v1/capabilities` reports the command present. */
 export async function loadSegments(id: string): Promise<Outcome> {
   return api.segments(id)
 }
 
-/** The preflight command, for when Workstream E lands. */
+/** The preflight command, landed by Workstream E in 0.1.5. The Preflight screen
+ * calls this once `/v1/capabilities` reports the command present. */
 export async function loadPreflight(id: string): Promise<Outcome> {
   return api.preflight(id)
 }

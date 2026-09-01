@@ -1,13 +1,15 @@
 <script setup lang="ts">
 /* Segments — gated on the capability, not on a hard-coded "not yet".
  *
- * This build has no `segments` subcommand, so `FeatureGate` renders the
- * Workstream B notice with the design's rotation-binding sentence as context.
- * There are no placeholder segment rows: three rows reading "binding holds"
- * would be three findings nobody made.
+ * Workstream B shipped `waxseal segments` in 0.1.5. `/v1/capabilities` reports
+ * the command present, so `CommandOutput` mounts and prints the verifier's own
+ * output — and not one line of this file changed when it landed, which is the
+ * whole reason the gate reads the server's report instead of a constant.
  *
- * When `/v1/capabilities` reports the command present, `CommandOutput` mounts
- * and prints the verifier's own output. Nothing else changes.
+ * Against a wheel that lacks the command, or a server that never answered,
+ * `FeatureGate` still renders the notice with the design's rotation-binding
+ * sentence as context. Either way there are no placeholder segment rows: three
+ * rows reading "binding holds" would be three findings nobody made.
  */
 
 import { loadSegments } from '@/services/chains'

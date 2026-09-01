@@ -1,15 +1,17 @@
 <script setup lang="ts">
-/* Preflight: the six-tier attacker ladder, unmeasured.
+/* Preflight: the command's reading, over the six-tier attacker ladder.
  *
  * The tiers are real — the threat model defines them and the defences named
- * beside them are the ones the library implements. What this build cannot do
- * is say which tier a given deployment is AT: there is no `preflight`
- * subcommand, so nothing was measured. Every badge therefore reads "not
- * measured" in the neutral style, and tier 4 is NOT marked current: the design
- * highlights it, but a highlight is a finding and no finding was made.
+ * beside them are the ones the library implements. Workstream E shipped
+ * `waxseal preflight` in 0.1.5, so `FeatureGate` mounts its reading above the
+ * ladder; nothing in this file changed when the command landed.
  *
- * When Workstream E ships the command, `FeatureGate` mounts the real output
- * above the ladder and no code here changes.
+ * The ladder itself stays static and every badge on it still reads "not
+ * measured" in the neutral style. That is not staleness: this list is the
+ * threat model's vocabulary, not a per-deployment finding, and the finding is
+ * the command's own output printed above it. Tier 4 is likewise NOT marked
+ * current — the design highlights it, but a highlight is a finding and no
+ * finding was made here.
  */
 
 import { computed } from 'vue'

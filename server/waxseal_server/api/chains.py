@@ -37,11 +37,12 @@ from waxseal_server.domain.operators import (
 from waxseal_server.runtime.cli import READ_ONLY_COMMANDS
 
 #: Reads offered over a live chain. Every one of these is in
-#: `READ_ONLY_COMMANDS`. `preflight` is here deliberately although this build has
-#: no such command: the honest answer is "unavailable" from the CLI runner rather
-#: than a route that does not exist. `segments` was in that position until 0.1.5
-#: Workstream B shipped it, and the route needed no change — which is the point
-#: of gating on `available()` instead of on a hard-coded "not yet".
+#: `READ_ONLY_COMMANDS`. `segments` and `preflight` were both listed here while
+#: the wheel still lacked them, on the rule that the honest answer is
+#: "unavailable" from the CLI runner rather than a route that does not exist.
+#: 0.1.5 shipped both — Workstreams B and E — and neither route needed a change,
+#: which is the point of gating on `available()` instead of on a hard-coded
+#: "not yet", and the reason this tuple stays safe to extend ahead of a wheel.
 CHAIN_READS: Final[tuple[str, ...]] = ("verify", "report", "inspect", "segments", "preflight")
 
 
@@ -152,7 +153,8 @@ def router(services: Services, authz: Authorizer) -> APIRouter:
         chain_id: str, command: str, authorization: str | None = Header(default=None)
     ) -> JSONResponse:
         # One route for every CLI-backed read, driven by CHAIN_READS. Adding a
-        # read when Workstream B or E lands is one tuple entry, not a handler.
+        # read is one tuple entry, not a handler — which is how B's `segments`
+        # and E's `preflight` both arrived in 0.1.5 with no handler written.
         denied = authz.require(authorization, SCOPE_VERIFY_RUN)
         if denied is not None:
             return denied

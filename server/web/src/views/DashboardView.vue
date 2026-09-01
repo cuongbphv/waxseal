@@ -4,9 +4,12 @@
  * Every value here is read from the server. Three of the design's numbers had
  * to change shape to stay honest:
  *
- *   - `segments` has no command in this build, so the column renders the em
- *     dash with a `title` naming Workstream B. Never `1`: a segment count of
- *     one is a measurement, and nobody took it.
+ *   - `segments` is not one of the three reads a row makes — `loadChainOverview`
+ *     fetches summary, verify and report — so the column renders the em dash
+ *     with a `title` saying no count was taken. Workstream B shipped the
+ *     command, which makes the dash a statement about this ROW rather than
+ *     about the build. Never `1`: a segment count of one is a measurement, and
+ *     nobody took it.
  *   - `dropped_writes` is `int | None`. `None` renders the WORD, and the
  *     aggregate says how many chains it could measure — a sum over a partial
  *     set presented as a total is the same collapse in a different place.
@@ -198,7 +201,7 @@ function anchorCell(row: ChainOverview) {
         </template>
 
         <template #cell-segments>
-          <span class="muted-2" :title="t('segmentsWorkstreamTitle')">{{ t('notApplicable') }}</span>
+          <span class="muted-2" :title="t('segmentsNotCountedTitle')">{{ t('notApplicable') }}</span>
         </template>
 
         <template #cell-entries="{ row }">

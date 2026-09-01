@@ -184,10 +184,10 @@ key that leaks lets them read every trail on the server and mint more keys.
 
 The chain id is derived from the event's own `cwd`, so each project lands on its
 own chain rather than braiding every project into one. Set `WAXSEAL_CHAIN_ID` to
-override it. Note that the full per-project slug routing for LOCAL trails is
-Workstream B and has not shipped; this is the remote-target form of the same
-idea, and it uses a readable project name because a chain id is read by people
-in a portal.
+override it. This is the remote-target form of the per-project routing Workstream
+B shipped for LOCAL trails in 0.1.5 (`integrations/_trail.py`'s `routed_trail`);
+it uses a readable project name rather than that slug because a chain id is read
+by people in a portal.
 
 If the server is unreachable the hook exits 0 with a labelled notice on stderr
 and the event is lost. That is the observer contract working: a broken audit
@@ -253,12 +253,15 @@ the conformance ledger uses: written is not shipped.
 - **No 2FA and no session history.** The operator table tracks what it can
   actually observe — role, creation, whether a key has ever been used. Columns
   the server cannot fill are absent rather than rendered as em dashes.
-- **The `preflight` screen reports `unavailable`.** It ships in Workstream E.
-  Until then the API says the capability is absent (`GET /v1/capabilities`
-  reports it present-and-false) and the screen says so. `segments` was in the
-  same position until Workstream B shipped it in 0.1.5; the capability gate is
-  parsed from `waxseal --help`, so that screen started rendering the verifier's
-  own output with no server change beyond the argument it is handed (below).
+- **No longer on this list: the `preflight` and `segments` screens.** Both were
+  recorded here as unshipped. Workstream B shipped `segments` and Workstream E
+  shipped `preflight`, both in 0.1.5, and because the capability gate is parsed
+  from `waxseal --help` each screen started rendering the verifier's own output
+  with no server change beyond the argument `segments` is handed (below). The
+  entry is kept rather than deleted because the gate did not go away with them:
+  a screen still reports `unavailable` whenever the wheel behind this server
+  lacks the command (`GET /v1/capabilities` reports it present-and-false),
+  which is the ordinary state of an older wheel behind a newer portal.
 - **No `.receipts` sidecar on the client side.** That is Workstream J2. This
   server already publishes the head a client would store, so the sidecar lands
   without a server change.
@@ -272,10 +275,12 @@ them, so an operator can reproduce any verdict on their own machine.
 
 Two consequences worth knowing:
 
-- Commands this build of waxseal does not have (`preflight` — 0.1.5 Workstream E)
-  report `"status": "unavailable"` with a null verdict. They are never run,
-  because argparse also exits 2 and that would arrive looking exactly like
-  "unverifiable" — a verdict nobody computed.
+- Commands this build of waxseal does not have report `"status": "unavailable"`
+  with a null verdict. They are never run, because argparse also exits 2 and
+  that would arrive looking exactly like "unverifiable" — a verdict nobody
+  computed. As of 0.1.5 the wheel has every read this server offers, so the path
+  is reached only by an older wheel behind a newer server — the case it exists
+  for.
 - Exit 3 ("nothing was read") is reported as `"absent"`, never as a break. A
   tamper report against a file that does not exist is a false alarm.
 - `segments` is handed the DIRECTORY holding the trail, not the trail file: it
