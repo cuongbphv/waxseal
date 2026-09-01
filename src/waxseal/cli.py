@@ -2732,6 +2732,14 @@ _PREFLIGHT_LEDGER: Final = (
     "`waxseal verify --rpc URL --liveness ADDR` is what checks one (F4)"
 )
 
+_PREFLIGHT_PREFIX_MECHANISM: Final = (
+    "DESIGN.md §11 names exactly two mechanisms that raise a prefix from "
+    "evidence to scoped proof — a finalized external ledger anchor (0.1.5 "
+    "Workstream F) or a WORM-locked archived segment (S3 Object Lock, "
+    "Workstream J1) — and preflight confirms neither: it opens no network "
+    "connection and holds no storage credentials"
+)
+
 
 def _declared_bool(value: bool) -> str:
     # "true"/"false" rather than Python's True/False: this line sits beside
@@ -2755,12 +2763,19 @@ def _observed_label(observed: Observed) -> str:
 @dataclass(frozen=True, slots=True)
 class _AnchorView:
     """What the `.anchors` sidecar shows a preflight run, as the ternary
-    observations the ladder consumes plus the lines that report them."""
+    observations the ladder consumes plus the lines that report them.
+
+    ``latest_seq`` is ``None`` for two different reasons — no anchor record
+    exists, or the sidecar could not be read — and J4's immutable-prefix
+    lines (below) tell those apart from ``records.found`` rather than
+    guessing a checkpoint from an absent number.
+    """
 
     lines: tuple[str, ...]
     records: Observed
     external: Observed
     aggregate: Observed
+    latest_seq: int | None
 
 
 def _preflight_anchors(trail: Path) -> _AnchorView:
@@ -2796,6 +2811,7 @@ def _preflight_anchors(trail: Path) -> _AnchorView:
             records=unparsed,
             external=unparsed,
             aggregate=unparsed,
+            latest_seq=None,
         )
 
     unreadable = Observed(
@@ -2861,7 +2877,39 @@ def _preflight_anchors(trail: Path) -> _AnchorView:
         records=anchor_records,
         external=external,
         aggregate=aggregate,
+        latest_seq=records[-1].checkpoint.seq if records else None,
     )
+
+
+def _preflight_immutable_prefix_lines(anchors: _AnchorView) -> tuple[str, str]:
+    """J4 (waxseal-p8s): the prefix/tail split threat-model.md section 1 and
+    DESIGN.md §11 both name, printed as trailing lines rather than folded
+    into the ladder above it. Deliberately not a rung: the ladder's PRESENT
+    means a mechanism is CONFIGURED (`domain/preflight.py`'s own docstring),
+    never that a ledger anchor is finalized or a segment is WORM-locked —
+    claims this command can never make, ladder or no ladder, because it
+    opens no network connection and holds no storage credentials.
+    """
+    if anchors.latest_seq is not None:
+        checkpoint = f"seq {anchors.latest_seq}"
+        tail = f"seq {anchors.latest_seq} onward"
+    elif anchors.records.found is None:
+        checkpoint = "UNMEASURED (the .anchors sidecar could not be read)"
+        tail = "the whole trail — no checkpoint could be read"
+    else:
+        checkpoint = "NONE (no anchor record on this trail)"
+        tail = "the whole trail — nothing is anchored"
+    prefix_line = (
+        f"immutable prefix: up to checkpoint {checkpoint}, mechanism NOT "
+        f"CONFIRMED this run (finalized ledger / WORM / none) — "
+        f"{_PREFLIGHT_PREFIX_MECHANISM}"
+    )
+    tail_line = (
+        f"tail from {tail}: tamper-evident only, never more — the live tail "
+        "and write-time honesty are limits DESIGN.md §11 says no mechanism "
+        "closes"
+    )
+    return prefix_line, tail_line
 
 
 @dataclass(frozen=True, slots=True)
@@ -3126,14 +3174,14 @@ def _preflight(path: str, *, pin_path: Path | None) -> int:
         )
     ):
         print(line)
-    # J4 (waxseal-p8s) inserts its two lines HERE, between the ladder and the
-    # scope line: "immutable prefix up to checkpoint N, by mechanism M
-    # (finalized ledger / WORM / none)" and "tail from seq N onward:
-    # tamper-evident only". They qualify the rung claim above rather than the
-    # configuration list, and `adapters/s3.py::render_worm_state` already
-    # returns ready-made lines for the WORM mechanism (print those verbatim:
-    # a BUCKET-level finding must never be re-worded into an object-level
-    # guarantee).
+    # J4 (waxseal-p8s): the prefix/tail split, qualifying the ladder's PRESENT
+    # ("configured") rather than adding a rung — see
+    # `_preflight_immutable_prefix_lines`'s own docstring for why this reads
+    # from `anchors` alone and never opens the network/S3 connection a real
+    # ledger-finality or WORM-lock check would need.
+    print()
+    for line in _preflight_immutable_prefix_lines(anchors):
+        print(line)
     print()
     print(_PREFLIGHT_SCOPE)
     return 0

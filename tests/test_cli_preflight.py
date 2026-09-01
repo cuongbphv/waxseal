@@ -508,3 +508,65 @@ class TestScope:
         _, out = preflight(capsys, str(trail))
         assert "not a verdict" in out
         assert "waxseal verify" in out
+
+
+class TestImmutablePrefixLines:
+    """J4 (waxseal-p8s): the invariant prefix line (mechanism + checkpoint)
+    and the scope-honest tail line (DESIGN.md §11), present in every
+    scenario — not folded into the ladder, and never claiming a mechanism
+    this command cannot check (no network, no storage credentials)."""
+
+    def test_a_bare_trail_names_no_checkpoint_and_the_tail_is_the_whole_trail(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        trail = tmp_path / "trail.jsonl"
+        make_trail(trail)
+        _, out = preflight(capsys, str(trail))
+        assert "immutable prefix: up to checkpoint NONE" in out
+        assert "mechanism NOT CONFIRMED this run (finalized ledger / WORM / none)" in out
+        assert "DESIGN.md §11" in out
+        assert (
+            "tail from the whole trail — nothing is anchored: tamper-evident "
+            "only, never more"
+        ) in out
+        # CLAUDE.md: "tamper-proof" is only ever SCOPED, and this command
+        # never claims it at all (same discipline as the ladder above).
+        assert "tamper-proof" not in out
+
+    def test_an_anchored_trail_names_the_latest_anchored_seq_both_lines(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        trail = tmp_path / "trail.jsonl"
+        make_trail(trail, sealed=True)
+        assert main(["anchor", str(trail)]) == 0
+        capsys.readouterr()
+        _, out = preflight(capsys, str(trail))
+        assert "immutable prefix: up to checkpoint seq 2" in out
+        assert "tail from seq 2 onward: tamper-evident only, never more" in out
+        assert "tamper-proof" not in out
+
+    def test_an_unparseable_sidecar_leaves_the_checkpoint_unmeasured_not_none(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Same rule 5 discipline `TestNotMeasuredIsNeverZero` already checks
+        # for the ladder: a sidecar this build cannot read might have
+        # carried a checkpoint, so the prefix line must not print NONE.
+        trail = tmp_path / "trail.jsonl"
+        make_trail(trail, sealed=True)
+        Path(str(trail) + ".anchors").write_text("{not json at all\n")
+        _, out = preflight(capsys, str(trail))
+        assert "immutable prefix: up to checkpoint UNMEASURED" in out
+        assert "the .anchors sidecar could not be read" in out
+        assert "tail from the whole trail — no checkpoint could be read" in out
+        assert "up to checkpoint NONE" not in out
+
+    def test_the_two_lines_sit_between_the_ladder_and_the_scope_line(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        trail = tmp_path / "trail.jsonl"
+        make_trail(trail)
+        _, out = preflight(capsys, str(trail))
+        ladder_at = out.index("attacker-capability ladder")
+        prefix_at = out.index("immutable prefix:")
+        scope_at = out.index("scope: this is a reading of CONFIGURATION")
+        assert ladder_at < prefix_at < scope_at

@@ -38,6 +38,8 @@ plain hash chain exists to create such copies:
 | Witness (SPEC 14) | another host | rewrite *and* split views |
 | Pinned head (SPEC 13) | the verifier | rewrite of history this verifier already saw |
 | Forward-secure seal (SPEC 11) | the evolving keyfile | insertion and truncation, while the key holder is honest |
+| Finalized ledger checkpoint (0.1.5 Workstream F, section 7) | the chain's own validators | equivocation on an anchored, already-finalized prefix — never a fresh, internally-consistent lie signed only once |
+| WORM-locked archived segment (S3 Object Lock, `adapters/s3.py`, Workstream J1) | the storage provider, in COMPLIANCE mode only | overwrite or deletion of an already-sealed, already-archived segment — prevention, not detection |
 
 Practical "proof" is a *combination*, and the combination is only as strong as
 its weakest separation:
@@ -45,14 +47,43 @@ its weakest separation:
 1. Anchor to at least two authorities that do not share an operator.
 2. Keep the seal key under a different administrative authority than the
    application that writes the trail.
-3. Put the storage on write-once media where the platform offers it (S3 Object
-   Lock in compliance mode, for instance). waxseal ships no code for this — it
-   is a storage configuration, and a library cannot enforce it.
+3. Put the storage on write-once media where the platform offers it. As of
+   0.1.5 Workstream J1, waxseal ships `adapters/s3.py` support for S3 Object
+   Lock on archived, sealed segments — but the OPERATOR still configures and
+   declares the bucket's retention mode (COMPLIANCE vs GOVERNANCE); waxseal
+   ships no default, the same discipline `--tsa-ca-file` already follows for
+   RFC 3161. Only COMPLIANCE mode is a guarantee against the account's own
+   operator (`WormStrength`, `adapters/s3.py`) — GOVERNANCE remains
+   bypassable by whoever holds `s3:BypassGovernanceRetention`.
 4. Pin, and keep the pin file somewhere the trail's writer cannot reach.
 
 Miss any one of these and the corresponding attack comes back. That is the
 honest shape of the answer: not a feature you enable, but a set of separations
 you maintain.
+
+**Tamper-evident vs tamper-proof, precisely.** Two of the items above are no
+longer aspirational — Workstream F and Workstream J1 shipped them for 0.1.5 —
+so the vocabulary is now fixed everywhere in this codebase (CLAUDE.md,
+DESIGN.md §11): **Tamper-evident is the headline claim; "tamper-proof" is
+only ever SCOPED: the anchored prefix on a finalized external ledger,
+WORM-archived segments — never the live tail, never write-time honesty.** Two
+limits survive both mechanisms, by construction rather than by budget
+(DESIGN.md §11):
+
+1. **Write-time honesty.** No hash prevents recording a lie or omitting an
+   event at the moment of writing. Tamper-proof ≠ truth-proof.
+2. **The live tail.** Whatever has not yet been externalized — anchored,
+   acknowledged, archived — is rewritable by a write-capable attacker.
+   Mechanisms shrink this window; none closes it.
+
+Section 7 states the ledger half of this precisely, attacker state by
+attacker state. The WORM half is `adapters/s3.py`'s `WormReport`
+(`worm_locked` / `worm_unlocked` / `worm_unknown`, rendered by
+`render_worm_state`) — checked-and-locked, checked-and-not, or unmeasured,
+never collapsed into either binary (CLAUDE.md rule 5). `waxseal preflight`
+prints, as a labelled prefix/tail split, which of the two mechanisms — if
+either — this run could confirm bounds an immutable prefix, and says so
+without opening a network connection to check either one itself (section 5).
 
 ---
 
@@ -222,31 +253,46 @@ different administrative authority.
 | trail + keyfile | yes, locally | anchors: an external record of the old root |
 | trail + keyfile + `.anchors` | yes, locally | external anchor: the TSA / calendar / witness holds its own copy |
 | trail + keyfile + `.sealagg` | previously yes (replay + truncate) | the aggregate binding in an anchored checkpoint (SPEC 15) |
-| all local files + the anchor sink | yes | nothing this library can offer |
-| all local files + every witness | yes | nothing — this is the collusion case |
+| all local files + the anchor sink | yes, for the live tail and anything never anchored | nothing this library can offer there; the one exception is the anchored prefix on a finalized external ledger (0.1.5 Workstream F, section 7) — acknowledged history in that prefix cannot be re-told without producing a slashable equivocation proof (DESIGN.md §11) |
+| all local files + every witness | yes, for the live tail and anything never anchored | nothing there — this is the collusion case; the same finalized-ledger exception above still holds, because the ledger's own validators sit under a different administrative authority than any witness, so witness collusion does not reach it |
 
-The row that changed in this release is the fourth. SPEC 11 documented a
-residual risk: an attacker who truncates the trail can copy an older
-`.sealagg` back into place, and every local check — `verify`,
-`verify_attestations`, even the aggregate — agrees, because they all read the
-same rewritten files. Binding the aggregate commitment into the anchored
-checkpoint moves that claim outside the attacker's reach: the anchor still says
-five rows were folded, and the trail now holds two.
+Three rows changed in this release: the fourth, and the last two. SPEC 11
+documented a residual risk for the fourth: an attacker who truncates the trail
+can copy an older `.sealagg` back into place, and every local check —
+`verify`, `verify_attestations`, even the aggregate — agrees, because they all
+read the same rewritten files. Binding the aggregate commitment into the
+anchored checkpoint moves that claim outside the attacker's reach: the anchor
+still says five rows were folded, and the trail now holds two.
 (`tests/test_anchored_aggregate_log.py` carries the falsifiability receipt: the
 forgery passes `verify()` and `verify_attestations()` and fails only against
 the anchor.)
+
+The last two rows carry the one exception DESIGN.md §11 documents — and
+nothing more. It is scoped three ways at once: to the PREFIX that was already
+anchored and finalized before this attacker arrived (never the live tail
+written after), to a writer that EQUIVOCATES to cover the rewrite (section 7's
+own table: a fresh, internally-consistent lie that is signed only once
+produces no contradiction for `BondedCheckpoints.proveEquivocation` to catch),
+and to detection, never recovery (the trail's own bytes are still whatever the
+attacker wrote locally — the ledger only lets a third party PROVE that
+contradicts what it finalized). `waxseal preflight` (section 5's own ladder,
+`domain/preflight.py`) prints this exception as a labelled prefix/tail split
+rather than folding it into the ladder's PRESENT/ABSENT rungs, precisely so it
+cannot be read as raising rung 5 or 6 themselves.
 
 What is committed is a *commitment*,
 `sha256(prefix || u64be(2) || lp(epoch) || lp(agg))`, never the accumulator
 itself — publishing intermediate accumulators would hand a truncating attacker
 exactly the value the scheme forbids persisting.
 
-**The operational requirement, stated plainly:** the seal key, the anchor sink,
-and the witness must each be under a *different* administrative authority than
-the process that writes the trail. If the same team, the same service account,
-or the same compromised host controls both sides, the mechanism records the
-attack rather than detecting it. No configuration flag substitutes for this,
-and waxseal cannot check it for you.
+**The operational requirement, stated plainly:** the seal key, the anchor
+sink, the witness, and the ledger must each be under a *different*
+administrative authority than the process that writes the trail. If the same
+team, the same service account, or the same compromised host controls both
+sides, the mechanism records the attack rather than detecting it. No
+configuration flag substitutes for this, and waxseal cannot check it for you
+(`domain/preflight.py`'s `_OPERATIONAL_REQUIREMENT` restates this exact
+sentence for `waxseal preflight` to print, so the two copies cannot drift).
 
 ---
 
