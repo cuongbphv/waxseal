@@ -444,8 +444,10 @@ class SegmentUpload:
     ``uploaded`` and ``worm.state`` are independent facts and must stay
     separable: a PUT can succeed while the retention check cannot be made, so
     collapsing the two would let a successful REQUEST masquerade as a verified
-    guarantee. Read by J3 (rotation archiving) and surfaced by preflight
-    (J4); both read these fields and neither needs this module's internals.
+    guarantee. Read by J3 (rotation archiving), which reads these fields and
+    needs none of this module's internals. `waxseal preflight` (J4) does NOT
+    read this dataclass — it names WORM as a mechanism without checking
+    bucket/object state itself (see `bucket_worm_state`'s docstring).
     """
 
     key: str
