@@ -181,6 +181,14 @@ row.
 Adding a *hard* dependency is a different question, and the answer is no. Extras
 are the sanctioned route.
 
+The shipped-extras table above is the single source for these client package
+names and version specifiers. [README.vi.md](README.vi.md) and
+[README.zh.md](README.zh.md) translate the prose of this section but link back
+to that table rather than duplicating the strings, so a translation that falls
+behind costs a click and never prints a wrong install command. Ship or retire an
+extra and you edit that table; the other two READMEs need touching only when the
+*list of shipped extra names* changes, which they do carry in prose.
+
 ## Usage
 
 ```python

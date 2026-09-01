@@ -1,5 +1,7 @@
 # Sổ đối chiếu với bài luận
 
+*[English](conformance.md)*
+
 Một bài phân tích độc lập kiểu arXiv về waxseal (viết trên v0.1.3) đã chứng minh một tập kết
 quả về thư viện này, đề xuất một tập construction, kê một quy trình đánh giá tám mục, và báo
 hai finding. Bản 0.1.4 đã xử lý một phần.
