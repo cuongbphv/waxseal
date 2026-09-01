@@ -164,10 +164,20 @@ def decode_descriptor(raw: bytes) -> tuple[str, ...] | None:
 
 REGISTRY_AGREES: Final = "agrees"
 REGISTRY_DISAGREES: Final = "disagrees"
+# waxseal-fg4.44: split from one merged "unreachable" status that used to
+# cover both "the registry holds nothing for this fingerprint" (a firm,
+# measured conclusion -- nobody registered it) and "the registry could not
+# be read" (nothing was measured at all). Collapsing those is the Ternary
+# Evidence Principle's collapse in miniature (CLAUDE.md, instance 11): an
+# operator told "unreachable" when the chain in fact answered "no" is told
+# a weaker claim than the evidence supports, and an operator told "absent"
+# for a node that never answered is told a stronger one than it does.
+REGISTRY_ABSENT: Final = "absent"
 REGISTRY_UNREACHABLE: Final = "unreachable"
 
 REGISTRY_DISAGREEMENT: Final = "registry_disagreement"
-REGISTRY_ABSENT_OR_UNREACHABLE: Final = "registry_absent_or_unreachable"
+REGISTRY_NOT_REGISTERED: Final = "registry_fingerprint_not_registered"
+REGISTRY_COULD_NOT_BE_READ: Final = "registry_could_not_be_read"
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +218,7 @@ class RegistryFinding:
 _REGISTRY_STATUS: Final[dict[str, Verdict]] = {
     REGISTRY_AGREES: Verdict.OK,
     REGISTRY_DISAGREES: Verdict.UNVERIFIABLE,
+    REGISTRY_ABSENT: Verdict.UNVERIFIABLE,
     REGISTRY_UNREACHABLE: Verdict.UNVERIFIABLE,
 }
 
@@ -218,24 +229,45 @@ class RegistryCrossCheck:
     def __init__(self, registry: VersionRegistry) -> None:
         self._registry = registry
 
-    def check(self, fingerprint_: str, onchain_descriptor: bytes | None) -> RegistryFinding:
+    def check(
+        self, fingerprint_: str, onchain_descriptor: bytes | None, *, reachable: bool = True
+    ) -> RegistryFinding:
         """Cross-check one fingerprint against what the chain returned.
 
-        `onchain_descriptor is None` covers both "the registry holds nothing
-        for this fingerprint" and "the registry could not be read": neither
-        measured anything about agreement, and the caller that owns the
-        network puts the distinction in the reason it passes on. Agreement is
-        decided by SHA-256, the same computation the contract performs, so
-        the answer does not depend on this build being able to PARSE the
-        descriptor it was given.
+        `reachable` is the caller's OWN measurement, not something this
+        method can infer from `onchain_descriptor` alone: only the caller
+        that actually made the network call knows whether it got back a real
+        (possibly empty) answer or nothing at all. Conflating the two here
+        would be exactly the collapse this split exists to undo, so a caller
+        that could not read the registry MUST pass `reachable=False` rather
+        than leaving this method to guess from a `None` descriptor.
+
+        `reachable=False` -> `REGISTRY_UNREACHABLE`: nothing was measured,
+        regardless of what `onchain_descriptor` happens to hold.
+
+        `reachable=True, onchain_descriptor is None` -> `REGISTRY_ABSENT`: a
+        real, measured answer -- the registry was asked and it holds nothing
+        for this fingerprint. A firm conclusion, not a shrug.
+
+        Otherwise, agreement is decided by SHA-256, the same computation the
+        contract performs, so the answer does not depend on this build being
+        able to PARSE the descriptor it was given.
         """
         known = self._registry.knows(fingerprint_)
         recomputable = self._registry.recomputable(fingerprint_)
-        if onchain_descriptor is None:
+        if not reachable:
             return RegistryFinding(
                 fingerprint=fingerprint_,
                 status=REGISTRY_UNREACHABLE,
-                reason=REGISTRY_ABSENT_OR_UNREACHABLE,
+                reason=REGISTRY_COULD_NOT_BE_READ,
+                locally_known=known,
+                locally_recomputable=recomputable,
+            )
+        if onchain_descriptor is None:
+            return RegistryFinding(
+                fingerprint=fingerprint_,
+                status=REGISTRY_ABSENT,
+                reason=REGISTRY_NOT_REGISTERED,
                 locally_known=known,
                 locally_recomputable=recomputable,
             )

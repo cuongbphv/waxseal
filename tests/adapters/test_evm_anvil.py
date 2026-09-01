@@ -62,7 +62,11 @@ from waxseal.domain.checkpoint import Checkpoint
 from waxseal.domain.fingerprint import HEADER_FIELDS, fingerprint_for
 from waxseal.domain.liveness import DELINQUENT, LIVE, NO_CHECKPOINT_ON_LEDGER, UNREACHABLE
 from waxseal.domain.registry import (
+    REGISTRY_ABSENT,
     REGISTRY_AGREES,
+    REGISTRY_COULD_NOT_BE_READ,
+    REGISTRY_NOT_REGISTERED,
+    REGISTRY_UNREACHABLE,
     RegistryCrossCheck,
     VersionRegistry,
     descriptor_frame,
@@ -519,6 +523,28 @@ class TestTheRegistry:
     def test_an_unknown_fingerprint_is_absent_not_a_failure(self, chain: Deployment) -> None:
         assert _reader(chain).registry_lookup("ff" * 32) is None
 
+    def test_registry_agreement_reports_absent_for_a_genuinely_unregistered_fingerprint(
+        self, chain: Deployment
+    ) -> None:
+        # waxseal-fg4.44: two REAL registrations, then ask about a third that
+        # was never one of them. The contract answers with empty bytes for
+        # the third (never a revert -- `FingerprintRegistry.sol`'s `lookup`
+        # has no failure path), which is the measured "absent" this bead
+        # exists to keep apart from a killed node
+        # (TestQuorumAgainstRealOutages.test_registry_agreement_is_unreachable_
+        # when_the_node_is_down below).
+        registered_a = descriptor_frame(("seq", "ts", "fg4_44_registered_a"))
+        registered_b = descriptor_frame(("seq", "ts", "fg4_44_registered_b"))
+        never_registered_fp = fingerprint_for(("seq", "ts", "fg4_44_never_registered"))
+        for url in chain.urls:
+            _sink(chain, url).register_fingerprint(registered_a)
+            _sink(chain, url).register_fingerprint(registered_b)
+        finding = _reader(chain).registry_agreement(
+            RegistryCrossCheck(VersionRegistry()), never_registered_fp
+        )
+        assert finding.status == REGISTRY_ABSENT
+        assert finding.reason == REGISTRY_NOT_REGISTERED
+
     def test_a_duplicate_registration_is_rejected_by_the_contract(
         self, chain: Deployment
     ) -> None:
@@ -588,6 +614,26 @@ class TestQuorumAgainstRealOutages:
         verdict = reader.liveness(TRAIL, now=datetime.now(UTC))
         # An outage must never be rendered as a writer that stopped anchoring.
         assert verdict.status == UNREACHABLE
+
+    def test_registry_agreement_is_unreachable_when_the_node_is_down(
+        self, chain: Deployment
+    ) -> None:
+        # waxseal-fg4.44's other half: a REAL killed node, not a fake
+        # exception, must land on `REGISTRY_UNREACHABLE`, never on the
+        # `REGISTRY_ABSENT` the previous test's real registrations proved a
+        # live node reports for a fingerprint nobody registered. Same
+        # fingerprint on both sides of this file's pair on purpose -- the
+        # only thing that differs is whether the node answered at all.
+        never_registered_fp = fingerprint_for(("seq", "ts", "fg4_44_never_registered"))
+        victim = _start_anvil()
+        reader = EvmLedgerReader([chain.urls[0], victim.url], chain.contracts)
+        victim.process.kill()
+        victim.process.wait(timeout=10)
+        finding = reader.registry_agreement(
+            RegistryCrossCheck(VersionRegistry()), never_registered_fp
+        )
+        assert finding.status == REGISTRY_UNREACHABLE
+        assert finding.reason == REGISTRY_COULD_NOT_BE_READ
 
 
 class TestTheBlockTagIsLoadBearing:

@@ -88,6 +88,7 @@ from waxseal.domain.liveness import (
     UNREACHABLE,
 )
 from waxseal.domain.registry import (
+    REGISTRY_ABSENT,
     REGISTRY_AGREES,
     REGISTRY_DISAGREES,
     REGISTRY_UNREACHABLE,
@@ -667,6 +668,33 @@ class TestRegistryTernary:
             cross, fp
         )
         assert finding.status == REGISTRY_UNREACHABLE
+
+    def test_registry_agreement_is_absent_when_the_fingerprint_is_not_registered(self) -> None:
+        # waxseal-fg4.44: `FingerprintRegistry.lookup` never reverts -- an
+        # unregistered fingerprint answers with EMPTY bytes, a real contract
+        # answer this fake node reproduces exactly (contracts/src/
+        # FingerprintRegistry.sol). Distinct from the killed-node test above:
+        # both hand `registry_agreement` a `None` descriptor internally, but
+        # one is a measured "no" and the other is nothing measured at all.
+        cross, fp, _ = self.known()
+        finding = reader(both(calls({LOOKUP: ok(dynamic_bytes(b""))}))).registry_agreement(
+            cross, fp
+        )
+        assert finding.status == REGISTRY_ABSENT
+
+    def test_absent_and_unreachable_render_as_different_states(self) -> None:
+        cross, fp, _ = self.known()
+        absent = reader(both(calls({LOOKUP: ok(dynamic_bytes(b""))}))).registry_agreement(
+            cross, fp
+        )
+        unreachable = reader(
+            {URL_A: Down("refused"), URL_B: Down("refused")}
+        ).registry_agreement(cross, fp)
+        assert absent.status != unreachable.status
+        assert absent.reason != unreachable.reason
+        # Both are still exit 2 -- never a break -- which is exactly why the
+        # status string, not the exit code, is what has to carry the fact.
+        assert absent.to_verdict().to_exit_code() == unreachable.to_verdict().to_exit_code() == 2
 
     def test_a_registry_disagreement_between_endpoints_is_not_flattened(self) -> None:
         cross, fp, raw = self.known()

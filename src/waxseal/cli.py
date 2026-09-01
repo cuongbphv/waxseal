@@ -3113,9 +3113,11 @@ def _ledger_check(
     to_verify_verdict()` and `RegistryFinding.to_verdict()` both map onto
     ``{OK, UNVERIFIABLE}`` only (domain/liveness.py, domain/registry.py), so
     every new reason this dimension can print — ``ledger_delinquent``,
-    ``registry_disagreement``, ``ledger_unreachable`` — reaches exit 2 and
-    only exit 2, by the shape of the tables it reads through, not by a check
-    written here.
+    ``registry_disagreement``, ``registry_fingerprint_not_registered``
+    (waxseal-fg4.44: a firm "nobody registered this" answer, distinct from
+    ``registry_could_not_be_read``), ``ledger_unreachable`` — reaches exit 2
+    and only exit 2, by the shape of the tables it reads through, not by a
+    check written here.
     """
     from waxseal.adapters.evm import EvmContracts, EvmLedgerReader
     from waxseal.domain.liveness import LEDGER_UNREACHABLE

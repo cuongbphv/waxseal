@@ -599,21 +599,25 @@ class EvmLedgerReader:
     def registry_agreement(
         self, cross_check: RegistryCrossCheck, fingerprint: str
     ) -> RegistryFinding:
-        """agrees / disagrees / unreachable-or-absent.
+        """agrees / disagrees / absent / unreachable.
 
-        A registry that could not be read and a registry holding nothing both
-        arrive as `None`, which is `RegistryCrossCheck`'s designed input and
-        yields reason `registry_absent_or_unreachable` — a string that claims
-        neither. The finer distinction is not invented here: it would need a
-        reason `domain/registry.py` does not define, and a verdict vocabulary
-        is not something an adapter gets to extend on its own.
+        waxseal-fg4.44: `registry_lookup` already keeps these apart at the
+        source, the same way `on_chain_delinquency`/`liveness` above keep a
+        recognised `TrailNotRegistered` revert apart from any other failure
+        -- `lookup(bytes32)` never reverts at all (`FingerprintRegistry.sol`),
+        it answers with empty bytes for an unregistered fingerprint, so a
+        `None` RETURNED by `registry_lookup` is a real, measured "no" and a
+        `LedgerUnreachable` RAISED by it is nothing measured. This method's
+        only job is to not re-merge what the source already told apart:
+        `reachable=False` is passed only for the raised case, never inferred
+        from the descriptor's own value.
         """
         try:
             descriptor = self.registry_lookup(fingerprint)
         except LedgerDisagreement:
             raise
         except LedgerUnreachable:
-            descriptor = None
+            return cross_check.check(fingerprint, None, reachable=False)
         return cross_check.check(fingerprint, descriptor)
 
 

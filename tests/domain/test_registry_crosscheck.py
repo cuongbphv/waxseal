@@ -24,10 +24,12 @@ from waxseal.domain.fingerprint import (
 )
 from waxseal.domain.hashing import ENCODING
 from waxseal.domain.registry import (
-    REGISTRY_ABSENT_OR_UNREACHABLE,
+    REGISTRY_ABSENT,
     REGISTRY_AGREES,
+    REGISTRY_COULD_NOT_BE_READ,
     REGISTRY_DISAGREEMENT,
     REGISTRY_DISAGREES,
+    REGISTRY_NOT_REGISTERED,
     REGISTRY_UNREACHABLE,
     RegistryCrossCheck,
     RegistryFinding,
@@ -141,10 +143,33 @@ class TestCrossCheck:
         assert finding.onchain_descriptor_hex == b"poison".hex()
 
     def test_a_registry_that_holds_nothing_for_this_fingerprint(self) -> None:
+        # waxseal-fg4.44: a REAL, measured answer -- the registry was asked
+        # and it holds nothing here -- not the same fact as the registry
+        # being unreachable, so this is `reachable=True` (the default) with
+        # a `None` descriptor, and gets its own status.
         finding = self.check().check(fingerprint(), None)
-        assert finding.status == REGISTRY_UNREACHABLE
-        assert finding.reason == REGISTRY_ABSENT_OR_UNREACHABLE
+        assert finding.status == REGISTRY_ABSENT
+        assert finding.reason == REGISTRY_NOT_REGISTERED
         assert finding.to_verdict() is Verdict.UNVERIFIABLE
+
+    def test_a_registry_that_could_not_be_read(self) -> None:
+        # The other half of the split: nothing was measured at all. The
+        # caller (adapters/evm.py) is the only one that knows this, which is
+        # why it is a keyword the caller passes, never inferred from the
+        # descriptor's own value.
+        finding = self.check().check(fingerprint(), None, reachable=False)
+        assert finding.status == REGISTRY_UNREACHABLE
+        assert finding.reason == REGISTRY_COULD_NOT_BE_READ
+        assert finding.to_verdict() is Verdict.UNVERIFIABLE
+
+    def test_absent_and_unreachable_are_different_states(self) -> None:
+        # The whole point of the split: two calls that both hand back
+        # `onchain_descriptor=None` must render as DIFFERENT facts, not the
+        # same message twice.
+        absent = self.check().check(fingerprint(), None)
+        unreachable = self.check().check(fingerprint(), None, reachable=False)
+        assert absent.status != unreachable.status
+        assert absent.reason != unreachable.reason
 
     def test_a_fingerprint_on_chain_that_this_build_never_heard_of(self) -> None:
         fields = ("seq", "ts", "payload_hash")
@@ -199,3 +224,34 @@ class TestFalsifiabilityReceipt:
 
     def test_the_receipt_is_recorded(self) -> None:
         assert "1 failed" in (TestFalsifiabilityReceipt.__doc__ or "")
+
+
+class TestAbsentVsUnreachableFalsifiabilityReceipt:
+    """Receipt for waxseal-fg4.44's split, run 01/09/2026.
+
+    The prior receipt above proved the merged `unreachable` state must not
+    collapse into `disagrees`. This one proves the SPLIT itself is real: that
+    `REGISTRY_ABSENT` and `REGISTRY_UNREACHABLE` are two states a test can
+    tell apart, not one state with two names. Re-merging them --
+    `if not reachable or onchain_descriptor is None: return ... UNREACHABLE
+    ...` in place of the two separate branches `check()` now has -- was run
+    against this file:
+
+        FAILED tests/domain/test_registry_crosscheck.py::TestCrossCheck::
+            test_a_registry_that_holds_nothing_for_this_fingerprint
+        AssertionError: assert 'unreachable' == 'absent'
+        FAILED tests/domain/test_registry_crosscheck.py::TestCrossCheck::
+            test_absent_and_unreachable_are_different_states
+        AssertionError: assert 'unreachable' != 'unreachable'
+        2 failed, 22 passed in 0.76s
+
+    Split restored: 24 passed. Both failures land on the STATUS, never the
+    exit code -- both merged and split map to exit 2 -- which is exactly why
+    an operator reading only the exit code could never see this regression;
+    the status string is the only place the fact survives.
+    """
+
+    def test_the_receipt_is_recorded(self) -> None:
+        doc = TestAbsentVsUnreachableFalsifiabilityReceipt.__doc__ or ""
+        assert "2 failed, 22 passed" in doc
+        assert "Split restored: 24 passed" in doc
