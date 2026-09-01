@@ -177,6 +177,26 @@ class TestPublicApiFrozen:
             "SeparationTopology",
             "Verdict",
             "separation_degree",
+            # 0.1.5's sealed segments, promoted by owner decision (01/09/2026)
+            # once the shape had two real consumers: the hook integrations and
+            # the chain server both already build on open_segmented, so the
+            # "stays behind its module until something actually needs it here"
+            # bar the decision-schema comment above sets is met. project_slug
+            # and verify_segments are the read half: a third-party verifier
+            # routing or checking a segment directory needs the same slug and
+            # the same verdict arithmetic the writer used, not a re-derivation.
+            # SegmentRead/SegmentState/SegmentsResult come along because a
+            # verification primitive whose signature names non-public types is
+            # not actually public. open_segmented is the one sources/ name
+            # exported — the precedent that record_decision/record_file stay
+            # unexported holds for *recorders of business events*; this is the
+            # storage-lifecycle counterpart of AuditLog.open, not an ingester.
+            "SegmentRead",
+            "SegmentState",
+            "SegmentsResult",
+            "open_segmented",
+            "project_slug",
+            "verify_segments",
         }
 
 

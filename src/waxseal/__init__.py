@@ -21,10 +21,18 @@ from waxseal.domain.export import (
 from waxseal.domain.fingerprint import fingerprint, fingerprint_for
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
 from waxseal.domain.registry import VersionRegistry
+from waxseal.domain.segments import (
+    SegmentRead,
+    SegmentsResult,
+    SegmentState,
+    project_slug,
+    verify_segments,
+)
 from waxseal.domain.separation import SeparationTopology, separation_degree
 from waxseal.domain.verdict import Verdict
 from waxseal.domain.verify import VerifyResult, verify_chain
 from waxseal.log import AuditLog
+from waxseal.sources.rotation import open_segmented
 
 __all__ = [
     "GENESIS_PREV_HASH",
@@ -37,6 +45,9 @@ __all__ = [
     "HumanOversight",
     "ModelRef",
     "ProofBundle",
+    "SegmentRead",
+    "SegmentState",
+    "SegmentsResult",
     "SeparationTopology",
     "Verdict",
     "VerifyResult",
@@ -49,11 +60,14 @@ __all__ = [
     "fingerprint",
     "fingerprint_for",
     "membership_proof",
+    "open_segmented",
+    "project_slug",
     "separation_degree",
     "verify_chain",
     "verify_consistency",
     "verify_membership",
     "verify_proof_bundle",
+    "verify_segments",
 ]
 
 __version__ = "0.1.4"

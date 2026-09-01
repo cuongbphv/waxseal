@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sealed segments joined the frozen public API**: `open_segmented`, `verify_segments`,
+  `project_slug`, and the types a caller needs to use them (`SegmentRead`, `SegmentState`,
+  `SegmentsResult`) are now importable from `waxseal` directly. Promoted by owner decision
+  once the shape had two real consumers (the hook integrations and the chain server) —
+  the same "stays behind its module until something actually needs it here" bar the
+  decision-schema exports were held to. `TestPublicApiFrozen` updated in the same commit,
+  with the rationale in the test.
+
 - **`server/`: a self-hosted chain server, witness, and public read point, with a
   read-only web portal** (0.1.5 plan, Workstream I). It is a separate application, not
   part of the wheel: CLAUDE.md rule 1 constrains the wheel's `[project] dependencies`,
