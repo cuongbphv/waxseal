@@ -443,9 +443,10 @@ class TestExtraAbsentIsItsOwnLabelledState:
 
 class TestBucketWormState:
     """"Is Object Lock configured on this bucket" is a DIFFERENT question
-    from "is this object version retained" — J4's preflight asks the former
-    to name the mechanism, and it gets its own ternary rather than being
-    folded into the object answer."""
+    from "is this object version retained" — the archive path asks the
+    former directly; `waxseal preflight` (J4) only names WORM as a
+    mechanism, without checking bucket state itself. It gets its own
+    ternary rather than being folded into the object answer."""
 
     def test_an_enabled_compliance_bucket_is_locked(self) -> None:
         client = FakeWormS3Client(
@@ -564,9 +565,10 @@ class TestReportRefusesIncoherentFindings:
 
 
 class TestRendering:
-    """J4's preflight prints these lines. They must name the mechanism and
-    its scope — DESIGN.md §11: no output prints a tamper-proof claim without
-    naming what it covers."""
+    """The archive path prints these lines (J4's `preflight` names WORM as a
+    mechanism but does not call this renderer — no bucket/object check of
+    its own). They must name the mechanism and its scope — DESIGN.md §11: no
+    output prints a tamper-proof claim without naming what it covers."""
 
     def test_every_representable_finding_has_a_label(self) -> None:
         # Exhaustive over the FULL PRODUCT with no silent default: a fourth
@@ -753,8 +755,10 @@ class TestUnknownCanNeverPrintAsLocked:
 
 
 class TestResultShape:
-    """J3 calls this from the rotation flow and preflight (J4) surfaces the
-    state. Both read the result; neither may need to reach into internals."""
+    """J3 calls this from the rotation flow and reads the result; nothing
+    downstream needs to reach into internals. (`waxseal preflight`, J4,
+    names WORM as a mechanism without reading this result itself — see
+    `TestRendering`.)"""
 
     def test_the_upload_result_carries_key_uploaded_and_worm(self) -> None:
         result = upload_sealed_segment(
@@ -794,10 +798,11 @@ class TestBucketEvidenceNeverClaimsObjectRetention:
     "Object Lock is enabled on the bucket" and "this object version carries a
     retention period" are two claims of different strength: AWS protects "only
     the version that's specified in the request", so bucket configuration
-    establishes nothing about any particular segment. preflight (J4) prints
-    these lines, and an operator who read the object-version guarantee off
-    bucket evidence would believe a segment is WORM-protected when nothing
-    has established it — the same false confidence as beads v1.2.2.
+    establishes nothing about any particular segment. The archive path
+    prints these lines (not `preflight`, J4 — see `TestRendering`), and an
+    operator who read the object-version guarantee off bucket evidence would
+    believe a segment is WORM-protected when nothing has established it —
+    the same false confidence as beads v1.2.2.
 
     A ternary that is correct per-value can still lie through its renderer.
     """

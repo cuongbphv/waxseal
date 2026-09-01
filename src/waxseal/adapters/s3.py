@@ -612,8 +612,12 @@ def bucket_worm_state(client: Any, *, bucket: str) -> WormReport:
     A different question from ``object_worm_state``'s, kept separate on
     purpose: Object Lock being enabled on a bucket does not mean any given
     object version got a retention period, so this answer must never be used
-    to answer for an object. preflight (J4) asks this one to name the
-    mechanism behind an immutable prefix; the archive path asks the other.
+    to answer for an object. The archive path asks this one directly. Naming
+    WORM as one of the two mechanisms that can raise an anchor into scoped
+    proof (DESIGN.md §11) is as far as `waxseal preflight` (J4) goes on its
+    own: it opens no network connection and holds no storage credentials, so
+    it never calls this function itself — that would require a `--bucket`
+    flag and real S3 access this bead deliberately left unbuilt.
     """
     ask = getattr(client, "get_object_lock_configuration", None)
     if ask is None:
@@ -861,11 +865,14 @@ def render_worm_state(report: WormReport) -> list[str]:
 
     Prefixed with the subject, the state AND the strength, so the ten possible
     findings are distinguishable in a log by grep and can never be told apart
-    only by prose. preflight (J4) prints these. Only the
-    ``OBJECT_VERSION``/``LOCKED``/``IRREVERSIBLE`` line claims storage-level
-    immutability for a segment, and it carries its scope inline; the
-    ``BUCKET``/``LOCKED`` lines disclaim the object-level reading and the
-    ``BYPASSABLE`` lines disclaim the refusal promise, each explicitly.
+    only by prose. The archive path prints these — `waxseal preflight` (J4)
+    does not call this function; it names WORM as a mechanism without
+    checking bucket/object state (no network access, no storage
+    credentials). Only the ``OBJECT_VERSION``/``LOCKED``/``IRREVERSIBLE``
+    line claims storage-level immutability for a segment, and it carries its
+    scope inline; the ``BUCKET``/``LOCKED`` lines disclaim the object-level
+    reading and the ``BYPASSABLE`` lines disclaim the refusal promise, each
+    explicitly.
     """
     return [
         f"{report.subject.value}/{report.state.value}/{report.strength.value}: "
