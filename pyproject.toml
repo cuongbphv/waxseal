@@ -154,6 +154,13 @@ exclude_lines = [
 
 [tool.mypy]
 strict = true
+# `files` stays scoped to the shipped library, not the test tree: a bare
+# `mypy` (no path argument) must stay a fast, src-only --strict gate,
+# unaffected by anything below. tests/ is checked by naming it explicitly
+# (`mypy tests/`, its own CI/verification step) — mypy always type-checks
+# whatever path is given on the command line regardless of `files`, so
+# tests/ is fully covered by that second invocation without widening this
+# list. See the tests.* override below for what "covered" means there.
 files = ["src/waxseal"]
 
 # Host frameworks are imported only inside their own environments and are
@@ -185,6 +192,48 @@ ignore_missing_imports = true
 module = "waxseal.integrations.*"
 disallow_subclassing_any = false
 disallow_untyped_decorators = false
+
+# waxseal-fg4.35: tests/ is checked under mypy, and this is the answer to
+# "under what strictness" — not a guess, a measurement. The owner's working
+# hypothesis was a RELAXED profile (disallow_untyped_defs kept, warn_return_any
+# dropped, was the specific proposal, "given fixtures and parametrize"). The
+# actual first full run (`mypy tests/` fresh on this worktree, 01/09/2026,
+# superseding an earlier agent's stale ~485-error estimate) measured 508
+# errors across 66 of the tree's 129 files, by code: no-untyped-def 226,
+# type-arg 101, arg-type 39, no-untyped-call 38, attr-defined 30,
+# no-any-return 24, union-attr 19, unused-ignore 11, operator 7, misc 3,
+# var-annotated 2, index 2, func-returns-value 2, exit-return 1,
+# comparison-overlap 1, call-overload 1, assignment 1 — worked directory by
+# directory (tests/domain, tests/adapters, tests/, tests/integrations;
+# tests/architecture and tests/ports were already clean). Every single one
+# resolved with a real annotation, a `cast()`/narrowing assert, or a
+# line-scoped `# type: ignore[<code>]` / `# noqa: B010` naming the exact
+# reason (a fake host-SDK module built from `types.ModuleType` for setattr,
+# mostly) — not one needed a --strict flag turned off. So the flags below
+# are not a relaxation: they are the same ones `strict = true` already sets,
+# spelled out here so that fact is PINNED and visible rather than inferred
+# from this block's absence — the next person to hit a tests/ mypy error
+# should find a deliberate "yes, still --strict" here, not wonder whether
+# tests/ was ever actually checked. If a real relaxation is ever needed
+# (warn_return_any is the most likely candidate — fixtures/parametrize/
+# monkeypatch return values can legitimately be Any in ways a `: T = ...`
+# local can't always narrow), change the value here, not the comment.
+#
+# The one known exception, NOT covered by this override: tests/adapters/
+# test_evm_anvil.py has one attr-defined error (Checkpoint is importable
+# from waxseal.domain.checkpoint, not the waxseal.domain.bond re-export this
+# file reaches through — identical shape to the fix already applied in
+# test_evm.py) — left alone because another agent owned that file this round
+# (investigating an unrelated flake). `mypy tests/` will not read clean
+# until that one import line is fixed; this is a known, reported gap, not a
+# silently swallowed one.
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = true
+disallow_any_generics = true
+disallow_untyped_calls = true
+warn_return_any = true
+warn_unused_ignores = true
 
 [tool.ruff]
 # tools/pm is vendored: it carries its own "beads-pm-kit v0.1.0" header and is
