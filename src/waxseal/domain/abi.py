@@ -18,8 +18,12 @@ selector, so the transaction would revert (or, far worse, land on whatever
 unrelated function happened to collide).
 
 So selectors are FROZEN CONSTANTS here, and their correctness is established
-outside Python, by `cast sig` in tests/domain/test_abi.py (and, once
-contracts/ exists, by `forge inspect` against the compiled artifacts). ABI
+outside Python, by `cast sig` in tests/domain/test_abi.py and by
+`contracts/abi/selectors.json` (`forge inspect`'s own output) — the second
+check is the one that matters: a table cross-checked only by re-hashing its
+own claimed signature string is self-consistent and blind to the string
+itself being wrong, which is exactly how six of these constants drifted from
+what the deployed contracts turned out to expose (waxseal-fg4.40). ABI
 *encoding* needs no keccak at all — only the selector does — and that
 boundary is why the constants can be frozen and the encoder cannot drift.
 """
@@ -227,47 +231,62 @@ def decode_bytes(data: bytes, *, index: int = 0) -> bytes:
 #
 # Frozen because nothing in this process can compute them (see the module
 # docstring). tests/domain/test_abi.py re-derives every one with `cast sig`
-# and fails on any drift; when contracts/ lands, the same table is what a
-# `forge inspect` cross-check compares against. Adding a function here means
-# adding it to SELECTORS in the same edit, or the cross-check never sees it.
+# AND cross-checks against `contracts/abi/selectors.json` (`forge inspect`'s
+# own output) -- waxseal-fg4.40: a cross-check that only recomputes the hash
+# of its own claimed signature string is self-consistent and blind to the
+# signature itself being wrong, which is how six of these constants drifted
+# from what F2's contracts actually deploy after F1 froze them early. Adding
+# a function here means adding it to SELECTORS in the same edit, or neither
+# cross-check ever sees it.
+#
+# `proveEquivocation`/`proveNonExtension` take struct/tuple arguments on the
+# deployed contracts. The selector below is still just the 4-byte keccak of
+# the signature string -- no tuple support needed to freeze that -- but
+# `domain/abi.py`'s encoder has no tuple/struct encoding (see the module
+# docstring: the subset here is deliberately small) and does not gain any
+# here either. `adapters/evm.py` hand-rolls the struct tail itself for both
+# calls; that split is deliberate, not an oversight -- see its docstring.
 
 SELECTOR_REGISTER: Final = bytes.fromhex("82fbdc9c")
 SELECTOR_LOOKUP: Final = bytes.fromhex("f39ec1f7")
 
-SELECTOR_SUBMIT: Final = bytes.fromhex("b1768e7e")
+SELECTOR_SUBMIT: Final = bytes.fromhex("0d0d53d2")
 SELECTOR_IS_DELINQUENT: Final = bytes.fromhex("f06b6eae")
 SELECTOR_LAST_SEEN: Final = bytes.fromhex("1abfe8e2")
-SELECTOR_DEADLINE: Final = bytes.fromhex("ee34cf1d")
-SELECTOR_LATEST: Final = bytes.fromhex("79feb107")
+SELECTOR_DEADLINE_OF: Final = bytes.fromhex("4acbede3")
+SELECTOR_REGISTER_TRAIL: Final = bytes.fromhex("257fb3fd")
 
 SELECTOR_DEPOSIT: Final = bytes.fromhex("d0e30db0")
 SELECTOR_WITHDRAW: Final = bytes.fromhex("3ccfd60b")
 SELECTOR_BOND_OF: Final = bytes.fromhex("72d2b6c0")
-SELECTOR_IS_SLASHED: Final = bytes.fromhex("b799036c")
-SELECTOR_PROVE_EQUIVOCATION: Final = bytes.fromhex("ed02a93c")
-SELECTOR_PROVE_NON_EXTENSION: Final = bytes.fromhex("cf35466d")
+SELECTOR_PROVE_EQUIVOCATION: Final = bytes.fromhex("1698fa64")
+SELECTOR_PROVE_NON_EXTENSION: Final = bytes.fromhex("d459a73d")
 
-# Split out only because the flattened checkpoint pair runs past the line
-# length; a struct argument would have shortened it and made the ABI tuple
-# encoding a second thing to get right.
+# Split out only because the tuple-argument signatures run past the line
+# length -- the struct arguments (`(uint64,bytes32,bytes32,bytes)` and the
+# inclusion-proof pair) are what make these two longer than everything else
+# in this table, not a flattening choice like the earlier draft made.
 _EQUIVOCATION_SIGNATURE: Final = (
-    "proveEquivocation(bytes32,uint64,bytes32,bytes32,bytes,bytes32,uint64,bytes32,bytes32,bytes)"
+    "proveEquivocation(bytes32,uint64,"
+    "(uint64,bytes32,bytes32,bytes),(uint64,bytes32,bytes32,bytes))"
+)
+_NON_EXTENSION_SIGNATURE: Final = (
+    "proveNonExtension(bytes32,"
+    "(uint64,bytes32,bytes32,bytes),(uint64,bytes32,bytes32,bytes),"
+    "(uint256,bytes32,bytes32[]),(uint256,bytes32,bytes32[]))"
 )
 
 SELECTORS: Final[dict[str, bytes]] = {
     "register(bytes)": SELECTOR_REGISTER,
     "lookup(bytes32)": SELECTOR_LOOKUP,
-    "submit(bytes32,uint64,bytes32,bytes32,bytes)": SELECTOR_SUBMIT,
+    "submit(bytes32,uint64,bytes32,bytes32,bytes,bytes32[])": SELECTOR_SUBMIT,
     "isDelinquent(bytes32)": SELECTOR_IS_DELINQUENT,
     "lastSeen(bytes32)": SELECTOR_LAST_SEEN,
-    "deadline(bytes32)": SELECTOR_DEADLINE,
-    "latest(bytes32)": SELECTOR_LATEST,
+    "deadlineOf(bytes32)": SELECTOR_DEADLINE_OF,
+    "registerTrail(bytes32,address,uint64)": SELECTOR_REGISTER_TRAIL,
     "deposit()": SELECTOR_DEPOSIT,
     "withdraw()": SELECTOR_WITHDRAW,
     "bondOf(address)": SELECTOR_BOND_OF,
-    "isSlashed(address)": SELECTOR_IS_SLASHED,
     _EQUIVOCATION_SIGNATURE: SELECTOR_PROVE_EQUIVOCATION,
-    "proveNonExtension(bytes32,uint64,bytes32,uint64,bytes32,bytes32[])": (
-        SELECTOR_PROVE_NON_EXTENSION
-    ),
+    _NON_EXTENSION_SIGNATURE: SELECTOR_PROVE_NON_EXTENSION,
 }

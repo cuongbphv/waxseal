@@ -9,12 +9,22 @@ misreading of the ABI spec, not a conformance check.
 The selector cross-check is the one that carries the incident: Python's
 standard library has no keccak256, so the selectors in `domain/abi.py` are
 frozen constants. Frozen constants with no external check are a wish. `cast
-sig` is the check.
+sig` is the check -- but `cast sig` only re-hashes the signature string
+`domain/abi.py` itself claims, so it is blind to the string being wrong. That
+is exactly how waxseal-fg4.40 happened: F1 froze plausible-looking selectors
+before F2's contracts had a final shape, and `cast sig` kept agreeing with
+them because it was only ever asked to re-derive its own input.
+`TestSelectorsMatchTheCompiledContracts` below closes that loop the way
+fbba32f closed the identical one for the checkpoint signing digest: against
+`contracts/abi/selectors.json`, which is `forge inspect`'s own output
+(frozen and CI-checked by `contracts/script/selectors.sh --check`), not
+against `domain/abi.py` re-deriving itself.
 """
 
 from __future__ import annotations
 
 import ast
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -22,6 +32,9 @@ from pathlib import Path
 import pytest
 
 from waxseal.domain import abi
+
+_REPO = Path(__file__).resolve().parents[2]
+_COMPILED_SELECTORS = _REPO / "contracts" / "abi" / "selectors.json"
 
 CAST = shutil.which("cast")
 NEEDS_CAST = pytest.mark.skipif(
@@ -309,6 +322,48 @@ class TestFrozenSelectors:
         assert keccak_selector != nist
 
 
+class TestSelectorsMatchTheCompiledContracts:
+    """waxseal-fg4.40: the join `TestFrozenSelectors` above cannot do.
+
+    `test_frozen_selectors_match_cast_sig` proves each frozen byte string is
+    truly `keccak256` of the signature string sitting next to it in
+    `SELECTORS` -- a hash always matches the string it hashed, so that check
+    is real but closed: it never asks whether the STRING is one the deployed
+    contracts actually expose. `contracts/abi/selectors.json` is `forge
+    inspect`'s own answer to that question (frozen and CI-checked by
+    `contracts/script/selectors.sh --check`, independently of this file), so
+    comparing against it -- not against `domain/abi.py` re-deriving itself --
+    is what would have caught six of these constants describing a contract
+    shape F2 never shipped. No Foundry install needed here: the committed
+    JSON is the artifact, not a live `forge` invocation.
+    """
+
+    @staticmethod
+    def compiled() -> dict[str, str]:
+        contracts = json.loads(_COMPILED_SELECTORS.read_text(encoding="utf-8"))
+        merged: dict[str, str] = {}
+        for methods in contracts.values():
+            merged.update(methods)
+        return merged
+
+    def test_there_is_a_compiled_selector_file_to_check_against(self) -> None:
+        assert self.compiled()
+
+    def test_every_frozen_signature_is_one_the_compiler_actually_emits(self) -> None:
+        compiled = self.compiled()
+        missing = sorted(signature for signature in abi.SELECTORS if signature not in compiled)
+        assert missing == []
+
+    def test_every_frozen_selector_matches_the_compiled_selector(self) -> None:
+        compiled = self.compiled()
+        mismatches = [
+            f"{signature}: frozen 0x{selector.hex()} != compiled 0x{compiled[signature]}"
+            for signature, selector in abi.SELECTORS.items()
+            if compiled.get(signature) != selector.hex()
+        ]
+        assert mismatches == []
+
+
 class TestAgainstCastCalldata:
     @NEEDS_CAST
     def test_a_static_only_call_matches_cast(self) -> None:
@@ -319,12 +374,29 @@ class TestAgainstCastCalldata:
 
     @NEEDS_CAST
     def test_a_mixed_static_and_dynamic_call_matches_cast(self) -> None:
-        signature = "submit(bytes32,uint64,bytes32,bytes32,bytes)"
+        # `submit`'s deployed signature (waxseal-fg4.40) exercises every
+        # dynamic shape this encoder knows in one call -- static words,
+        # dynamic `bytes`, and a dynamic `bytes32[]` -- so this one call
+        # against `cast calldata` covers all three, instead of needing a
+        # second, unrelated signature just to reach the array case (the
+        # earlier draft used the now-nonexistent flattened
+        # `proveNonExtension` for that, which this replaces).
+        signature = "submit(bytes32,uint64,bytes32,bytes32,bytes,bytes32[])"
         chain_id = "0x" + "11" * 32
         entry_hash = "0x" + "22" * 32
         root = "0x" + "33" * 32
         sig = "0x" + "ab" * 65
-        expected = cast_out("calldata", signature, chain_id, "42", entry_hash, root, sig)
+        proof = ["0x" + "44" * 32, "0x" + "55" * 32]
+        expected = cast_out(
+            "calldata",
+            signature,
+            chain_id,
+            "42",
+            entry_hash,
+            root,
+            sig,
+            f"[{','.join(proof)}]",
+        )
         got = abi.encode_call(
             abi.SELECTOR_SUBMIT,
             [
@@ -333,29 +405,30 @@ class TestAgainstCastCalldata:
                 abi.encode_bytes32(entry_hash),
                 abi.encode_bytes32(root),
                 abi.encode_bytes(bytes.fromhex("ab" * 65)),
+                abi.encode_bytes32_array(proof),
             ],
         )
         assert "0x" + got.hex() == expected
 
     @NEEDS_CAST
-    def test_a_bytes32_array_call_matches_cast(self) -> None:
-        signature = "proveNonExtension(bytes32,uint64,bytes32,uint64,bytes32,bytes32[])"
+    def test_an_empty_bytes32_array_is_a_bare_length_word_against_cast(self) -> None:
+        # The zero-element edge of the array encoding, kept as its own case
+        # now that the non-empty array is reached only via `submit` above.
+        signature = "submit(bytes32,uint64,bytes32,bytes32,bytes,bytes32[])"
         chain_id = "0x" + "11" * 32
-        old_root = "0x" + "22" * 32
-        new_root = "0x" + "33" * 32
-        proof = ["0x" + "44" * 32, "0x" + "55" * 32]
-        expected = cast_out(
-            "calldata", signature, chain_id, "3", old_root, "9", new_root, f"[{','.join(proof)}]"
-        )
+        entry_hash = "0x" + "22" * 32
+        root = "0x" + "33" * 32
+        sig = "0x" + "ab" * 65
+        expected = cast_out("calldata", signature, chain_id, "3", entry_hash, root, sig, "[]")
         got = abi.encode_call(
-            abi.SELECTOR_PROVE_NON_EXTENSION,
+            abi.SELECTOR_SUBMIT,
             [
                 abi.encode_bytes32(chain_id),
                 abi.encode_uint(3, bits=64),
-                abi.encode_bytes32(old_root),
-                abi.encode_uint(9, bits=64),
-                abi.encode_bytes32(new_root),
-                abi.encode_bytes32_array(proof),
+                abi.encode_bytes32(entry_hash),
+                abi.encode_bytes32(root),
+                abi.encode_bytes(bytes.fromhex("ab" * 65)),
+                abi.encode_bytes32_array([]),
             ],
         )
         assert "0x" + got.hex() == expected

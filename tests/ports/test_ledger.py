@@ -54,6 +54,20 @@ CHAIN_ID = "0x" + "11" * 32
 WRITER = "0x" + "ab" * 20
 HASHES = tuple(hashlib.sha256(str(i).encode()).hexdigest() for i in range(8))
 
+# This fake never claimed byte-accuracy with the deployed contracts -- that
+# fidelity is `adapters/evm.py`'s job, checked in tests/adapters/test_evm.py
+# against `contracts/abi/selectors.json`. It only needs a 4-byte identifier
+# that matches calldata it built itself against a response dict it built
+# itself, so these two are locally-scoped rather than borrowed from
+# `domain/abi.py`'s frozen (necessarily real) selector table. waxseal-fg4.40
+# removed `abi.SELECTOR_LATEST`/`abi.SELECTOR_IS_SLASHED` because neither
+# `latest(bytes32)` nor `isSlashed(address)` exists on any deployed
+# contract -- `latest_checkpoint` here models a lookup no real ledger
+# exposes this way, and `bond_status` below models `.slashed` as its own
+# call rather than as a field of the real `bondOf` tuple return.
+_FAKE_LATEST_SELECTOR = bytes.fromhex("00000001")
+_FAKE_IS_SLASHED_SELECTOR = bytes.fromhex("00000002")
+
 
 def word(value: int) -> bytes:
     return abi.encode_uint(value)
@@ -84,7 +98,7 @@ class FakeLedgerReader:
 
     def latest_checkpoint(self, chain_id: str) -> OnChainCheckpoint | None:
         data = self._chain.call(
-            abi.encode_call(abi.SELECTOR_LATEST, [abi.encode_bytes32(chain_id)])
+            abi.encode_call(_FAKE_LATEST_SELECTOR, [abi.encode_bytes32(chain_id)])
         )
         seq, entry_hash, root, block_time = abi.decode_words(data)
         if abi.decode_uint(block_time) == 0:
@@ -100,7 +114,7 @@ class FakeLedgerReader:
     def deadline_s(self, chain_id: str) -> int | None:
         raw = abi.decode_uint(
             self._chain.call(
-                abi.encode_call(abi.SELECTOR_DEADLINE, [abi.encode_bytes32(chain_id)])
+                abi.encode_call(abi.SELECTOR_DEADLINE_OF, [abi.encode_bytes32(chain_id)])
             )
         )
         return raw or None
@@ -114,7 +128,7 @@ class FakeLedgerReader:
     def bond_status(self, writer_id: str) -> BondStatus:
         arg = [abi.encode_address(writer_id)]
         amount = abi.decode_uint(self._chain.call(abi.encode_call(abi.SELECTOR_BOND_OF, arg)))
-        slashed = abi.decode_bool(self._chain.call(abi.encode_call(abi.SELECTOR_IS_SLASHED, arg)))
+        slashed = abi.decode_bool(self._chain.call(abi.encode_call(_FAKE_IS_SLASHED_SELECTOR, arg)))
         return bond_status_for(writer_id, amount_wei=amount, slashed=slashed)
 
 
@@ -164,8 +178,8 @@ class FakeLedgerSink:
 
 
 def live_chain(*, block_time: int, deadline: int = 3600) -> FakeChain:
-    latest_call = abi.encode_call(abi.SELECTOR_LATEST, [abi.encode_bytes32(CHAIN_ID)])
-    deadline_call = abi.encode_call(abi.SELECTOR_DEADLINE, [abi.encode_bytes32(CHAIN_ID)])
+    latest_call = abi.encode_call(_FAKE_LATEST_SELECTOR, [abi.encode_bytes32(CHAIN_ID)])
+    deadline_call = abi.encode_call(abi.SELECTOR_DEADLINE_OF, [abi.encode_bytes32(CHAIN_ID)])
     checkpoint = checkpoint_for(HASHES)
     return FakeChain(
         {
@@ -277,7 +291,7 @@ class TestBondThroughThePort:
         return FakeChain(
             {
                 abi.encode_call(abi.SELECTOR_BOND_OF, arg): word(amount),
-                abi.encode_call(abi.SELECTOR_IS_SLASHED, arg): abi.encode_bool(slashed),
+                abi.encode_call(_FAKE_IS_SLASHED_SELECTOR, arg): abi.encode_bool(slashed),
             }
         )
 
