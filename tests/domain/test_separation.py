@@ -336,7 +336,9 @@ class TestLedgerField:
             seal_escrow=False, anchor_sinks=0, witness=False, pin_separate=False
         )
         with_ledger = dataclasses.replace(without, ledger=True)
-        assert separation_degree(with_ledger) == separation_degree(without) + 1
+        without_degree = separation_degree(without)
+        assert without_degree is not None
+        assert separation_degree(with_ledger) == without_degree + 1
 
     def test_undeclared_and_declared_false_ledger_contribute_the_same_degree(self) -> None:
         undeclared = SeparationTopology(
@@ -357,9 +359,15 @@ class TestLedgerField:
         )
         declared_false = dataclasses.replace(undeclared, ledger=False)
         declared_true = dataclasses.replace(undeclared, ledger=True)
-        assert "ledger" not in [n for n, _ in counted_authorities(undeclared)]
-        assert "ledger" not in [n for n, _ in counted_authorities(declared_false)]
-        assert "ledger" in [n for n, _ in counted_authorities(declared_true)]
+        undeclared_counted = counted_authorities(undeclared)
+        declared_false_counted = counted_authorities(declared_false)
+        declared_true_counted = counted_authorities(declared_true)
+        assert undeclared_counted is not None
+        assert declared_false_counted is not None
+        assert declared_true_counted is not None
+        assert "ledger" not in [n for n, _ in undeclared_counted]
+        assert "ledger" not in [n for n, _ in declared_false_counted]
+        assert "ledger" in [n for n, _ in declared_true_counted]
 
     def test_full_topology_with_ledger_enumerates_it_last(self) -> None:
         topology = SeparationTopology(

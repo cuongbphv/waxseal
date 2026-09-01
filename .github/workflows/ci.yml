@@ -37,6 +37,12 @@ jobs:
       # performs — the one thing this project must never ship.
       - run: uv run --extra dev pytest --cov=waxseal
       - run: uv run --extra dev mypy
+      # pyproject.toml's `files = ["src/waxseal"]` comment promises tests/ is
+      # covered by naming it explicitly on its own line — a bare `mypy`
+      # above never touches it. Without this step that promise was a claimed
+      # check nobody performs (fg4.47): fg4.45's TestLedgerField landed 4
+      # real int|None/tuple|None errors straight through CI green.
+      - run: uv run --extra dev mypy tests/
       - run: uv run --extra dev ruff check .
       # CLAUDE.md: golden vectors are cross-checked by scripts that implement
       # SPEC.md prose directly instead of importing waxseal. A vector suite
