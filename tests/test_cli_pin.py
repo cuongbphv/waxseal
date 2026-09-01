@@ -816,11 +816,13 @@ class TestLedgerShortfall:
     """waxseal-fg4.45: `declared_topology.ledger` vs. what THIS run's own
     ledger check (`verify --rpc/--liveness`) corroborates. Same shape as
     `TestDeclaredTopologyShortfall` above, one dimension over.
-    `--declare-topology` has no `ledger=` grammar yet (a separate,
-    not-yet-taken bead), so `_add_declared_topology`'s `ledger=` kwarg
-    stands in for it here — the exact same "hand-edit the pin, bypass the
-    CLI writer" pattern this file already uses for `max_anchor_age_s`/
-    `expect_anchor_binding` below.
+    `--declare-topology` gained a `ledger=` subfield in waxseal-fg4.46 (see
+    `TestDeclaredTopologySpecParsing`/`TestDeclareViaCLI` below), but the
+    tests here still use `_add_declared_topology`'s `ledger=` kwarg to build
+    fixtures directly — the same "hand-edit the pin, bypass the CLI writer"
+    pattern this file already uses for `max_anchor_age_s`/
+    `expect_anchor_binding` below, and it isolates the shortfall comparison
+    from the CLI grammar it now shares tests with.
     """
 
     LIVENESS = "0x" + "33" * 20
@@ -1591,6 +1593,53 @@ class TestDeclaredTopologySpecParsing:
                 "seal_escrow=true,anchor_sinks=two,witness=true,pin_separate=true"
             )
 
+    def test_ledger_true_parses_onto_the_topology(self) -> None:
+        # waxseal-fg4.46: the optional 5th subfield, alongside the 4
+        # required-together ones, wired straight into
+        # SeparationTopology.ledger.
+        from waxseal.cli import _parse_declared_topology_spec
+
+        topology = _parse_declared_topology_spec(
+            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
+            "ledger=true"
+        )
+        assert topology.ledger is True
+
+    def test_ledger_false_parses_onto_the_topology(self) -> None:
+        from waxseal.cli import _parse_declared_topology_spec
+
+        topology = _parse_declared_topology_spec(
+            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
+            "ledger=false"
+        )
+        assert topology.ledger is False
+
+    def test_omitting_ledger_parses_as_none_not_false(self) -> None:
+        # The backward-compatibility case this bead exists to protect: every
+        # pre-fg4.46 spec string, and every existing CLI invocation, omits
+        # ledger= entirely and must keep parsing exactly as it did before —
+        # ledger is None ("never declared"), never False ("declared, not
+        # separated"). CLAUDE.md rule 5.
+        from waxseal.cli import _parse_declared_topology_spec
+
+        topology = _parse_declared_topology_spec(
+            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true"
+        )
+        assert topology.ledger is None
+
+    def test_a_non_boolean_ledger_value_is_rejected(self) -> None:
+        # Same error-handling convention every other subfield here already
+        # uses (_parse_bool_field's "must be 'true' or 'false'" message) —
+        # optional changes only whether the key must be present, never how a
+        # given value is validated.
+        from waxseal.cli import _parse_declared_topology_spec
+
+        with pytest.raises(ValueError, match="must be 'true' or 'false'"):
+            _parse_declared_topology_spec(
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
+                "ledger=maybe"
+            )
+
 
 class TestDeclareViaCLI:
     """CLI flags that WRITE `expect_anchor_binding`/`max_anchor_age_s`/
@@ -1648,6 +1697,57 @@ class TestDeclareViaCLI:
             "witness": True,
             "pin_separate": False,
         }
+
+    def test_declare_topology_with_ledger_round_trips_through_the_pin_file(
+        self, tmp_path: Path
+    ) -> None:
+        # End-to-end (waxseal-fg4.46): declare via the CLI's optional 5th
+        # subfield, --pin advances, and the pin JSON file on disk carries
+        # ledger nested inside declared_topology exactly as
+        # domain/pinning.py's render_pin_state already writes it.
+        trail = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(trail, 2)
+
+        code = main(
+            [
+                "verify", str(trail), "--pin", str(pin),
+                "--declare-topology",
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false,"
+                "ledger=true",
+            ]
+        )
+        assert code == 0
+        state = json.loads(pin.read_text())
+        assert state["declared_topology"] == {
+            "seal_escrow": True,
+            "anchor_sinks": 2,
+            "witness": True,
+            "pin_separate": False,
+            "ledger": True,
+        }
+
+    def test_declare_topology_without_ledger_omits_it_from_the_pin_file(
+        self, tmp_path: Path
+    ) -> None:
+        # The same backward-compatibility guarantee as the spec-parsing
+        # test, checked end-to-end: a run that never mentions ledger= must
+        # not grow a "ledger": false key domain/pinning.py's own
+        # omit-when-undeclared rule forbids inventing.
+        trail = tmp_path / "trail.jsonl"
+        pin = tmp_path / "pin.json"
+        make_trail(trail, 2)
+
+        code = main(
+            [
+                "verify", str(trail), "--pin", str(pin),
+                "--declare-topology",
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false",
+            ]
+        )
+        assert code == 0
+        state = json.loads(pin.read_text())
+        assert "ledger" not in state["declared_topology"]
 
     def test_declare_topology_partial_is_a_cli_usage_error(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

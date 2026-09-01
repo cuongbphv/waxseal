@@ -121,7 +121,11 @@ _DECLARE_TOPOLOGY_HELP = (
     "binding, as seal_escrow=<bool>,anchor_sinks=<int>,witness=<bool>,"
     "pin_separate=<bool> — all four subfields required together (SPEC 13.1: "
     "a partial declaration is malformed_pin, never silently defaulted). "
-    "Requires --pin; only takes effect on a run that advances it"
+    "An optional fifth ledger=<bool> may be added to declare the on-chain "
+    "ledger authority; omitting it leaves ledger undeclared (None), never "
+    "false, and every spec string written before this subfield existed "
+    "keeps parsing unchanged. Requires --pin; only takes effect on a run "
+    "that advances it"
 )
 
 _TSA_HELP = (
@@ -2510,16 +2514,37 @@ def _is_hex(value: str) -> bool:
 
 _DECLARED_TOPOLOGY_FIELDS: Final = ("seal_escrow", "anchor_sinks", "witness", "pin_separate")
 
+# `ledger` (waxseal-fg4.45's SeparationTopology.ledger, bool | None) is
+# deliberately NOT in _DECLARED_TOPOLOGY_FIELDS above: that tuple is the
+# required-together set the "missing" check walks, and every pin file (and
+# every CLI invocation) written before this field existed omits it and must
+# keep parsing unchanged. It gets its own optional slot instead, the same
+# "fifth field, never required" shape domain/pinning.py's
+# `_optional_bool_or_none` already gives it on the JSON side.
+_DECLARED_TOPOLOGY_OPTIONAL_FIELD: Final = "ledger"
+
 
 def _parse_declared_topology_spec(spec: str) -> SeparationTopology:
     """Parse ``--declare-topology``: comma-separated ``key=value`` pairs
     carrying all four ``SeparationTopology`` subfields together, e.g.
-    ``"seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true"``.
+    ``"seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true"``,
+    plus an OPTIONAL fifth ``ledger=true``/``ledger=false`` (waxseal-fg4.45's
+    ``SeparationTopology.ledger``, one more independent authority to declare).
 
-    Raises ``ValueError`` on anything else, including a partial spec: SPEC
-    13.1 says a partial ``declared_topology`` is ``malformed_pin``, never
-    silently defaulted, and the same rule holds one layer up, at the CLI
-    boundary that would otherwise have to guess the missing subfields.
+    ``ledger`` is never part of the required-together set: omitting it parses
+    exactly as it did before this subfield existed (``ledger=None``, "never
+    declared"), so every pre-fg4.45 spec string and every existing automation
+    around this flag keeps working unchanged (rule 5 — ``None`` is not the
+    same claim as a declared-false ledger).
+
+    Raises ``ValueError`` on anything else, including a partial spec over the
+    four required subfields: SPEC 13.1 says a partial ``declared_topology``
+    is ``malformed_pin``, never silently defaulted, and the same rule holds
+    one layer up, at the CLI boundary that would otherwise have to guess the
+    missing subfields. A malformed ``ledger`` value is rejected the same way
+    (``_parse_bool_field``'s "must be 'true' or 'false'" message) — being
+    optional changes only whether it must be present, never how a value
+    given for it is validated.
     """
     fields: dict[str, str] = {}
     for raw in spec.split(","):
@@ -2540,15 +2565,24 @@ def _parse_declared_topology_spec(spec: str) -> SeparationTopology:
             "declared_topology needs all four subfields together "
             f"({', '.join(_DECLARED_TOPOLOGY_FIELDS)}), missing: {', '.join(missing)}"
         )
-    extra = sorted(set(fields) - set(_DECLARED_TOPOLOGY_FIELDS))
+    allowed = {*_DECLARED_TOPOLOGY_FIELDS, _DECLARED_TOPOLOGY_OPTIONAL_FIELD}
+    extra = sorted(set(fields) - allowed)
     if extra:
         raise ValueError(f"unknown declared_topology field(s): {', '.join(extra)}")
+
+    ledger_raw = fields.get(_DECLARED_TOPOLOGY_OPTIONAL_FIELD)
+    ledger = (
+        _parse_bool_field(_DECLARED_TOPOLOGY_OPTIONAL_FIELD, ledger_raw)
+        if ledger_raw is not None
+        else None
+    )
 
     return SeparationTopology(
         seal_escrow=_parse_bool_field("seal_escrow", fields["seal_escrow"]),
         anchor_sinks=_parse_int_field("anchor_sinks", fields["anchor_sinks"]),
         witness=_parse_bool_field("witness", fields["witness"]),
         pin_separate=_parse_bool_field("pin_separate", fields["pin_separate"]),
+        ledger=ledger,
     )
 
 
