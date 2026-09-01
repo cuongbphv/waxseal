@@ -46,11 +46,21 @@ dev = [
 # These extras exist only so `pip install waxseal[s3]` pulls in a compatible
 # client for callers who want one, not because waxseal needs it.
 s3 = [
-    # [Unverified] minimum version for IfNoneMatch/IfMatch (S3 conditional
-    # writes, AWS GA 2024) is not pinned here — not independently confirmed
-    # against boto3's own changelog. If put_object rejects IfNoneMatch as an
-    # unexpected keyword, upgrade boto3/botocore to a current release.
-    "boto3",
+    # The floor is verified against boto3's own CHANGELOG.rst, and covers both
+    # surfaces adapters/s3.py touches:
+    #   1.35.2  "Add support for conditional writes for PutObject and
+    #            CompleteMultipartUpload APIs."          -> put_object(IfNoneMatch=)
+    #   1.35.69 "Add support for ETag based conditional writes in PutObject and
+    #            CompleteMultiPartUpload APIs ..."       -> put_object(IfMatch=)
+    # Object Lock (ObjectLockMode / ObjectLockRetainUntilDate /
+    # ObjectLockLegalHoldStatus on put_object, plus get_object_lock_configuration
+    # and get_object_retention) predates both by six years and does not bind the
+    # floor: it is present in the shipped S3 model as far back as botocore
+    # 1.12.55 (2018). So IfMatch is the binding constraint and >=1.35.69 covers
+    # everything. Corroborated against the shipped model, not just the prose:
+    # botocore 1.35.68's PutObjectRequest has no IfMatch member and 1.35.69's
+    # does, and boto3 1.35.69 requires botocore>=1.35.69,<1.36.0.
+    "boto3>=1.35.69",
 ]
 postgres = [
     "psycopg[binary]>=3.1",
@@ -95,7 +105,15 @@ exclude = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# NOT "-q" (waxseal-fg4.28). pytest's TerminalReporter.summary_stats opens with
+# `if self.verbosity < -1: return`, so the "N failed, M passed" line is dropped
+# entirely at -qq and printed undecorated at -q. `addopts` is applied on top of
+# whatever the caller types, so a single `-q` on the command line — the most
+# natural thing to type — landed the run at -2 and the output ended at the
+# FAILED list with no count at all. Reading the verdict from the junit XML is
+# still the rule; this only removes the trap for anyone who has not learned it.
+# -ra costs one flag and makes the skip reasons visible for the same reason.
+addopts = "-ra"
 
 [tool.coverage.run]
 source = ["waxseal"]

@@ -35,7 +35,7 @@ import ast
 import importlib
 import sys
 import types
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -241,6 +241,42 @@ class TestLibraryIntegrationPrecedence:
         cls, _ = library_integration
         assert cls("~/given-as-str.jsonl")._trail == Path.home() / "given-as-str.jsonl"
 
+    def test_home_env_beats_path_home_in_the_default(
+        self, library_integration, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # waxseal-fg4.20. All three resolved the bottom rung with
+        # Path(DEFAULT_TRAIL).expanduser(), which goes through
+        # ntpath.expanduser on Windows: its source reads USERPROFILE (then
+        # HOMEDRIVE/HOMEPATH) and never consults HOME. A host launched with
+        # HOME set (git-bash, WSL-style wrappers, CI images) therefore sealed
+        # into one profile while `waxseal verify` read the other, and the
+        # missing entries look exactly like a truncated chain — the same
+        # split fg4.3 fixed for hermes and fg4.19 for install.
+        #
+        # On POSIX this asserts agreement rather than discriminating: HOME is
+        # the first thing posixpath.expanduser reads too, so the pre-fix code
+        # passes it. The discriminating case on this platform is the sibling
+        # test below, where HOME is absent and expanduser falls through to the
+        # pwd database instead of Path.home() — that one goes RED when the fix
+        # is backed out, and so does the AST detector.
+        cls, default = library_integration
+        monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "windows"))
+        tail = PurePosixPath(default).relative_to("~")
+        assert cls()._trail == tmp_path / "posix-home" / tail
+
+    def test_path_home_is_the_fallback_when_no_home_env(
+        self, library_integration, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The other half of the rule: Path.home() is consulted only when
+        # there is no HOME at all, so the fix does not strand a host that
+        # never sets one.
+        cls, default = library_integration
+        monkeypatch.delenv("HOME", raising=False)
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "profile"))
+        tail = PurePosixPath(default).relative_to("~")
+        assert cls()._trail == tmp_path / "profile" / tail
+
 
 # --------------------------------------------------------------------------
 # hermes / hermes_gateway: no explicit-argument rung, so env > HERMES_HOME > home
@@ -435,6 +471,13 @@ class TestEveryIntegrationHonoursTheVariable:
         # the host does not read never loads and produces no trail at all.
         # _trail.py stays out because it IS the owner: home_base() is the one
         # place Path.home() is allowed to be called.
+        #
+        # waxseal-fg4.20 widened it again, to `.expanduser()`. Path.home() was
+        # never the only way to reach the wrong profile: langchain, crewai and
+        # openai_agents each resolved their default with
+        # Path(DEFAULT_TRAIL).expanduser(), and ntpath.expanduser reads
+        # USERPROFILE while ignoring HOME — the identical split, spelled
+        # differently, and invisible to a detector that only knew one spelling.
         src = Path(_trail.__file__).parent
         offenders = []
         for path in sorted(src.glob("*.py")):
@@ -442,13 +485,14 @@ class TestEveryIntegrationHonoursTheVariable:
                 continue
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "home"
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                    continue
+                is_path_home = (
+                    node.func.attr == "home"
                     and isinstance(node.func.value, ast.Name)
                     and node.func.value.id == "Path"
-                ):
+                )
+                if is_path_home or node.func.attr == "expanduser":
                     offenders.append(path.name)
                     break
         assert offenders == []

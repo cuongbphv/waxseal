@@ -795,9 +795,10 @@ what was checked, say what was not, and never let the second read as the first.
 - AI decision log layer. `DecisionRecord` (`waxseal.domain.decision`) is a decision-shaped
   payload carrying system id, model name, version and digest, outcome, rationale, policy
   version, confidence, and human-oversight mode, alongside `record_decision`,
-  `iter_decisions` and `commit_input` in `waxseal.sources.decisions`. `commit_input` hashes the input **after** redaction, so
-  the commitment cannot act as a guess-confirmation oracle for the secrets redaction just
-  removed; it refuses a redactor on `bytes` rather than silently claiming to have redacted
+  `iter_decisions` and `commit_input` in `waxseal.sources.decisions`. `commit_input`
+  hashes the input **after** redaction, so the commitment cannot act as a
+  guess-confirmation oracle for the secrets redaction just removed; it refuses a
+  redactor on `bytes` rather than silently claiming to have redacted
   them. `human_oversight=None` means *not recorded* and is counted apart from
   `mode="automated"` everywhere, because collapsing them would report an absence of
   evidence as evidence. Optional fields serialize as explicit `null` rather than being omitted, for
@@ -904,8 +905,8 @@ what was checked, say what was not, and never let the second read as the first.
 
 - **An unreachable witness now exits 2, not 0.** Unreachable means unverifiable by
   witness, and a script reading only the exit code could not previously distinguish
-  "witnessed" from "no witness answered". `inconsistent` stays exit 1 and wins over 2, per the existing
-  combine ordering.
+  "witnessed" from "no witness answered". `inconsistent` stays exit 1 and wins
+  over 2, per the existing combine ordering.
 
 - `sources/{decisions,files,openclaw}` read the chain through the public `log.entries()`
   facade instead of reaching into `log._backend`. The facade's own docstring forbade

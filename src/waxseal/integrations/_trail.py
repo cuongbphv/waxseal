@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Final
 
 from waxseal.domain.segments import project_slug, segment_name
@@ -99,6 +99,26 @@ def home_base() -> Path:
     """
     home = os.environ.get("HOME")
     return Path(home) if home else Path.home()
+
+
+def home_default(documented: str) -> Path:
+    """A library integration's documented ``~/...`` default, under `home_base()`.
+
+    waxseal-fg4.20. The three library-style integrations spelled this rung as
+    ``Path(DEFAULT_TRAIL).expanduser()``. On Windows that runs
+    ``ntpath.expanduser``, whose source consults USERPROFILE (then
+    HOMEDRIVE/HOMEPATH) and never reads HOME at all — so a host launched with
+    HOME set (git-bash, WSL-style wrappers, CI images) sealed the trail into
+    one profile while `waxseal verify` read the other, and the absent entries
+    are indistinguishable from a truncated chain. That is the split fg4.3
+    fixed for hermes and fg4.19 for install; these three were the holdouts.
+
+    ``documented`` is the module's own POSIX-spelled ``DEFAULT_TRAIL``, so it
+    stays the single source of truth for the path the docstrings advertise,
+    and is parsed as the POSIX string it is rather than through whatever
+    separator the host happens to use.
+    """
+    return home_base() / PurePosixPath(documented).relative_to("~")
 
 
 def routed_trail(root: Path, cwd: str | None) -> Path:

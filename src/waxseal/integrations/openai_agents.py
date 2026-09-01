@@ -39,7 +39,7 @@ from agents import RunHooks
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
-from waxseal.integrations._trail import resolve_trail
+from waxseal.integrations._trail import home_default, resolve_trail
 
 # _sanitize redacts BEFORE clipping: a clip can split a secret across the
 # boundary (a PEM losing its END marker stops matching) and land it on disk.
@@ -85,7 +85,10 @@ class WaxsealRunHooks(RunHooks):
         `WAXSEAL_TRAIL` would be silently ignored by this integration while
         the stdin hooks honoured it.
         """
-        self._trail = resolve_trail(trail, default=lambda: Path(DEFAULT_TRAIL).expanduser())
+        # home_default(), not Path(...).expanduser(): the last rung has to
+        # honour HOME, which ntpath.expanduser ignores in favour of USERPROFILE
+        # (waxseal-fg4.20; the profile split is documented on home_default).
+        self._trail = resolve_trail(trail, default=lambda: home_default(DEFAULT_TRAIL))
         self._log: AuditLog | None = None
 
     def _append(self, payload: dict[str, Any]) -> None:

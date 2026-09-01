@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -149,7 +150,7 @@ class _ByteCountingFile:
     seeks from EOF, unlike the old whole-file forward parse this wrapper was
     first written against."""
 
-    def __init__(self, fileobj, sink: list) -> None:
+    def __init__(self, fileobj: Any, sink: list[int]) -> None:
         self._fileobj = fileobj
         self._sink = sink
 
@@ -157,7 +158,7 @@ class _ByteCountingFile:
         self._fileobj.__enter__()
         return self
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: Any) -> None:
         return self._fileobj.__exit__(*exc)
 
     def __iter__(self) -> "_ByteCountingFile":
@@ -168,15 +169,15 @@ class _ByteCountingFile:
         self._sink.append(_byte_len(line))
         return line
 
-    def read(self, *args, **kwargs):
+    def read(self, *args: Any, **kwargs: Any) -> "str | bytes":
         data = self._fileobj.read(*args, **kwargs)
         self._sink.append(_byte_len(data))
         return data
 
-    def seek(self, *args, **kwargs):
+    def seek(self, *args: Any, **kwargs: Any) -> int:
         return self._fileobj.seek(*args, **kwargs)
 
-    def tell(self, *args, **kwargs):
+    def tell(self, *args: Any, **kwargs: Any) -> int:
         return self._fileobj.tell(*args, **kwargs)
 
 
@@ -198,7 +199,7 @@ class TestCostReceipt:
         for _ in range(n - 1):
             backend.append(lambda seq, prev: build_entry(seq, prev))
 
-        sink: list = []
+        sink: list[int] = []
         real_open = open
 
         def counting_open(file, *args, **kwargs):
@@ -262,7 +263,7 @@ class TestCostReceipt:
 
             monkeypatch.setattr(JSONLBackend, "_integrity_scan", full_scan)
         backend = JSONLBackend(path, integrity_scan_every=integrity_scan_every)
-        sink: list = []
+        sink: list[int] = []
         real_open = open
 
         def counting_open(file, *args, **kwargs):

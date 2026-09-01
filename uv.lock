@@ -986,7 +986,7 @@ s3 = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boto3", marker = "extra == 's3'" },
+    { name = "boto3", marker = "extra == 's3'", specifier = ">=1.35.69" },
     { name = "cryptography", marker = "extra == 'dev'", specifier = ">=40" },
     { name = "cryptography", marker = "extra == 'rfc3161'", specifier = ">=40" },
     { name = "hypothesis", marker = "extra == 'dev'" },
