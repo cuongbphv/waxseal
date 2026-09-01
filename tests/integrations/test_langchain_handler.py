@@ -23,9 +23,12 @@ import base64
 import importlib.util
 import json
 import sys
+import types
 import uuid
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -38,13 +41,11 @@ class _StubBaseCallbackHandler:
 
 
 @pytest.fixture()
-def handler_module(monkeypatch: pytest.MonkeyPatch):
-    import types
-
+def handler_module(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleType]:
     pkg = types.ModuleType("langchain_core")
     callbacks = types.ModuleType("langchain_core.callbacks")
-    callbacks.BaseCallbackHandler = _StubBaseCallbackHandler
-    pkg.callbacks = callbacks
+    setattr(callbacks, "BaseCallbackHandler", _StubBaseCallbackHandler)  # noqa: B010
+    setattr(pkg, "callbacks", callbacks)  # noqa: B010
     monkeypatch.setitem(sys.modules, "langchain_core", pkg)
     monkeypatch.setitem(sys.modules, "langchain_core.callbacks", callbacks)
 
@@ -56,8 +57,10 @@ def handler_module(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture()
-def make_handler(handler_module, tmp_path: Path):
-    def _make(trail: Path | None = None):
+def make_handler(
+    handler_module: types.ModuleType, tmp_path: Path
+) -> Callable[..., Any]:
+    def _make(trail: Path | None = None) -> Any:
         return handler_module.WaxsealCallbackHandler(trail or tmp_path / "trail.jsonl")
 
     return _make
@@ -66,7 +69,7 @@ def make_handler(handler_module, tmp_path: Path):
 RUN_ID = uuid.uuid4()
 
 
-def tool_start_kwargs():
+def tool_start_kwargs() -> dict[str, object]:
     # The exact keyword-only shape langchain-core 1.6.0 invokes with.
     return dict(
         run_id=RUN_ID, parent_run_id=None, tags=["agent"], metadata={"m": 1},
@@ -74,18 +77,25 @@ def tool_start_kwargs():
     )
 
 
-def read_payload(trail: Path, line_no: int = 0) -> dict:
+def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
     line = trail.read_text().splitlines()[line_no]
-    return json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
+    result: dict[str, Any] = json.loads(
+        base64.b64decode(json.loads(line)["payload_b64"])
+    )
+    return result
 
 
 class TestContract:
-    def test_is_a_base_callback_handler(self, handler_module, make_handler) -> None:
+    def test_is_a_base_callback_handler(
+        self,
+        handler_module: types.ModuleType,
+        make_handler: Callable[..., Any],
+    ) -> None:
         # The callback manager type-gates on this class; anything else is
         # silently ignored at attach time.
         assert isinstance(make_handler(), _StubBaseCallbackHandler)
 
-    def test_raise_error_stays_false(self, make_handler) -> None:
+    def test_raise_error_stays_false(self, make_handler: Callable[..., Any]) -> None:
         # raise_error=True would let a broken audit disk abort the user's
         # agent run — the audit observer must stay fail-open (and labelled).
         assert make_handler().raise_error is False
@@ -93,7 +103,7 @@ class TestContract:
 
 class TestToolEvents:
     def test_tool_start_and_end_chain_two_verified_entries(
-        self, make_handler, tmp_path: Path
+        self, make_handler: Callable[..., Any], tmp_path: Path
     ) -> None:
         trail = tmp_path / "trail.jsonl"
         h = make_handler(trail)
@@ -103,7 +113,11 @@ class TestToolEvents:
         assert result.ok
         assert result.checked == 2
 
-    def test_dispatch_payload_fields(self, make_handler, tmp_path: Path) -> None:
+    def test_dispatch_payload_fields(
+        self,
+        make_handler: Callable[..., Any],
+        tmp_path: Path,
+    ) -> None:
         trail = tmp_path / "trail.jsonl"
         make_handler(trail).on_tool_start(
             {"name": "sql_db_query"}, "SELECT 1", **tool_start_kwargs()
@@ -115,7 +129,11 @@ class TestToolEvents:
         assert payload["inputs"] == {"query": "SELECT 1"}
         assert payload["run_id"] == str(RUN_ID)
 
-    def test_tool_error_records_type_and_message(self, make_handler, tmp_path: Path) -> None:
+    def test_tool_error_records_type_and_message(
+        self,
+        make_handler: Callable[..., Any],
+        tmp_path: Path,
+    ) -> None:
         trail = tmp_path / "trail.jsonl"
         make_handler(trail).on_tool_error(
             TimeoutError("query exceeded 30s"), run_id=RUN_ID, parent_run_id=None
@@ -125,7 +143,11 @@ class TestToolEvents:
         assert payload["error_type"] == "TimeoutError"
         assert "30s" in payload["error_message"]
 
-    def test_non_string_tool_output_is_recorded(self, make_handler, tmp_path: Path) -> None:
+    def test_non_string_tool_output_is_recorded(
+        self,
+        make_handler: Callable[..., Any],
+        tmp_path: Path,
+    ) -> None:
         # on_tool_end's output is Any in langchain-core >= 1.x (was str);
         # a handler assuming str drops structured ToolMessage outputs.
         trail = tmp_path / "trail.jsonl"
@@ -140,7 +162,7 @@ class TestAgentDecisions:
     record of having been decided at all."""
 
     def test_agent_action_records_the_chosen_tool_and_its_input(
-        self, make_handler, tmp_path: Path
+        self, make_handler: Callable[..., Any], tmp_path: Path
     ) -> None:
         trail = tmp_path / "trail.jsonl"
         action = SimpleNamespace(
@@ -153,14 +175,22 @@ class TestAgentDecisions:
         assert payload["tool_input"] == {"query": "DROP TABLE users"}
         assert payload["run_id"] == str(RUN_ID)
 
-    def test_agent_action_secret_never_reaches_disk(self, make_handler, tmp_path: Path) -> None:
+    def test_agent_action_secret_never_reaches_disk(
+        self,
+        make_handler: Callable[..., Any],
+        tmp_path: Path,
+    ) -> None:
         trail = tmp_path / "trail.jsonl"
         secret = "sk-abcdef1234567890abcdef"
         action = SimpleNamespace(tool="shell", tool_input=f"curl -H 'Authorization: {secret}'")
         make_handler(trail).on_agent_action(action, run_id=RUN_ID)
         assert secret.encode() not in trail.read_bytes()
 
-    def test_agent_finish_records_the_return_values(self, make_handler, tmp_path: Path) -> None:
+    def test_agent_finish_records_the_return_values(
+        self,
+        make_handler: Callable[..., Any],
+        tmp_path: Path,
+    ) -> None:
         trail = tmp_path / "trail.jsonl"
         finish = SimpleNamespace(return_values={"output": "42"}, log="done")
         make_handler(trail).on_agent_finish(finish, run_id=RUN_ID, parent_run_id=None)
@@ -169,7 +199,7 @@ class TestAgentDecisions:
         assert payload["return_values"] == {"output": "42"}
 
     def test_a_decision_object_missing_the_attributes_is_recorded_as_none(
-        self, make_handler, tmp_path: Path
+        self, make_handler: Callable[..., Any], tmp_path: Path
     ) -> None:
         # LangChain's agent types differ across versions; a missing attribute
         # must read as "not present" on the chain, never crash the run and
@@ -182,7 +212,11 @@ class TestAgentDecisions:
 
 
 class TestRedactionAndClipping:
-    def test_secret_in_tool_input_never_reaches_disk(self, make_handler, tmp_path: Path) -> None:
+    def test_secret_in_tool_input_never_reaches_disk(
+        self,
+        make_handler: Callable[..., Any],
+        tmp_path: Path,
+    ) -> None:
         trail = tmp_path / "trail.jsonl"
         secret = "sk-abcdef1234567890abcdef"
         make_handler(trail).on_tool_start(
@@ -192,7 +226,7 @@ class TestRedactionAndClipping:
         assert AuditLog.open(trail).verify(measure_drops=False).ok
 
     def test_huge_output_is_clipped_with_visible_marker(
-        self, make_handler, tmp_path: Path
+        self, make_handler: Callable[..., Any], tmp_path: Path
     ) -> None:
         trail = tmp_path / "trail.jsonl"
         make_handler(trail).on_tool_end("y" * 1_000_000, run_id=RUN_ID)
@@ -202,7 +236,7 @@ class TestRedactionAndClipping:
 
 class TestNeverBlocksTheRun:
     def test_broken_trail_never_raises_and_labels_the_drop(
-        self, make_handler, tmp_path: Path, capsys
+        self, make_handler: Callable[..., Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # LangChain would swallow a raise (raise_error=False), but that
         # swallow is silent — the handler must label the drop itself.
@@ -213,7 +247,11 @@ class TestNeverBlocksTheRun:
         assert "dropped" in capsys.readouterr().err
 
     def test_open_failure_still_leaves_a_drop_record(
-        self, make_handler, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+        self,
+        make_handler: Callable[..., Any],
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # M5: the pre-open failure branch has no AuditLog to route through
         # yet, so it calls FileDropRecorder directly. tmp_path is writable,

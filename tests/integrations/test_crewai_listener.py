@@ -25,7 +25,9 @@ import importlib.util
 import json
 import sys
 import types
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -36,10 +38,10 @@ class _FakeBus:
     """Reproduces the verified registration surface of CrewAIEventsBus."""
 
     def __init__(self) -> None:
-        self.handlers: dict[type, object] = {}
+        self.handlers: dict[type, Callable[..., object]] = {}
 
-    def on(self, event_type: type):
-        def decorator(fn):
+    def on(self, event_type: type) -> Callable[[Callable[..., object]], Callable[..., object]]:
+        def decorator(fn: Callable[..., object]) -> Callable[..., object]:
             self.handlers[event_type] = fn
             return fn
 
@@ -47,7 +49,7 @@ class _FakeBus:
 
 
 def _event_class(name: str, event_type: str) -> type:
-    def __init__(self, **kwargs):
+    def __init__(self: Any, **kwargs: object) -> None:
         self.type = event_type
         for k, v in kwargs.items():
             setattr(self, k, v)
@@ -56,18 +58,21 @@ def _event_class(name: str, event_type: str) -> type:
 
 
 @pytest.fixture()
-def stub(monkeypatch: pytest.MonkeyPatch):
+def stub(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.SimpleNamespace]:
     bus = _FakeBus()
 
     class BaseEventListener:
         def __init__(self) -> None:
             # Verified: the real base class registers on the global bus
-            # singleton at construction time.
-            self.setup_listeners(bus)
+            # singleton at construction time. setup_listeners is the
+            # subclass's contract (crewai's template-method pattern) --
+            # WaxsealEventListener provides it, this fake base class does
+            # not, the same shape as the real crewai.events.BaseEventListener.
+            self.setup_listeners(bus)  # type: ignore[attr-defined]
 
     events = types.ModuleType("crewai.events")
-    events.BaseEventListener = BaseEventListener
-    events.crewai_event_bus = bus
+    setattr(events, "BaseEventListener", BaseEventListener)  # noqa: B010
+    setattr(events, "crewai_event_bus", bus)  # noqa: B010
     for name, etype in [
         ("ToolUsageStartedEvent", "tool_usage_started"),
         ("ToolUsageFinishedEvent", "tool_usage_finished"),
@@ -81,7 +86,7 @@ def stub(monkeypatch: pytest.MonkeyPatch):
     ]:
         setattr(events, name, _event_class(name, etype))
     pkg = types.ModuleType("crewai")
-    pkg.events = events
+    setattr(pkg, "events", events)  # noqa: B010
     monkeypatch.setitem(sys.modules, "crewai", pkg)
     monkeypatch.setitem(sys.modules, "crewai.events", events)
 
@@ -92,13 +97,16 @@ def stub(monkeypatch: pytest.MonkeyPatch):
     sys.modules.pop(name, None)
 
 
-def read_payload(trail: Path, line_no: int = 0) -> dict:
+def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
     line = trail.read_text().splitlines()[line_no]
-    return json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
+    result: dict[str, Any] = json.loads(
+        base64.b64decode(json.loads(line)["payload_b64"])
+    )
+    return result
 
 
-def tool_started(events, **overrides):
-    fields = dict(
+def tool_started(events: Any, **overrides: object) -> Any:
+    fields: dict[str, object] = dict(
         tool_name="web_search",
         tool_args={"query": "waxseal"},
         agent_role="Researcher",
@@ -111,7 +119,11 @@ def tool_started(events, **overrides):
 
 
 class TestRegistration:
-    def test_instantiation_registers_all_audited_events(self, stub, tmp_path: Path) -> None:
+    def test_instantiation_registers_all_audited_events(
+        self,
+        stub: types.SimpleNamespace,
+        tmp_path: Path,
+    ) -> None:
         stub.module.WaxsealEventListener(tmp_path / "trail.jsonl")
         registered = {cls.__name__ for cls in stub.bus.handlers}
         assert registered == {
@@ -124,7 +136,7 @@ class TestRegistration:
 
 class TestToolEvents:
     def test_started_and_finished_chain_two_verified_entries(
-        self, stub, tmp_path: Path
+        self, stub: types.SimpleNamespace, tmp_path: Path
     ) -> None:
         trail = tmp_path / "trail.jsonl"
         stub.module.WaxsealEventListener(trail)
@@ -142,7 +154,11 @@ class TestToolEvents:
         assert result.ok
         assert result.checked == 2
 
-    def test_action_fields_land_in_the_payload(self, stub, tmp_path: Path) -> None:
+    def test_action_fields_land_in_the_payload(
+        self,
+        stub: types.SimpleNamespace,
+        tmp_path: Path,
+    ) -> None:
         trail = tmp_path / "trail.jsonl"
         stub.module.WaxsealEventListener(trail)
         stub.bus.handlers[stub.events.ToolUsageStartedEvent]("crew", tool_started(stub.events))
@@ -153,7 +169,7 @@ class TestToolEvents:
         assert payload["agent_role"] == "Researcher"
         assert payload["task_id"] == "task-1"
 
-    def test_tool_error_is_recorded(self, stub, tmp_path: Path) -> None:
+    def test_tool_error_is_recorded(self, stub: types.SimpleNamespace, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
         stub.module.WaxsealEventListener(trail)
         stub.bus.handlers[stub.events.ToolUsageErrorEvent](
@@ -170,7 +186,11 @@ class TestToolEvents:
 
 
 class TestLifecycleEvents:
-    def test_crew_and_task_events_are_recorded(self, stub, tmp_path: Path) -> None:
+    def test_crew_and_task_events_are_recorded(
+        self,
+        stub: types.SimpleNamespace,
+        tmp_path: Path,
+    ) -> None:
         trail = tmp_path / "trail.jsonl"
         stub.module.WaxsealEventListener(trail)
         stub.bus.handlers[stub.events.CrewKickoffStartedEvent](
@@ -186,7 +206,11 @@ class TestLifecycleEvents:
 
 
 class TestRedactionAndClipping:
-    def test_secret_in_tool_args_never_reaches_disk(self, stub, tmp_path: Path) -> None:
+    def test_secret_in_tool_args_never_reaches_disk(
+        self,
+        stub: types.SimpleNamespace,
+        tmp_path: Path,
+    ) -> None:
         trail = tmp_path / "trail.jsonl"
         stub.module.WaxsealEventListener(trail)
         secret = "sk-abcdef1234567890abcdef"
@@ -196,7 +220,11 @@ class TestRedactionAndClipping:
         assert secret.encode() not in trail.read_bytes()
         assert AuditLog.open(trail).verify(measure_drops=False).ok
 
-    def test_huge_output_is_clipped_with_visible_marker(self, stub, tmp_path: Path) -> None:
+    def test_huge_output_is_clipped_with_visible_marker(
+        self,
+        stub: types.SimpleNamespace,
+        tmp_path: Path,
+    ) -> None:
         trail = tmp_path / "trail.jsonl"
         stub.module.WaxsealEventListener(trail)
         stub.bus.handlers[stub.events.ToolUsageFinishedEvent](
@@ -212,7 +240,7 @@ class TestRedactionAndClipping:
 
 class TestNeverBlocksTheCrew:
     def test_broken_trail_never_raises_and_labels_the_drop(
-        self, stub, tmp_path: Path, capsys
+        self, stub: types.SimpleNamespace, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # The bus would swallow a raise, but that swallow is silent — the
         # listener must label the drop itself.
@@ -223,7 +251,11 @@ class TestNeverBlocksTheCrew:
         assert "dropped" in capsys.readouterr().err
 
     def test_open_failure_still_leaves_a_drop_record(
-        self, stub, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+        self,
+        stub: types.SimpleNamespace,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # M5: the pre-open failure branch has no AuditLog to route through
         # yet, so it calls FileDropRecorder directly. tmp_path is writable,
