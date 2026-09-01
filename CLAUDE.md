@@ -137,14 +137,23 @@ This codebase already applies the principle, by name or not, in (at least) thirt
     measured, and `bonded`/`unbonded` are two distinct KINDS of measured-bad or
     measured-clean, never collapsed into each other for the sake of a shorter enum.
 13. **Registry cross-check** (`src/waxseal/domain/registry.py`) — `agrees` / `disagrees`
-    / `unreachable`, comparing this build's fingerprint against an on-chain fingerprint
-    registry. `_REGISTRY_STATUS`'s entire range is `{OK, UNVERIFIABLE}` — `BROKEN` is not
-    spelled anywhere in the table, so no registry reading can produce `verify` exit 1 by
+    / `absent` / `unreachable`, comparing this build's fingerprint against an on-chain
+    fingerprint registry. `absent` and `unreachable` were one merged value at first —
+    `FingerprintRegistry.sol`'s `lookup()` never reverts, so a caller getting back nothing
+    for a fingerprint (a firm, measured "nobody registered this") looked identical to a
+    caller that never got an answer at all (nothing measured). Both F3 and F4 hit that
+    same collapse independently while building unrelated features on top of it, which is
+    the tell that it was load-bearing rather than cosmetic: `RegistryCrossCheck.check()`
+    now takes a `reachable` flag the CALLER sets from its own network measurement — the
+    domain layer cannot infer reachability from a `None` descriptor, only the caller that
+    made the actual RPC call knows which of the two happened. `_REGISTRY_STATUS`'s entire
+    range is still `{OK, UNVERIFIABLE}` for all four values — `BROKEN` is not spelled
+    anywhere in the table, so no registry reading can produce `verify` exit 1 by
     construction, not by a reviewer's care. Two registries disagreeing about one
     fingerprint are two authorities in conflict; this process has no standing to
     adjudicate which is real, and reporting "tampered" for a conflict it cannot settle
     would be migration 060 with a second registry standing in for the widened field set.
-    A fourth, closely related value lives one layer down and is deliberately NOT a
+    A fifth, closely related value lives one layer down and is deliberately NOT a
     fourteenth instance here: `LedgerDisagreement` (`ports/ledger.py`), raised when two or
     more RPC endpoints answer and do not agree, is a measured CONFLICT rather than a
     not-measured state, so the collapse theorem's two-values-from-three shape does not
