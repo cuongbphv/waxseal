@@ -56,6 +56,10 @@ sys.path.insert(0, str(_REPO / "tools"))
 import gen_consistency_vectors as rfc  # noqa: E402  clean-room RFC transcription
 
 from waxseal.domain import anchoring as wx  # noqa: E402
+from waxseal.domain.bond import (  # noqa: E402
+    checkpoint_signing_digest,
+    trail_id_for,
+)
 from waxseal.domain.checkpoint import Checkpoint, checkpoint_frame  # noqa: E402
 from waxseal.domain.fingerprint import (  # noqa: E402
     ALGORITHM,
@@ -63,7 +67,7 @@ from waxseal.domain.fingerprint import (  # noqa: E402
     HEADER_FIELDS,
     fingerprint_for,
 )
-from waxseal.domain.hashing import ENCODING, lp  # noqa: E402
+from waxseal.domain.hashing import ENCODING  # noqa: E402
 
 VECTOR_DIR = _REPO / "contracts" / "vectors"
 
@@ -82,35 +86,8 @@ _FAIL = {
 }
 _FAIL_NAME = {v: k for k, v in _FAIL.items()}
 
-# The signing domain separator, duplicated in CheckpointCodec.sol. Not imported
-# from waxseal: at the time this lands, `domain/bond.py` (workstream F1) may not
-# have chosen it yet, and a generator that imported a constant that does not
-# exist would fail for a reason unrelated to what it checks. The vectors are the
-# contract between the two -- if F1 picks different bytes, these vectors go red,
-# which is the intended way to discover the disagreement.
-SIGNING_PREFIX = b"waxseal-checkpoint-sig-v1\n"
-
-
 def _hex(value: bytes) -> str:
     return "0x" + value.hex()
-
-
-def signing_digest(trail_id: bytes, checkpoint: Checkpoint) -> bytes:
-    """The 32 bytes a trail writer signs for one checkpoint.
-
-    A domain-separated SHA-256 over the checkpoint frame with the trail id
-    bound in. Both fields are 64-character hex spellings so the frame uses
-    `domain.hashing.lp` unmodified -- the on-chain side has to reproduce this
-    byte for byte, and an encoder with only one arm to implement is an encoder
-    with fewer ways to disagree.
-
-    Not an EIP-191 or EIP-712 envelope: these bytes must be producible by a
-    Python verifier whose only crypto is hashlib.
-    """
-    frame_hash = hashlib.sha256(checkpoint_frame(checkpoint)).digest()
-    return hashlib.sha256(
-        SIGNING_PREFIX + struct.pack(">Q", 2) + lp(trail_id.hex()) + lp(frame_hash.hex())
-    ).digest()
 
 
 def descriptor_frame(fields: tuple[str, ...]) -> bytes:
@@ -508,6 +485,14 @@ def build_checkpoint_vectors() -> list[dict[str, Any]]:
     frame, so the contract has to reproduce both spellings. The seq values
     below straddle every digit-count boundary a naive decimal writer gets
     wrong.
+
+    `signingDigest` is computed by the SHIPPED `checkpoint_signing_digest`,
+    and `trailId` by the SHIPPED `trail_id_for`. This file used to restate
+    both, so `--check` compared the Solidity against a private copy while
+    `domain/bond.py` signed entirely different bytes and every gate stayed
+    green (waxseal-fg4.37). Importing is the fix; the vector carries `chainId`
+    beside `trailId` so the name-to-bytes32 mapping is itself pinned by a
+    value rather than assumed by both sides separately.
     """
     vectors = []
     hashes = entry_hashes(40)
@@ -517,17 +502,18 @@ def build_checkpoint_vectors() -> list[dict[str, Any]]:
         )
         frame = checkpoint_frame(checkpoint)
         frame_hash = hashlib.sha256(frame).digest()
-        trail_id = hashlib.sha256(f"trail-{seq}".encode()).digest()
+        chain_id = f"trail-{seq}"
         vectors.append(
             {
                 "name": f"checkpoint_seq{seq}",
-                "trailId": _hex(trail_id),
+                "chainId": chain_id,
+                "trailId": _hex(trail_id_for(chain_id)),
                 "seq": seq,
                 "entryHash": "0x" + checkpoint.entry_hash,
                 "root": "0x" + checkpoint.root,
                 "frame": _hex(frame),
                 "frameHash": _hex(frame_hash),
-                "signingDigest": _hex(signing_digest(trail_id, checkpoint)),
+                "signingDigest": _hex(checkpoint_signing_digest(chain_id, checkpoint)),
             }
         )
     return vectors

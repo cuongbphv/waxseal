@@ -45,26 +45,76 @@ from typing import Final
 
 from waxseal.domain.anchoring import verify_consistency
 from waxseal.domain.checkpoint import Checkpoint, checkpoint_frame
-from waxseal.domain.hashing import lp
+from waxseal.domain.hashing import LpEncodingError, lp
 from waxseal.domain.verdict import Verdict
 
+# THE one signing prefix. `CheckpointCodec.sol` holds the same literal because
+# Solidity cannot import Python, and `tools/gen_contract_vectors.py` imports
+# THIS name rather than restating it — the generator's own copy is what let
+# the two sides sign different bytes through every green gate
+# (waxseal-fg4.37). The vector the generator writes is computed by the
+# function below, so a change here moves the vector and the stale Solidity
+# constant fails `forge test`.
 LEDGER_CHECKPOINT_SIG_PREFIX: Final = b"waxseal-ledger-checkpoint-sig-v1\n"
+
+
+def trail_id_for(chain_id: str) -> bytes:
+    """The 32-byte trail id the contracts key by, from the trail's name.
+
+    PINNED, not implicit. The Python side names a trail with a string; the
+    contracts key their mappings by `bytes32` and cannot hold a name of
+    unbounded length. Something has to reduce one to the other, and while
+    that reduction was unwritten the two halves of the protocol each assumed
+    a different one — which is half of why they signed different bytes. The
+    reduction is `sha256` of the name's UTF-8 bytes, it is stated here once,
+    and the cross-language vectors carry both the name and the id so the
+    mapping itself is under test rather than merely believed.
+
+    Operator-chosen ids were the alternative and are rejected: an id nobody
+    can recompute from the trail name is an id a verifier has to be TOLD,
+    and a verifier that takes the binding on trust is not verifying it.
+
+    Raises `LpEncodingError`, matching `lp`, for a `str` with no UTF-8 form
+    (a lone UTF-16 surrogate) rather than letting the bare stdlib error out.
+    """
+    try:
+        encoded = chain_id.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise LpEncodingError(
+            f"trail_id_for() cannot encode {chain_id!r}: not representable in UTF-8"
+        ) from exc
+    return hashlib.sha256(encoded).digest()
 
 
 def checkpoint_signing_digest(chain_id: str, checkpoint: Checkpoint) -> bytes:
     """The 32 bytes a writer's key signs when publishing a checkpoint.
 
-    The trail's `chain_id` is INSIDE the digest. Without it, a signature over
-    trail A's checkpoint at seq 9 is a valid signature over trail B's
-    checkpoint at seq 9 whenever the two happen to agree, and — worse in the
-    other direction — two unrelated trails at the same seq look to the
-    contract like one writer equivocating. Binding the identity costs one
-    length-prefixed field and removes the whole class.
+    The trail is INSIDE the digest. Without it, a signature over trail A's
+    checkpoint at seq 9 is a valid signature over trail B's checkpoint at seq
+    9 whenever the two happen to agree, and — worse in the other direction —
+    two unrelated trails at the same seq look to the contract like one writer
+    equivocating. Binding the identity costs one length-prefixed field and
+    removes the whole class.
+
+    It is bound as `trail_id_for(chain_id)` spelled in lowercase hex, not as
+    the name itself: the contracts already hold that `bytes32` as their
+    mapping key, so the digest is built from what the contract HAS and there
+    is no name-to-id check to get wrong on the slashing path.
+
+    The frame is signed DIRECTLY rather than through its own hash. The
+    alternative — signing `sha256(frame)` hex-encoded — buys a fixed-length
+    preimage, which is the mitigation you need when fields are not length
+    prefixed. lp64 length-prefixes them, so the concatenation below is
+    already injective: the prefix and field count are fixed, `lp` is
+    self-delimiting, and the frame is last and takes the remainder. Paying an
+    extra hash and an extra ASCII re-spelling for a property the encoding
+    already guarantees would add two more surfaces for the two languages to
+    disagree on, which is the failure this whole bead is about.
     """
     frame = (
         LEDGER_CHECKPOINT_SIG_PREFIX
         + struct.pack(">Q", 2)
-        + lp(chain_id)
+        + lp(trail_id_for(chain_id).hex())
         + checkpoint_frame(checkpoint)
     )
     return hashlib.sha256(frame).digest()

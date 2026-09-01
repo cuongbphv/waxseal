@@ -18,6 +18,7 @@ import pytest
 from waxseal.domain import bond
 from waxseal.domain.anchoring import batch_root, consistency_proof
 from waxseal.domain.checkpoint import Checkpoint, checkpoint_for, checkpoint_frame
+from waxseal.domain.hashing import LpEncodingError
 from waxseal.domain.verdict import Verdict
 
 CHAIN_ID = "trail-a"
@@ -28,25 +29,93 @@ def cp(seq: int) -> Checkpoint:
     return checkpoint_for(HASHES[: seq + 1])
 
 
+class TestTrailIdMapping:
+    """The name-to-bytes32 reduction, pinned rather than assumed.
+
+    While it was unwritten, `domain/bond.py` bound the trail NAME into the
+    digest and `CheckpointCodec.sol` bound a `bytes32` nobody had said how to
+    derive — one of the three ways the two halves signed different bytes
+    (waxseal-fg4.37).
+    """
+
+    def test_is_sha256_of_the_utf8_name(self) -> None:
+        assert bond.trail_id_for(CHAIN_ID) == hashlib.sha256(b"trail-a").digest()
+        assert len(bond.trail_id_for(CHAIN_ID)) == 32
+
+    def test_a_non_ascii_name_is_reduced_over_its_utf8_bytes(self) -> None:
+        # The contracts see only the 32 bytes, so the encoding of the name has
+        # to be stated: UTF-8, the same encoding `lp` uses everywhere else.
+        assert bond.trail_id_for("trail-\u00e9") == hashlib.sha256("trail-é".encode()).digest()
+
+    def test_a_name_with_no_utf8_form_raises_the_labelled_error(self) -> None:
+        # A lone UTF-16 surrogate is a valid `str` with no UTF-8 spelling.
+        # `lp` raises `LpEncodingError` rather than leaking the bare stdlib
+        # `UnicodeEncodeError` (finding G4); this reduction now encodes the
+        # name itself, so it owes the same labelled failure and must not
+        # reintroduce the leak `lp` was fixed to stop.
+        with pytest.raises(LpEncodingError, match="not representable in UTF-8"):
+            bond.trail_id_for("trail-\ud800")
+
+
 class TestSigningDigest:
     def test_is_domain_separated_sha256_over_the_checkpoint_frame(self) -> None:
+        # The frame goes in DIRECTLY, not as its own hash: lp64 already
+        # length-prefixes the trail id, so the concatenation is injective
+        # without a fixed-length preimage, and each extra hash or re-spelling
+        # is one more surface for Python and Solidity to disagree on.
         checkpoint = cp(3)
+        trail_id_hex = hashlib.sha256(b"trail-a").hexdigest()
         expected = hashlib.sha256(
             bond.LEDGER_CHECKPOINT_SIG_PREFIX
             + (2).to_bytes(8, "big")
-            + b"\x00\x00\x00\x00\x00\x00\x00\x08\x01trail-a"
+            + (65).to_bytes(8, "big")
+            + b"\x01"
+            + trail_id_hex.encode()
             + checkpoint_frame(checkpoint)
         ).digest()
         assert bond.checkpoint_signing_digest(CHAIN_ID, checkpoint) == expected
         assert len(expected) == 32
+
+    def test_the_frame_is_signed_directly_and_not_through_its_own_hash(self) -> None:
+        # The superseded shape (workstream F2's, before waxseal-fg4.37 settled
+        # the disagreement): sha256 of the frame, hex-spelled, as a second lp
+        # field. Pinned as a NON-match so the two forms can never be confused
+        # for one another again by a reader who finds the old bytes in a
+        # commit or in a contract comment.
+        checkpoint = cp(3)
+        frame_hash = hashlib.sha256(checkpoint_frame(checkpoint)).digest()
+        superseded = hashlib.sha256(
+            bond.LEDGER_CHECKPOINT_SIG_PREFIX
+            + (2).to_bytes(8, "big")
+            + (65).to_bytes(8, "big")
+            + b"\x01"
+            + hashlib.sha256(b"trail-a").hexdigest().encode()
+            + (65).to_bytes(8, "big")
+            + b"\x01"
+            + frame_hash.hex().encode()
+        ).digest()
+        assert bond.checkpoint_signing_digest(CHAIN_ID, checkpoint) != superseded
 
     def test_a_frozen_digest_pins_the_bytes_a_signature_commits_to(self) -> None:
         # Changing this value invalidates every signature already published to
         # the bond contract, and no code in this process would notice: the
         # contract would simply stop recovering the writer's address. Frozen
         # here so the change cannot be silent.
+        #
+        # RE-FROZEN ONCE, deliberately, in waxseal-fg4.37, from
+        # c65148fdcdcd298907162f24c0cae03514cfc90cbd33cf0c290722c725d64b24.
+        # That value was never a shared digest: `CheckpointCodec.sol` signed a
+        # different prefix over a different body at the same time, so no
+        # signature anyone could verify on chain was ever taken over it, and
+        # nothing verifiable is orphaned by the move. Two of the three
+        # differences land in this hex — the trail is now bound as
+        # `trail_id_for(chain_id)` in hex rather than as the bare name, and
+        # the contract's prefix moved to this module's. The frame itself did
+        # NOT move; it is inside externally issued RFC 3161 receipts.
+        # This is a re-freeze under CLAUDE.md rule 3, not a precedent: a
+        # frozen-hash failure still means STOP.
         assert bond.checkpoint_signing_digest(CHAIN_ID, cp(3)).hex() == (
-            "c65148fdcdcd298907162f24c0cae03514cfc90cbd33cf0c290722c725d64b24"
+            "45778fc6c5bf4a7e38058b7b8db89a84705e4d27e1e60dae2a45f5d08560ac12"
         )
 
     def test_the_chain_id_is_inside_the_digest(self) -> None:

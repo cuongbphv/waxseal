@@ -32,7 +32,17 @@ library CheckpointCodec {
     ///      the frame's. Without the separation a timestamp token over a
     ///      frame and a writer signature over the same frame would be
     ///      interchangeable bytes.
-    bytes internal constant SIGNING_PREFIX = "waxseal-checkpoint-sig-v1\n";
+    ///
+    ///      These bytes are `domain/bond.py::LEDGER_CHECKPOINT_SIG_PREFIX`.
+    ///      Solidity cannot import Python, so the literal is restated here
+    ///      and joined to the Python one by the checkpoint vectors, whose
+    ///      `signingDigest` is computed by `checkpoint_signing_digest`
+    ///      itself. Editing this constant alone turns
+    ///      `test_frameAndDigestAgreeWithPython` red. It once said
+    ///      "waxseal-checkpoint-sig-v1\n" while Python said this, and nothing
+    ///      was red at all, because the generator restated the prefix too
+    ///      (waxseal-fg4.37).
+    bytes internal constant SIGNING_PREFIX = "waxseal-ledger-checkpoint-sig-v1\n";
 
     /// @notice `checkpoint_frame(Checkpoint(seq, entryHash, root))`, bare shape.
     /// @dev The hex strings are the 64-character LOWERCASE spelling, because
@@ -49,10 +59,23 @@ library CheckpointCodec {
     }
 
     /// @notice The 32 bytes a trail writer signs for one checkpoint.
-    /// @dev The trail id is bound INTO the digest. Without it a checkpoint
-    ///      signed for one trail is a valid signature for the same (seq,
-    ///      entryHash, root) on any other trail the same key writes, and the
-    ///      liveness contract is keyed by trail.
+    /// @dev `domain/bond.py::checkpoint_signing_digest`, byte for byte. The
+    ///      `trailId` here is that function's `trail_id_for(chain_id)` --
+    ///      `sha256` of the trail name's UTF-8 bytes, the pinned mapping
+    ///      between the name Python holds and the `bytes32` this contract
+    ///      keys its mappings by. It is spelled as 64 lowercase hex
+    ///      characters inside `lp` because lp64 encodes strings, and because
+    ///      the ASCII is what both languages can write down identically.
+    ///
+    ///      The FRAME is signed directly, not its hash. Hashing it first
+    ///      would buy a fixed-length preimage, which is what you need when
+    ///      fields are not length prefixed; lp64 prefixes them, so this
+    ///      concatenation is already injective -- fixed prefix, fixed field
+    ///      count, self-delimiting `lp`, frame last taking the remainder --
+    ///      and the extra hash plus the extra hex re-spelling would only add
+    ///      two more surfaces for the two languages to disagree on. This
+    ///      contract already builds the frame in memory to reach either
+    ///      form, so signing it directly is also the cheaper of the two.
     ///
     ///      This is a raw SHA-256 digest, deliberately NOT an EIP-191
     ///      personal_sign or EIP-712 envelope: the same bytes must be
@@ -65,9 +88,10 @@ library CheckpointCodec {
         pure
         returns (bytes32)
     {
-        bytes32 frameHash = sha256(frame(seq, entryHash, root));
         return sha256(
-            abi.encodePacked(SIGNING_PREFIX, uint64(2), lp(hex32(trailId)), lp(hex32(frameHash)))
+            abi.encodePacked(
+                SIGNING_PREFIX, uint64(2), lp(hex32(trailId)), frame(seq, entryHash, root)
+            )
         );
     }
 
