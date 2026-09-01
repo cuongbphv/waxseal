@@ -29,6 +29,7 @@ TARGETS = (
     "crewai",
     "openai-agents",
     "openclaw",
+    "agt",
 )
 
 _STDIN_HOOK_SHIM = '''#!/usr/bin/env python3
@@ -81,6 +82,19 @@ _LIBRARY_USAGE = {
     "openai-agents": (
         "from waxseal.integrations.openai_agents import WaxsealRunHooks\n"
         'result = await Runner.run(agent, "input", hooks=WaxsealRunHooks(trail_path))'
+    ),
+    "agt": (
+        "from agentmesh.governance import AuditLog as AGTAuditLog\n"
+        "from waxseal.integrations.agt import WaxsealAuditSink\n\n"
+        "audit = AGTAuditLog(sink=WaxsealAuditSink(trail_path))\n"
+        'audit.log(event_type="policy_evaluation", agent_did="did:web:agent-1",\n'
+        '          action="read_file", outcome="allow", policy_decision="allow")\n\n'
+        "Note: govern()'s own wrapper builds its OWN AuditLog with no way to\n"
+        "attach a sink (agent-governance-toolkit-core 4.1.0 and 5.0.0, both\n"
+        "read — a confirmed upstream gap, not a waxseal limitation). Call\n"
+        "AGTAuditLog(sink=...) yourself at your governance checkpoints, or\n"
+        "reach into `governed._audit = AGTAuditLog(sink=...)` post-construction\n"
+        "(a private attribute; there is no public setter upstream)."
     ),
 }
 

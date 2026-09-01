@@ -515,6 +515,7 @@ class TestEveryIntegrationHonoursTheVariable:
     """The census this bead closes: 4 of 9 became 9 of 9."""
 
     MODULES = (
+        "waxseal.integrations.agt",
         "waxseal.integrations.claude_code",
         "waxseal.integrations.codex",
         "waxseal.integrations.crewai",
