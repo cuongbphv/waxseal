@@ -167,8 +167,12 @@ Two are worth naming as attacks the previous release could not see at all:
   indistinguishable from a system that was simply idle. `max_anchor_age_s` closes this
   for a verifier that holds the deadline in its own trust domain: silence past the
   deadline becomes a reported finding rather than an absence of findings. This does not
-  make silence publicly adjudicable — that needs a third party holding the deadline, and
-  the on-chain liveness contract sketched in `docs/paper/` remains designed, not built.
+  make silence publicly adjudicable by itself — that needs a third party holding the
+  deadline. As of 0.1.5 that third party can be the on-chain liveness contract this
+  document's own text once called "sketched in `docs/paper/`, designed, not built" —
+  it is now built (section 7 below); an UNINVOLVED third party can read `waxseal
+  ledger-status` against it without the operator's cooperation, closing the gap this
+  paragraph used to name as open.
 
 ### Provably impossible without an external channel
 
@@ -298,3 +302,65 @@ three explicitly:
 3. **What did the checks that were not performed cover?** A check absent from
    the report was not performed, and absence of a check is never a pass — the
    report labels each one rather than omitting it.
+
+---
+
+## 7. The on-chain ledger layer (0.1.5, Workstream F)
+
+**Question:** does anchoring to a smart contract change the trust boundary the rest of
+this document draws?
+
+**Answer: no. The three contracts are a THIRD kind of external copy, joining section 1's
+table, and every one of them inherits the SAME scoped claim: they detect rewriting and
+equivocation on a writer's own SIGNED claims, never dishonesty at write time.** The
+doctrine is DESIGN.md §11's, restated here for the layer that makes it concrete: the
+trusted-writer boundary still applies in full. A compromised writer can still append
+anything to the trail and sign a checkpoint over it; a contract that only ever sees
+signed heads can compare what the SAME signer claimed at two different times or
+positions, and nothing more.
+
+| Contract | What it adds to section 1's table | What it does NOT do |
+|---|---|---|
+| `AnchoringLiveness` | a finalized-ledger copy of the WRITER's latest signed checkpoint, readable by an uninvolved third party without the operator's cooperation (closing the gap section 4 used to name as open) | attest that any entry between two checkpoints is honest; detect a writer that keeps anchoring while quietly editing what it anchors |
+| `FingerprintRegistry` | an append-only publication of a header descriptor, so a poisoned LOCAL registry now needs either a SHA-256 collision or control of the chain to pass unnoticed | license this build to RECOMPUTE a row under a fingerprint it agrees is real by name; agreement on a name is not agreement on a hasher (RFC 6962 §4.6, `domain/registry.py`'s own doctrine) |
+| `BondedCheckpoints` | a PRICE on one specific dishonesty — signing two different checkpoints at the same position (equivocation) | make equivocation impossible, detect a writer that never contradicts itself (omission, fabrication, or silent editing that never produces two conflicting signed heads), or protect a writer whose bond is worth less than the lie |
+
+Extending section 5's table with the state this layer introduces:
+
+| Attacker holds | Rewrite works? | What stops it |
+|---|---|---|
+| the writer's signing key, no bond posted | yes, freely | nothing here — `AnchoringLiveness` only detects SILENCE (the writer stopped anchoring), never a live, self-consistent rewrite; section 5's original rows are unchanged |
+| the writer's signing key, a bond posted, and it EQUIVOCATES to cover the rewrite | caught once someone holds both signed heads | `BondedCheckpoints.proveEquivocation` — self-contained positive evidence, no further context needed |
+| the writer's signing key, a bond posted, and it never equivocates (one consistent lie, signed once) | yes | nothing — the contract never sees a contradiction to prove, because there is not one |
+
+### New detection surfaces this layer adds
+
+- **`LedgerDisagreement`** (`ports/ledger.py`) is a new kind of finding, orthogonal to
+  the `ok`/`broken`/`unverifiable` chain verdict: two or more RPC endpoints answered the
+  SAME question about on-chain state and did not agree. It is an eclipse-shaped
+  observation about the TRANSPORT, not a verdict about the trail, and the client
+  refuses to pick a winner — reporting the disagreeing pair (rule 6) is the whole
+  response. Residual, carried forward from section 4's eclipse discussion: two RPC
+  endpoints is a floor an operator configures, not proof of independence. Two providers
+  that both proxy the same upstream node have not raised τ at all, and waxseal cannot
+  detect that from the client side any more than it can verify who operates a witness.
+- **The revert as a three-way answer.** `AnchoringLiveness.isDelinquent`/`.lastSeen`
+  REVERT for an unregistered or never-anchored trail rather than lying with `false` —
+  `bool` is two-valued and the honest answer is three-valued. The adapter (`adapters/
+  evm.py`) reads a RECOGNISED revert as a measured absence (the chain answered,
+  deterministically, that it holds nothing), an UNRECOGNISED revert as unmeasured but
+  LABELLED with the four-byte selector the operator can look up, and a genuine network
+  failure as unreachable with neither label. On the WRITE path the same shape inverts: a
+  transaction the contract rejects is a POSITIVE rejection — the contract answered no —
+  never folded into "could not be asked." SPEC.md's Ledger layer section defines the
+  full mapping; `CLAUDE.md`'s Named-principle list records instances 11-13 for the three
+  contract-backed ternaries this produces (liveness, bond, registry), and records why
+  `LedgerDisagreement` and the revert pattern are documented here and in SPEC.md rather
+  than counted as a fourth/fifth Named-principle instance: neither is a not-measured
+  state collapsing into a binary the way the collapse theorem describes; both are
+  measured facts about the TRANSPORT or the WRITE outcome layered underneath the three
+  ternaries that are.
+
+Cross-reference: `docs/paper/conformance.md` section 3's three on-chain rows record what
+shipped and cite the tests; SPEC.md's Ledger layer section is the byte-level and
+exit-code contract.

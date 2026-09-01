@@ -67,7 +67,7 @@ confidence) — collapsing to two values leaves no third option. "Migration 060"
 clothing: an unknown/unmeasured state got forced into a binary and came out on the wrong
 side.
 
-This codebase already applies the principle, by name or not, in (at least) ten places:
+This codebase already applies the principle, by name or not, in (at least) thirteen places:
 
 1. **Verdict chain**: `ok` / `broken` / `unverifiable` (`domain/verify.py`), now also
    formalized as the `Verdict` type (`src/waxseal/domain/verdict.py`) — a new instance
@@ -116,10 +116,44 @@ This codebase already applies the principle, by name or not, in (at least) ten p
     on none of them. Unreadable stays unchecked, never invalid; only a signature that
     verifiably fails, or a signer that verifiably reaches none of the operator's anchors,
     earns `signature_invalid`.
+11. **On-chain liveness reading** (`src/waxseal/domain/liveness.py`) — `live` /
+    `delinquent` / `unreachable`. An RPC endpoint that did not answer has measured
+    nothing about a writer's punctuality: reading that silence as `delinquent` raises an
+    alarm about a node outage that was never the writer's fault, and reading it as `live`
+    reports a writer that stopped anchoring weeks ago as healthy — the collapse arrived at
+    from both directions on the same predicate. `LivenessVerdict` carries two DIFFERENT
+    mappings onto `Verdict` on purpose: `to_verdict()` (the `ledger-status` sense, where a
+    delinquent reading is a positive detection, exit 1) and `to_verify_verdict()` (the
+    `verify`/`report` sense, whose range excludes `BROKEN` by construction, so a chain
+    saying "not anchored on time" can never print as "the trail was edited").
+12. **Bond status** (`src/waxseal/domain/bond.py`) — FOUR values, not three, and the
+    fourth is the point: `bonded` / `slashed` / `unbonded` / `unreachable`. `slashed`
+    names an ADJUDICATED event — a fraud proof was submitted and accepted; `unbonded`
+    names a writer that simply never posted a stake. Folding the second into the first
+    "would print 'slashed' over a writer nobody ever proved anything against — asserting
+    an adjudication from an absence, which is the same move CLAUDE.md rule 5 forbids in
+    the other direction" (the module's own docstring). The evidential trichotomy stays
+    intact around the pair: `unreachable` remains the one value that means nothing was
+    measured, and `bonded`/`unbonded` are two distinct KINDS of measured-bad or
+    measured-clean, never collapsed into each other for the sake of a shorter enum.
+13. **Registry cross-check** (`src/waxseal/domain/registry.py`) — `agrees` / `disagrees`
+    / `unreachable`, comparing this build's fingerprint against an on-chain fingerprint
+    registry. `_REGISTRY_STATUS`'s entire range is `{OK, UNVERIFIABLE}` — `BROKEN` is not
+    spelled anywhere in the table, so no registry reading can produce `verify` exit 1 by
+    construction, not by a reviewer's care. Two registries disagreeing about one
+    fingerprint are two authorities in conflict; this process has no standing to
+    adjudicate which is real, and reporting "tampered" for a conflict it cannot settle
+    would be migration 060 with a second registry standing in for the widened field set.
+    A fourth, closely related value lives one layer down and is deliberately NOT a
+    fourteenth instance here: `LedgerDisagreement` (`ports/ledger.py`), raised when two or
+    more RPC endpoints answer and do not agree, is a measured CONFLICT rather than a
+    not-measured state, so the collapse theorem's two-values-from-three shape does not
+    apply to it the way it applies to instances 11-13 above — it is documented as its own
+    transport-layer concept in SPEC.md's Ledger layer section instead of listed here.
 
 Rule 5 below is the SPECIFIC instance of this general principle that the chain-integrity
 metric needed. An implementer who has internalized the general principle, not just rule
-5's wording, should be able to find an eleventh place it applies without being told.
+5's wording, should be able to find a fourteenth place it applies without being told.
 
 ## Architecture (layer DAG, enforced by tests/architecture/)
 
@@ -248,8 +282,33 @@ reports a reading and not a verdict an operator would then have to reconcile aga
 URL/remote target. Two spec'd
 verifier-state carve-outs, neither of which touches the log: `--pin` writes the pin state
 file (SPEC §13 — exit 2 advances the pin because unverifiable ≠ tampered; exit 1 freezes
-it), and `anchor` appends to the `.anchors` sidecar. Credentials come only from env:
-`WAXSEAL_API_KEY` for the chain server, `WAXSEAL_WITNESS_API_KEY` for witnesses — the
-server's write credential never crosses the administrative-authority boundary to a
-witness. `waxseal install <target>` writes host shim files only (hook/plugin stubs in
-the agent framework's home). The CLI never appends chain entries.
+it), and `anchor` appends to the `.anchors` sidecar. `waxseal ledger-status <trail> --rpc
+URL [--rpc URL…] --liveness ADDR [--registry ADDR] [--bond ADDR --writer ADDR]` (0.1.5,
+Workstream F) is read-only against the ledger layer, reusing `reconcile-tickets`'s exit
+convention exactly: exit 0 = every configured dimension came back clean (live, and
+registry agrees if `--registry` was given, and bonded if `--bond` was given); exit 1 = a
+POSITIVELY DETECTED finding — delinquent, slashed, or unbonded — the same
+"detected, not tampered" sense `reconcile-tickets` gives its own exit 1; exit 2 =
+unreachable, two RPC endpoints disagree (`LedgerDisagreement`, naming the pair — a
+measured conflict, never a silence), or malformed input, never rendered as "0 findings"
+(rule 5); exit 3 = the named trail does not exist. `verify` and `report` accept the same
+`--rpc/--liveness/--registry [--trail-id]`: the ledger dimension this adds is
+structurally incapable of exit 1 — `LivenessVerdict.to_verify_verdict()` and
+`RegistryFinding.to_verdict()` both range over `{OK, UNVERIFIABLE}` only — so
+`ledger_delinquent`, `registry_disagreement`, and `ledger_unreachable` all land on exit
+2: a chain saying "not anchored on time" is not a chain saying "the trail was edited".
+`waxseal registry publish --descriptor-of FP --registry ADDR --rpc URL […]
+[--write-rpc URL]` and `waxseal bond deposit --bond ADDR --amount-wei WEI [...]` /
+`bond prove <proof.json> --bond ADDR [...]` write to the ledger layer, never to the audit
+trail — the same footing `anchor` already has (the CLI still never appends chain
+entries); every ledger write prints the chain id, the contract, and the action before
+sending. `anchor` additionally accepts `--evm-rpc/--evm-liveness[/--evm-write-rpc/
+--evm-trail-id/--evm-consistency-proof-file]`, publishing the SAME checkpoint to a
+fourth independently-recording anchor domain alongside `--tsa-url`/`--ots-calendar`.
+Credentials come only from env: `WAXSEAL_API_KEY` for the chain server,
+`WAXSEAL_WITNESS_API_KEY` for witnesses, `WAXSEAL_EVM_SIGNER_CMD` for the ledger layer's
+writes (a three-verb external-signer protocol — `address` / `sign-digest` / `sign-tx` —
+never a private key on argv or in a flag) — the server's write credential never crosses
+the administrative-authority boundary to a witness, and the ledger layer's signer never
+crosses it to either. `waxseal install <target>` writes host shim files only (hook/plugin
+stubs in the agent framework's home). The CLI never appends chain entries.
