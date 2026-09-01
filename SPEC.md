@@ -1051,13 +1051,16 @@ directory is not a break.
 
 Rotation is triggered by ONE `stat` of the active segment at open: a
 threshold of 16 MiB, a constant in code with no environment variable. By-count
-triggering is not permitted (stored entry sizes differ by roughly 100x, so a
-count says almost nothing about bytes). Reading the closing segment's tail and
-appending the new segment's genesis binding are ONE critical section, held
-across BOTH files by `<dir>/segments.lock`, so N racing writers produce
-exactly one rotation. A writer publishes one last checkpoint for the segment
-it is sealing, best-effort, into that segment's own `.anchors` (section 9's
-sidecar, never a chain append); a failure there is labelled and never blocks.
+triggering is not permitted (stored entry sizes differ by roughly 10x -- 650 B
+for a minimal `UserPromptSubmit` event against 6_374 B for a `PostToolUse`
+event clipped at `MAX_FIELD_CHARS`, both measured through the real append path
+in `tests/test_entry_size_receipt.py` -- so a count says almost nothing about
+bytes). Reading the closing segment's tail and appending the new segment's
+genesis binding are ONE critical section, held across BOTH files by
+`<dir>/segments.lock`, so N racing writers produce exactly one rotation. A
+writer publishes one last checkpoint for the segment it is sealing,
+best-effort, into that segment's own `.anchors` (section 9's sidecar, never a
+chain append); a failure there is labelled and never blocks.
 
 ### 20.3 Verification (`waxseal segments <dir>`)
 
