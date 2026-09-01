@@ -1,8 +1,7 @@
 # waxseal-server
 
 A self-hosted chain server, witness, and public read point for waxseal trails,
-with a read-only web portal. Source: `docs/plans/waxseal-0.1.5-contract.md`,
-Workstream I.
+with a read-only web portal (0.1.5, Workstream I).
 
 This is a separate application, not part of the `waxseal` wheel. CLAUDE.md rule
 1 ("no new runtime dependencies") constrains `[project] dependencies` of the

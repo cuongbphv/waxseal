@@ -54,7 +54,7 @@ jobs:
       - run: uv run --extra dev python tools/gen_consistency_vectors.py
       - run: uv run --extra dev python tools/gen_checkpoint_vectors.py
 
-  # The self-hosted server (docs/plans/waxseal-0.1.5-contract.md, Workstream I).
+  # The self-hosted server (0.1.5, Workstream I).
   # A separate job with its own coverage floor: it is a separate application with
   # its own dependencies, and mixing it into the wheel's gate would let one
   # move the other.
@@ -95,7 +95,7 @@ jobs:
       - run: uv run mypy
         working-directory: server
 
-  # The on-chain contracts (docs/plans/waxseal-0.1.5-contract.md, Workstream F2).
+  # The on-chain contracts (0.1.5, Workstream F2).
   # A separate application like server/: its own toolchain, never packaged into
   # the wheel, its own job so neither gate can move the other.
   contracts:

@@ -347,7 +347,14 @@ class TestDocumentationLinks:
         docs = self.docs()
         # Raised from 25/150 with the glob (waxseal-fg4.33): a bound left at
         # the old set's size stops protecting the trees that widened it.
-        assert len(docs) >= 40, docs
+        # Lowered from 40 to 35 (01/09/2026, owner decision): docs/plans/**
+        # and docs/research/** (10 files) moved out of the published tree
+        # entirely, into the gitignored .docs/ — a real, legitimate shrink
+        # of the corpus, not a glob regression. 37 files remain scanned at
+        # the time of this change; the bound stays a genuine floor below
+        # that, not the exact count, per this test's own "lower bounds, not
+        # exact counts" rule above.
+        assert len(docs) >= 35, docs
         chosen = set(docs)
         for pattern in self.DOC_GLOBS:
             assert chosen.intersection(REPO.glob(pattern)) != set(), pattern

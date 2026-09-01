@@ -1,6 +1,6 @@
 """Tests for exogenous admission tickets (domain/tickets.py).
 
-D2 (docs/plans/waxseal-paper-conformance.md): the one construction in the
+D2: the one construction in the
 paper's re-analysis that turns a dropped write into a *positively detected*
 one, the counterweight to the coverage-impossibility theorem. waxseal never
 issues a ticket (that is a separate, exogenous authority's job) — it only

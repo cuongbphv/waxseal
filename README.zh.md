@@ -168,12 +168,6 @@ pip install waxseal
 已发布于 [PyPI](https://pypi.org/project/waxseal/)。从源码安装：
 `pip install git+https://github.com/cuongbphv/waxseal`
 
-> **在找 WaxSeal SDK 吗？** PyPI 上的 `waxseal` 是本库，一条审计哈希链。npm 上的
-> **WaxSeal SDK**（`@waxseal/verify`、`@waxseal/mcp`，以及 waxseal.id 上的服务）
-> 是另一位作者的 Ed25519 身份产品：不同语言、不同问题，与本项目没有任何关系。如果
-> 你是为了签名和验证 agent 身份而来，那才是你要找的东西。
-> [docs/research/landscape.md](docs/research/landscape.md) §3 完整区分了两者。
-
 ## 能力扩展（capability extras）
 
 <!-- 翻译决定（waxseal-fg4.32，2026-09-01）：本节翻译正文，而把具体的 specifier

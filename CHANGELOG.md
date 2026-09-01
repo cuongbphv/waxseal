@@ -243,41 +243,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules that already read this variable have always taken it verbatim, and widening who
   reads a variable must not change what an already-deployed value means.
 
-- **[`docs/research/landscape.md`](docs/research/landscape.md) and
-  [`docs/research/hedera-lessons.md`](docs/research/hedera-lessons.md)** (0.1.5 plan,
-  Workstream G), with Vietnamese counterparts
-  ([`landscape.vi.md`](docs/research/landscape.vi.md),
-  [`hedera-lessons.vi.md`](docs/research/hedera-lessons.vi.md)) — every other document under
-  `docs/` already had one, so a Vietnamese-only reader had no access to the positioning
-  document or the Hedera reading at all. Docs only; no `src/waxseal` change. Every datum was
-  re-checked against the surveyed projects' own sources in the session that wrote them
-  rather than carried over from the plan, and what a README cannot establish stays labelled:
-  the "neither project copied the other" conclusion keeps its `[Inference]` tag with its
-  basis stated, and the two claims resting on a README alone keep `[Unverified]`, with no
-  comparison drawn where the underlying spec went unread. Domain and npm-scope ownership is
-  reported as what a 200 response shows and no more; no registrar or trademark record was
-  consulted and the document takes no position on renaming. `hedera-lessons.md` opens with
-  the owner's clarification that no service was used, no fees were paid and no adapter was
-  written, and it records two of its three ideas as **built** in 9162abf rather than as
-  backlog.
-
-  All six epistemic labels survive translation with their basis, each still at the start of
-  the clause it guards, and the bracketed tag stays in English because it is this
-  repository's controlled vocabulary rather than prose — a label whose basis is lost in
-  translation is how a hedged claim becomes an assertion, and it would be worse in the
-  Vietnamese, where that reader never sees the original hedge. Verbatim quotes stay in
-  English with the Vietnamese meaning alongside, since a translated quote is no longer a
-  quote. One doc-to-doc link deliberately breaks the `.vi.md`-prefers-`.vi.md` convention:
-  `landscape.vi.md`'s Install note points at `README.md`, because the npm disambiguation
-  sentence exists only there and linking `README.vi.md` would have described something the
-  reader cannot find. The gap is stated in the document rather than papered over.
-
 - **README "Capability extras"**: zero hard dependencies is the core, not a ceiling, and the
   route out is an extra plus injection. It lists what `pyproject.toml` actually carries
-  today (`s3`, `postgres`) and marks `rfc3161` and `evm` as planned and **not shipped**,
-  because [Written, unwired] is not [Shipped]. No hard dependency was added and rule 1 is
-  untouched. The Install section gains a disambiguation notice for the unrelated WaxSeal SDK
-  on npm, so a reader after the identity product does not land here by mistake.
+  today (`s3`, `postgres`) and marks `rfc3161` and `evm` as planned and **not shipped**
+  at the time of this entry, because [Written, unwired] is not [Shipped] — both shipped
+  later this same release (Workstreams C and F, below). No hard dependency was added and
+  rule 1 is untouched.
 
 ### Changed
 

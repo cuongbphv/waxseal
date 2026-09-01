@@ -142,5 +142,11 @@ class TestEpistemicTagVocabulary:
         # ...and so does the Vietnamese half, in English. Without this the file
         # would still pass if every `.vi.md` tag vanished instead of being
         # translated, which loses the claim just as thoroughly.
+        # Lowered from 10 to 6 (01/09/2026, owner decision): docs/research/*.vi.md
+        # (landscape.vi.md, hedera-lessons.vi.md) carried several of the
+        # counted hedges and moved out of the published tree into the
+        # gitignored .docs/ — a real shrink of the Vietnamese corpus, not a
+        # translation regression. 8 remain at the time of this change; the
+        # bound stays a genuine floor below that.
         vietnamese = sum(n for path, n in tagged.items() if path.name.endswith(".vi.md"))
-        assert vietnamese >= 10, tagged
+        assert vietnamese >= 6, tagged

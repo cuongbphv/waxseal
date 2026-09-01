@@ -1,6 +1,6 @@
 """Exogenous admission tickets (pure; no I/O).
 
-D2 (docs/plans/waxseal-paper-conformance.md): the one construction in the
+D2: the one construction in the
 paper's independent re-analysis that turns a dropped write into one
 *positively detected*, the counterweight to the coverage-impossibility
 theorem. Every drop metric elsewhere in this codebase, `dropped_writes`

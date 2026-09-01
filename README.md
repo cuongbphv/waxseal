@@ -128,14 +128,6 @@ pip install waxseal
 Released on [PyPI](https://pypi.org/project/waxseal/). From source:
 `pip install git+https://github.com/cuongbphv/waxseal`
 
-> **Looking for WaxSeal SDK?** `waxseal` on PyPI is this library, an audit hash
-> chain. The **WaxSeal SDK** on npm (`@waxseal/verify`, `@waxseal/mcp`, and the
-> service at waxseal.id) is an unrelated Ed25519 identity product by a different
-> author: different language, different problem, no connection to this project.
-> If you came here wanting to sign and verify agent identities, that is the one
-> you want. [docs/research/landscape.md](docs/research/landscape.md) § 3 sets the
-> two apart in full.
-
 ## Capability extras
 
 Zero dependencies describes the core, not a ceiling on what waxseal can do. The
@@ -701,10 +693,6 @@ separation of authority is what the whole security argument rests on.
   shape, authentication, and the trusted-writer trust model.
 - [DESIGN.md](DESIGN.md) covers the algorithm choices and the academic literature
   behind them.
-- [docs/research/](docs/research/) holds the positioning notes: how waxseal
-  differs from adjacent projects ([landscape.md](docs/research/landscape.md)) and
-  which ideas were read off a public distributed-ledger design without adopting
-  the service ([hedera-lessons.md](docs/research/hedera-lessons.md)).
 
 ## License
 

@@ -381,9 +381,8 @@ would surface the disagreement loudly rather than silently pick a winner).
 
 Sections 3 and 6 already say the load-bearing part: a hash chain is
 tamper-*evident*, and a write-capable attacker can rewrite everything since the
-last external reference point. The 0.1.5 contract
-(docs/plans/waxseal-0.1.5-contract.md, Workstream J) adds mechanisms that
-upgrade specific, named scopes from evidence to something an operator may
+last external reference point. The 0.1.5 release (Workstream J) adds mechanisms
+that upgrade specific, named scopes from evidence to something an operator may
 reasonably call proof — and fixes the vocabulary so the claim is never made
 without its scope.
 

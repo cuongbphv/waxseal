@@ -9,12 +9,8 @@ a bare, unscoped claim and drift past review unnoticed.
 
 Scope of the check, and why it stops where it does: this walks waxseal's own
 shipped ENGLISH surface — `src/**/*.py`, `examples/**/*.py`, and the
-top-level and `docs/` Markdown files — and deliberately excludes two classes
-of file. `docs/plans/**` is internal planning prose that PROPOSES this very
-doctrine and necessarily quotes the word while arguing for it (see
-waxseal-0.1.5-contract.md §J4, the source of this bead); holding a plan to
-the same bar as the doctrine it is drafting is a category error, not rigor.
-A `*.xx.md` translation (`README.vi.md`, `threat-model.zh.md`, ...) is a
+top-level and `docs/` Markdown files — and deliberately excludes one class
+of file. A `*.xx.md` translation (`README.vi.md`, `threat-model.zh.md`, ...) is a
 separate maintenance concern this bead does not own — keeping every
 translation in lockstep with an English wording change is real work, and
 claiming it here would be exactly the kind of asserted-but-not-verified
@@ -23,7 +19,10 @@ mechanical reason that this file, and `test_cli_preflight.py`'s own
 `test_a_bare_trail_...` assertion, reference the string "tamper-proof" to
 test for its ABSENCE from real CLI output — that is not a claim needing a
 scope, it is a test of one, and scanning it would make this file assert
-against its own sibling.
+against its own sibling. (Internal planning prose — the 0.1.5 contract and
+its research/positioning notes — lives outside the published tree entirely,
+by owner decision 01/09/2026, so there is no third class to carve out here
+any more.)
 
 The heuristic: a scope marker (DESIGN.md's own citation, the word "scope"/
 "scoped", "tamper-evident" itself — the standard "X, not tamper-proof"
@@ -58,14 +57,12 @@ _SCOPE_MARKERS = (
 
 
 def _is_excluded(rel: tuple[str, ...]) -> bool:
-    if any(part in _EXCLUDED_DIR_NAMES for part in rel):
-        return True
-    return rel[0] == "docs" and len(rel) > 1 and rel[1] == "plans"
+    return any(part in _EXCLUDED_DIR_NAMES for part in rel)
 
 
 def candidate_files() -> list[Path]:
     """waxseal's own shipped English *.py and *.md surface — see the module
-    docstring for exactly which two classes of file are excluded and why.
+    docstring for exactly which class of file is excluded and why.
 
     "Top-level and `docs/` Markdown files" (the module docstring's own words)
     is a claim about WHICH directories, not just which suffix: gating on
@@ -167,19 +164,11 @@ class TestFalsifiability:
 
 
 class TestFileSelection:
-    """`candidate_files` excludes exactly the two classes the module
+    """`candidate_files` excludes exactly the one class the module
     docstring names, and nothing else in the repo's real *.py/*.md surface —
     checked against the actual tree, since a hand-picked fixture tree could
-    pass while the real exclusion glob (`docs/plans` vs. `docs/plan`, a
-    suffix regex anchored wrong) does not."""
-
-    def test_it_excludes_docs_plans(self) -> None:
-        found = candidate_files()
-        assert not any(p.relative_to(REPO_ROOT).parts[:2] == ("docs", "plans") for p in found)
-        # The exclusion is exercised, not vacuous: docs/plans/ actually
-        # holds a *.md file in this tree, or this assertion would pass by
-        # having nothing to exclude in the first place.
-        assert (REPO_ROOT / "docs" / "plans" / "waxseal-0.1.5-contract.md").is_file()
+    pass while the real exclusion glob (a suffix regex anchored wrong) does
+    not."""
 
     def test_it_excludes_translations(self) -> None:
         found = candidate_files()
