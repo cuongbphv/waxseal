@@ -3,10 +3,15 @@
 
 A hook that appends on every tool dispatch grows one file without bound. The
 trigger here is ONE `os.stat` at open -- O(1), on the path already being
-opened. By-count was rejected because stored entry sizes differ by ~100x (a
-prompt line versus a clipped terminal dump), so a count says almost nothing
-about bytes; manual-only was rejected because hooks run unattended, and
-unbounded growth is the bug being fixed, not a state an operator will notice.
+opened. By-count was rejected because stored entry sizes differ by ~10x: 650 B
+for a minimal `UserPromptSubmit` event against 6_374 B for a `PostToolUse`
+event whose output is clipped at `MAX_FIELD_CHARS`, both measured through this
+append path in tests/test_entry_size_receipt.py. A count still says almost
+nothing about bytes at 10x. (This paragraph said ~100x through 0.1.5 and cited
+nothing; SPEC section 20.2 still does. The measurement is the receipt that was
+missing, and a spec correction is the owner's call, not this file's.)
+Manual-only was rejected because hooks run unattended, and unbounded growth is
+the bug being fixed, not a state an operator will notice.
 
 NO RENAME. `adapters/atomic.py` stays the single owner of the atomic-replace
 syscall (tests/architecture/test_invariants.py scans for the call by name, so
@@ -57,8 +62,15 @@ from waxseal.log import AuditLog
 #: 16 MiB. A CONSTANT IN CODE with no environment variable to tune it (owner
 #: decision, 31/08/2026): a threshold an operator can raise is a threshold
 #: that gets raised the first time rotation is inconvenient, and the file it
-#: bounds is the one an incident review has to read. At the measured 1.9 KB
-#: per stored hook entry this is roughly 8.8k entries per segment.
+#: bounds is the one an incident review has to read.
+#:
+#: In ENTRIES this is a range, not a number, because entry size is a property
+#: of the workload: ~25.8k minimal prompt events (650 B each) or ~2.6k clipped
+#: tool results (6_374 B each), the two ends measured in
+#: tests/test_entry_size_receipt.py. It read "the measured 1.9 KB per stored
+#: hook entry ... roughly 8.8k entries" through 0.1.5; 1.9 KB named no fixture
+#: and no fixture in this tree produces it, so the point estimate is gone
+#: rather than corrected.
 DEFAULT_MAX_SEGMENT_BYTES: Final = 16 * 1024 * 1024
 
 _LOCK_BASE: Final = "segments"

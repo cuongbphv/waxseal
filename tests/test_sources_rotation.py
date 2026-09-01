@@ -38,9 +38,17 @@ from waxseal.sources.rotation import (
 
 PT = "application/vnd.test.event+json"
 
-# A measured stored event line is ~462 bytes and a rotation binding ~624, so a
-# test threshold has to sit well ABOVE one entry: a threshold under one entry
-# would make every single open rotate again, which is a property of the
+# 462 bytes is what THIS file's fixture stores -- payload {"i": <int>} under
+# the 31-character PT above -- and 624 is a rotation binding under a
+# directory name of 9 to 11 characters, the shape pytest's tmp_path hands
+# out. Neither is a hook entry: the smallest real one is 650 B and a clipped
+# tool result is 6_374 B (tests/test_entry_size_receipt.py, which pins all
+# four). Stating the fixture matters because 462 B was once cited as "a
+# stored entry" in an argument about hook trail growth, where it is wrong by
+# 1.4x at the floor and 14x at the ceiling.
+#
+# A test threshold has to sit well ABOVE one entry: a threshold under one
+# entry would make every single open rotate again, which is a property of the
 # fixture, not of the code. 5000 bytes leaves room for a fresh segment plus
 # the eight events the concurrency tests write into it. The 16 MiB production
 # constant is exercised on its own below.
