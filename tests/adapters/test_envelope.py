@@ -55,6 +55,7 @@ class TestRoundTrip:
 class TestEntryFromFields:
     def test_reconstructs_entry_from_flat_fields(self) -> None:
         entry = build_entry(5, "b" * 64, b"payload bytes")
+        assert entry.payload is not None
         reconstructed = entry_from_fields(
             seq=entry.header.seq,
             ts=entry.header.ts,

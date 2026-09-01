@@ -111,7 +111,7 @@ class TestRoundTrip:
 
 
 class TestTrailPermissions:
-    def test_trail_file_is_created_owner_only(self, tmp_path) -> None:
+    def test_trail_file_is_created_owner_only(self, tmp_path: Path) -> None:
         # The trail holds prompts, tool output, and file contents at a
         # predictable path (~/.claude/waxseal/...): default-umask 0644 hands
         # every local user the whole audit trail. Only the sealkey was 0600.
@@ -159,26 +159,28 @@ class _ByteCountingFile:
         return self
 
     def __exit__(self, *exc: Any) -> None:
-        return self._fileobj.__exit__(*exc)
+        self._fileobj.__exit__(*exc)
 
     def __iter__(self) -> "_ByteCountingFile":
         return self
 
     def __next__(self) -> str:
-        line = next(self._fileobj)
+        line: str = next(self._fileobj)
         self._sink.append(_byte_len(line))
         return line
 
     def read(self, *args: Any, **kwargs: Any) -> "str | bytes":
-        data = self._fileobj.read(*args, **kwargs)
+        data: str | bytes = self._fileobj.read(*args, **kwargs)
         self._sink.append(_byte_len(data))
         return data
 
     def seek(self, *args: Any, **kwargs: Any) -> int:
-        return self._fileobj.seek(*args, **kwargs)
+        pos: int = self._fileobj.seek(*args, **kwargs)
+        return pos
 
     def tell(self, *args: Any, **kwargs: Any) -> int:
-        return self._fileobj.tell(*args, **kwargs)
+        pos: int = self._fileobj.tell(*args, **kwargs)
+        return pos
 
 
 class TestCostReceipt:
@@ -202,7 +204,7 @@ class TestCostReceipt:
         sink: list[int] = []
         real_open = open
 
-        def counting_open(file, *args, **kwargs):
+        def counting_open(file: Any, *args: Any, **kwargs: Any) -> Any:
             f = real_open(file, *args, **kwargs)
             if Path(file) == path:
                 return _ByteCountingFile(f, sink)
@@ -266,7 +268,7 @@ class TestCostReceipt:
         sink: list[int] = []
         real_open = open
 
-        def counting_open(file, *args, **kwargs):
+        def counting_open(file: Any, *args: Any, **kwargs: Any) -> Any:
             f = real_open(file, *args, **kwargs)
             if Path(file) == path:
                 return _ByteCountingFile(f, sink)

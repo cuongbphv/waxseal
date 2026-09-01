@@ -9,6 +9,7 @@ injected by the caller — waxseal itself imports nothing non-stdlib.
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import pytest
 
@@ -16,7 +17,7 @@ from tests.adapters.backend_contract import BackendContractTests
 from tests.adapters.test_jsonl import build_entry
 from waxseal import AuditLog, VersionRegistry, verify_chain
 from waxseal.adapters.s3 import S3Backend
-from waxseal.domain.header import GENESIS_PREV_HASH
+from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 
 PT = "application/vnd.test.event+json"
 
@@ -42,35 +43,47 @@ class FakeS3Client:
         self._objects: dict[tuple[str, str], bytes] = {}
         self._lock = threading.Lock()
 
-    def put_object(self, *, Bucket: str, Key: str, Body: bytes, **kwargs) -> dict:
+    def put_object(
+        self, *, Bucket: str, Key: str, Body: bytes, **kwargs: object
+    ) -> dict[str, object]:
         with self._lock:
             if kwargs.get("IfNoneMatch") == "*" and (Bucket, Key) in self._objects:
                 raise FakeClientError("PreconditionFailed")
             self._objects[(Bucket, Key)] = Body
         return {}
 
-    def get_object(self, *, Bucket: str, Key: str) -> dict:
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         with self._lock:
             if (Bucket, Key) not in self._objects:
                 raise FakeClientError("NoSuchKey")
             return {"Body": FakeBody(self._objects[(Bucket, Key)])}
 
-    def list_objects_v2(self, *, Bucket: str, Prefix: str, **kwargs) -> dict:
+    def list_objects_v2(
+        self, *, Bucket: str, Prefix: str, **kwargs: object
+    ) -> dict[str, object]:
         with self._lock:
             keys = sorted(
                 k for (b, k) in self._objects if b == Bucket and k.startswith(Prefix)
             )
         start = kwargs.get("StartAfter", "")
+        assert isinstance(start, str)
         keys = [k for k in keys if k > start]
         page, rest = keys[:2], keys[2:]  # tiny page size to exercise pagination
-        out = {"Contents": [{"Key": k} for k in page], "IsTruncated": bool(rest)}
+        out: dict[str, object] = {
+            "Contents": [{"Key": k} for k in page],
+            "IsTruncated": bool(rest),
+        }
         if rest:
             out["NextContinuationToken"] = page[-1]
         if "ContinuationToken" in kwargs:
             token = kwargs["ContinuationToken"]
+            assert isinstance(token, str)
             keys_after = [k for k in keys if k > token]
             page, rest = keys_after[:2], keys_after[2:]
-            out = {"Contents": [{"Key": k} for k in page], "IsTruncated": bool(rest)}
+            out = {
+                "Contents": [{"Key": k} for k in page],
+                "IsTruncated": bool(rest),
+            }
             if rest:
                 out["NextContinuationToken"] = page[-1]
         return out
@@ -95,7 +108,7 @@ class TestAppend:
     def test_first_append_gets_seq_0_and_genesis_prev(self, backend: S3Backend) -> None:
         seen: list[tuple[int, str]] = []
 
-        def build(seq: int, prev: str):
+        def build(seq: int, prev: str) -> Entry:
             seen.append((seq, prev))
             return build_entry(seq, prev)
 
@@ -151,7 +164,9 @@ class TestConditionalWriteRetry:
         real_put = client.put_object
         remaining = [failures]
 
-        def put_object(*, Bucket: str, Key: str, Body: bytes, **kwargs) -> dict:
+        def put_object(
+            *, Bucket: str, Key: str, Body: bytes, **kwargs: object
+        ) -> dict[str, object]:
             if "entries/" in Key and remaining[0] > 0:
                 remaining[0] -= 1
                 raise error
@@ -165,7 +180,7 @@ class TestConditionalWriteRetry:
         backend = S3Backend(client, bucket="audit", prefix="trail")
         seen: list[int] = []
 
-        def build(seq: int, prev: str):
+        def build(seq: int, prev: str) -> Entry:
             seen.append(seq)
             return build_entry(seq, prev)
 
@@ -235,7 +250,7 @@ class TestTailDiscovery:
         backend = S3Backend(client, bucket="audit", prefix="trail")
         backend.append(lambda seq, prev: build_entry(seq, prev))
 
-        def get_object(*, Bucket: str, Key: str) -> dict:
+        def get_object(*, Bucket: str, Key: str) -> dict[str, object]:
             raise FakeClientError("AccessDenied")
 
         client.get_object = get_object  # type: ignore[method-assign]

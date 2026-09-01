@@ -118,6 +118,7 @@ def test_blank_lines_are_skipped_but_line_numbers_stay_physical(tmp_path: Path) 
     trail = tmp_path / "trail.jsonl"
     receipts_path(trail).write_text("\n\n{not json\n")
     lines = read_receipts(trail).lines
+    assert isinstance(lines[0], MalformedRecord)
     assert lines == (MalformedRecord(line_no=3, detail=lines[0].detail),)
 
 

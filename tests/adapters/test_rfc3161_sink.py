@@ -10,19 +10,20 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from waxseal.adapters.anchors import (
+    AnchorRecord,
     MultiAnchorSink,
     RecordingAnchorSink,
-    SinkReceipt,
     read_anchor_records,
 )
 from waxseal.adapters.remote import RemoteRequest, RemoteResponse
 from waxseal.adapters.rfc3161 import ACCEPT, CONTENT_TYPE, Rfc3161AnchorSink
-from waxseal.domain.checkpoint import Checkpoint, checkpoint_frame
+from waxseal.domain.checkpoint import Checkpoint, SinkReceipt, checkpoint_frame
 from waxseal.domain.rfc3161 import (
     SHA256_OID,
     _der_int,
@@ -63,7 +64,9 @@ def granted_response(
     return _tlv(0x30, _tlv(0x30, _der_int(status)) + token)
 
 
-def honest_tsa(nonce: int) -> tuple[list[RemoteRequest], object]:
+def honest_tsa(
+    nonce: int,
+) -> tuple[list[RemoteRequest], Callable[[RemoteRequest], RemoteResponse]]:
     seen: list[RemoteRequest] = []
 
     def transport(request: RemoteRequest) -> RemoteResponse:
@@ -96,12 +99,16 @@ class TestRequest:
         # binding outside the attestation.
         seen, transport = honest_tsa(1)
         Rfc3161AnchorSink("http://tsa", transport=transport, nonce_fn=lambda: 1).anchor(CP)
-        assert hashlib.sha256(FRAME).digest() in seen[0].body
+        sent_body = seen[0].body
+        assert sent_body is not None
+        assert hashlib.sha256(FRAME).digest() in sent_body
 
     def test_the_nonce_is_injectable(self) -> None:
         seen, transport = honest_tsa(0x4242)
         Rfc3161AnchorSink("http://tsa", transport=transport, nonce_fn=lambda: 0x4242).anchor(CP)
-        assert bytes([0x02, 0x02, 0x42, 0x42]) in seen[0].body
+        sent_body = seen[0].body
+        assert sent_body is not None
+        assert bytes([0x02, 0x02, 0x42, 0x42]) in sent_body
 
     def test_the_default_nonce_is_random_and_present(self) -> None:
         # Not asserting the value — asserting that two anchors do not reuse
@@ -109,6 +116,7 @@ class TestRequest:
         bodies: list[bytes] = []
 
         def transport(request: RemoteRequest) -> RemoteResponse:
+            assert request.body is not None
             bodies.append(request.body)
             return RemoteResponse(status=200, body=b"")
 
@@ -356,7 +364,9 @@ class TestNoncePersistence:
     time rather than only at anchor time — the gap SPEC.md section 17 used to
     state as unfixable with a record format that did not carry it."""
 
-    def filed_record(self, tmp_path: Path, nonce: int | None):
+    def filed_record(
+        self, tmp_path: Path, nonce: int | None
+    ) -> tuple[Path, AnchorRecord]:
         trail = tmp_path / "trail.jsonl"
 
         def transport(request: RemoteRequest) -> RemoteResponse:

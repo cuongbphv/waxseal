@@ -72,11 +72,11 @@ from waxseal.domain.bond import (
     BONDED,
     SLASHED,
     UNBONDED,
-    Checkpoint,
     EquivocationProof,
     NonExtensionProof,
     trail_id_for,
 )
+from waxseal.domain.checkpoint import Checkpoint
 from waxseal.domain.fingerprint import HEADER_FIELDS, fingerprint_for
 from waxseal.domain.liveness import (
     DEADLINE_UNAVAILABLE,
@@ -1072,7 +1072,10 @@ class TestSelectorsMatchTheCompiler:
 
     @staticmethod
     def frozen() -> dict[str, dict[str, str]]:
-        return json.loads((REPO / "contracts" / "abi" / "selectors.json").read_text())
+        result: dict[str, dict[str, str]] = json.loads(
+            (REPO / "contracts" / "abi" / "selectors.json").read_text()
+        )
+        return result
 
     def test_every_selector_the_adapter_uses_is_the_compiled_one(self) -> None:
         compiled = self.frozen()

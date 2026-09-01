@@ -28,6 +28,7 @@ from waxseal.adapters.remote import (
     RemoteError,
     RemoteRequest,
     RemoteResponse,
+    Transport,
     urllib_transport,
 )
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry
@@ -290,9 +291,14 @@ class TestEntryHashParity:
         remote = RemoteBackend("http://fake.local", transport=fake_transport(FakeChainServer()))
         for backend in (jsonl, remote):
             for i in range(3):
-                backend.append(
-                    lambda seq, prev, i=i: build_entry(seq, prev, f'{{"i":{i}}}'.encode())
-                )
+                # A plain lambda's params can't carry annotations, and
+                # `backend` here is a JSONLBackend | RemoteBackend union, so
+                # mypy has no single Callable signature to infer them from
+                # (misc: "Cannot infer type of lambda").
+                def build(seq: int, prev: str, i: int = i) -> Entry:
+                    return build_entry(seq, prev, f'{{"i":{i}}}'.encode())
+
+                backend.append(build)
         assert [e.entry_hash for e in jsonl.entries()] == [
             e.entry_hash for e in remote.entries()
         ]
@@ -513,10 +519,10 @@ class TestConcurrencyFalsifiability:
         server = FakeChainServer(enforce_precondition=True)
         barrier = threading.Barrier(4)
 
-        def gated_transport(inner: Any) -> Any:
+        def gated_transport(inner: Transport) -> Transport:
             state = {"gated": False}
 
-            def transport(request: Any) -> RemoteResponse:
+            def transport(request: RemoteRequest) -> RemoteResponse:
                 if request.method == "GET" and request.url.endswith("/head") and not state["gated"]:
                     state["gated"] = True
                     resp = inner(request)
@@ -565,7 +571,9 @@ class TestPaginationTerminates:
     loop. Both guards exist because "it hung" is the failure mode nobody
     alerts on — the audit simply never produces a verdict."""
 
-    def paging_backend(self, monkeypatch: pytest.MonkeyPatch, cursors: list[str | None]):
+    def paging_backend(
+        self, monkeypatch: pytest.MonkeyPatch, cursors: list[str | None]
+    ) -> RemoteBackend:
         from waxseal.adapters import remote as remote_module
 
         served = iter(cursors)

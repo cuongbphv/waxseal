@@ -8,7 +8,7 @@ from tests.adapters.backend_contract import BackendContractTests
 from tests.adapters.test_jsonl import build_entry
 from waxseal import AuditLog, VersionRegistry, verify_chain
 from waxseal.adapters.memory import MemoryBackend
-from waxseal.domain.header import GENESIS_PREV_HASH
+from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 
 PT = "application/vnd.test.event+json"
 
@@ -24,7 +24,7 @@ class TestMemoryBackend:
         backend = MemoryBackend()
         seen: list[tuple[int, str]] = []
 
-        def build(seq: int, prev: str):
+        def build(seq: int, prev: str) -> Entry:
             seen.append((seq, prev))
             return build_entry(seq, prev)
 

@@ -26,7 +26,9 @@ class TestAnchor:
         assert len(captured) == 1
         assert captured[0].method == "POST"
         assert captured[0].url == "http://anchor.example/v1/anchors"
-        body = json.loads(captured[0].body)
+        sent_body = captured[0].body
+        assert sent_body is not None
+        body = json.loads(sent_body)
         assert body == {"seq": 2, "entry_hash": "e" * 64, "root": "r" * 64}
 
     def test_returns_receipt_from_response_body(self) -> None:

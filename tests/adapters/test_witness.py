@@ -14,6 +14,7 @@ rest of the HTTP adapters use. The read half's contract is the interesting one:
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 import pytest
 
@@ -24,7 +25,9 @@ from waxseal.domain.checkpoint import Checkpoint
 CP = Checkpoint(seq=2, entry_hash="a" * 64, root="b" * 64)
 
 
-def responder(status: int, body: bytes):  # type: ignore[no-untyped-def]
+def responder(
+    status: int, body: bytes
+) -> tuple[Callable[[RemoteRequest], RemoteResponse], list[RemoteRequest]]:
     sent: list[RemoteRequest] = []
 
     def transport(request: RemoteRequest) -> RemoteResponse:
@@ -43,7 +46,9 @@ class TestPublish:
         transport, sent = responder(200, b"{}")
         HTTPWitness("http://witness/anchor", transport=transport).anchor(CP)
         assert sent[0].method == "POST"
-        body = json.loads(sent[0].body)  # type: ignore[arg-type]
+        sent_body = sent[0].body
+        assert sent_body is not None
+        body = json.loads(sent_body)
         assert body == {"seq": 2, "entry_hash": "a" * 64, "root": "b" * 64}
 
     def test_returns_the_receipt(self) -> None:

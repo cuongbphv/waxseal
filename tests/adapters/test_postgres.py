@@ -26,6 +26,9 @@ default at a shared development database cannot touch anything in `public`.
 
 import os
 import uuid
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -33,15 +36,15 @@ from tests.adapters.backend_contract import BackendContractTests
 from tests.adapters.test_jsonl import build_entry
 from waxseal import VersionRegistry, verify_chain
 from waxseal.adapters.postgres import ADVISORY_LOCK_KEY, PostgresBackend
-from waxseal.domain.header import GENESIS_PREV_HASH
+from waxseal.domain.header import GENESIS_PREV_HASH, Entry
 
 
 class FakeCursor:
     def __init__(self, conn: "FakeConn"):
         self._conn = conn
-        self._result: list[tuple] = []
+        self._result: list[tuple[object, ...]] = []
 
-    def execute(self, sql: str, params: tuple = ()) -> None:
+    def execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
         self._conn.statements.append((sql.strip(), params))
         norm = " ".join(sql.split()).lower()
         if "pg_advisory_xact_lock" in norm:
@@ -63,10 +66,10 @@ class FakeCursor:
         else:
             raise AssertionError(f"unexpected SQL: {sql}")
 
-    def fetchone(self):
+    def fetchone(self) -> tuple[object, ...] | None:
         return self._result[0] if self._result else None
 
-    def fetchall(self):
+    def fetchall(self) -> list[tuple[object, ...]]:
         return list(self._result)
 
     def close(self) -> None:
@@ -74,15 +77,15 @@ class FakeCursor:
 
 
 class FakeStore:
-    def __init__(self):
-        self.rows: list[tuple] = []
+    def __init__(self) -> None:
+        self.rows: list[tuple[object, ...]] = []
 
 
 class FakeConn:
     def __init__(self, store: FakeStore):
         self.store = store
-        self.statements: list[tuple[str, tuple]] = []
-        self.pending: list[tuple] = []
+        self.statements: list[tuple[str, tuple[object, ...]]] = []
+        self.pending: list[tuple[object, ...]] = []
         self.locked = False
         self.closed = False
 
@@ -100,6 +103,14 @@ class FakeConn:
 
     def close(self) -> None:
         self.closed = True
+
+
+def _conns(backend: PostgresBackend) -> list[FakeConn]:
+    """The `backend`/`store` fixtures below stash their scripted FakeConns
+    here for the protocol assertions in TestProtocol; PostgresBackend itself
+    declares no such attribute (this is test-only introspection, never a
+    production surface)."""
+    return backend._test_conns  # type: ignore[attr-defined,no-any-return]
 
 
 @pytest.fixture()
@@ -146,7 +157,7 @@ class TestProtocol:
     ) -> None:
         # FakeCursor asserts lock-before-read/insert; this drives the flow.
         backend.append(lambda seq, prev: build_entry(seq, prev))
-        stmts = [s for conn in backend._test_conns for s, _ in conn.statements]
+        stmts = [s for conn in _conns(backend) for s, _ in conn.statements]
         lock_idx = next(i for i, s in enumerate(stmts) if "pg_advisory_xact_lock" in s)
         tail_idx = next(i for i, s in enumerate(stmts) if "ORDER BY seq DESC" in s)
         assert lock_idx < tail_idx
@@ -154,7 +165,7 @@ class TestProtocol:
     def test_advisory_lock_uses_the_documented_key(self, backend: PostgresBackend) -> None:
         backend.append(lambda seq, prev: build_entry(seq, prev))
         lock_params = [
-            p for conn in backend._test_conns
+            p for conn in _conns(backend)
             for s, p in conn.statements if "pg_advisory_xact_lock" in s
         ]
         assert lock_params == [(ADVISORY_LOCK_KEY,)]
@@ -162,7 +173,7 @@ class TestProtocol:
     def test_first_append_gets_seq_0_and_genesis_prev(self, backend: PostgresBackend) -> None:
         seen: list[tuple[int, str]] = []
 
-        def build(seq: int, prev: str):
+        def build(seq: int, prev: str) -> Entry:
             seen.append((seq, prev))
             return build_entry(seq, prev)
 
@@ -177,10 +188,10 @@ class TestProtocol:
     def test_connections_are_closed(self, backend: PostgresBackend) -> None:
         backend.append(lambda seq, prev: build_entry(seq, prev))
         list(backend.entries())
-        assert all(c.closed for c in backend._test_conns)
+        assert all(c.closed for c in _conns(backend))
 
     def test_failed_append_rolls_back(self, backend: PostgresBackend, store: FakeStore) -> None:
-        def bad_build(seq: int, prev: str):
+        def bad_build(seq: int, prev: str) -> Entry:
             raise RuntimeError("builder exploded")
 
         with pytest.raises(RuntimeError, match="builder exploded"):
@@ -226,7 +237,7 @@ _active_schema: str | None = None
 
 
 @pytest.fixture()
-def pg_backend():
+def pg_backend() -> Iterator[PostgresBackend]:
     """Fresh backend in a schema of its own, dropped afterwards.
 
     A schema per test rather than a DROP TABLE in a shared one: the default
@@ -237,7 +248,7 @@ def pg_backend():
     psycopg = pytest.importorskip("psycopg")
     schema = f"waxseal_wheel_test_{uuid.uuid4().hex[:12]}"
 
-    def connect():
+    def connect() -> Any:
         conn = psycopg.connect(DSN)
         conn.execute(f'SET search_path TO "{schema}"')
         return conn
@@ -255,7 +266,7 @@ def pg_backend():
             admin.commit()
 
 
-def pg_execute(sql: str, params: tuple = ()) -> None:
+def pg_execute(sql: str, params: tuple[object, ...] = ()) -> None:
     """Tamper with the table out of band, in the schema the active fixture made."""
     import psycopg
 
@@ -282,13 +293,20 @@ class TestRealPostgres:
         # high bytes, and the empty payload included (b"" is a payload; only
         # None is refused).
         payloads = [b"", b"\x00", b"\x00binary\xff\xfe", bytes(range(256))]
-        for p in payloads:
-            pg_backend.append(lambda seq, prev, p=p: build_entry(seq, prev, p))
+        for payload_bytes in payloads:
+            # A plain lambda's default-arg params can't be annotated, and
+            # mypy cannot infer them positionally against the two-arg
+            # Callable[[int, str], Entry] PostgresBackend.append() expects
+            # (misc: "Cannot infer type of lambda").
+            def build(seq: int, prev: str, p: bytes = payload_bytes) -> Entry:
+                return build_entry(seq, prev, p)
+
+            pg_backend.append(build)
         assert [e.payload for e in pg_backend.entries()] == payloads
         assert verify_chain(pg_backend.entries(), VersionRegistry()).ok
 
     def test_parity_with_jsonl_and_sqlite(
-        self, pg_backend: PostgresBackend, tmp_path
+        self, pg_backend: PostgresBackend, tmp_path: Path
     ) -> None:
         # Same payload must yield the same entry_hash byte-for-byte on every
         # backend — the chain must not depend on where it is stored.
@@ -419,9 +437,11 @@ class TestRealPostgres:
         def worker(worker_id: int) -> None:
             for i in range(per_thread):
                 payload = f'{{"w": {worker_id}, "i": {i}}}'.encode()
-                pg_backend.append(
-                    lambda seq, prev, p=payload: build_entry(seq, prev, p)
-                )
+
+                def build(seq: int, prev: str, p: bytes = payload) -> Entry:
+                    return build_entry(seq, prev, p)
+
+                pg_backend.append(build)
 
         with ThreadPoolExecutor(max_workers=threads) as pool:
             list(pool.map(worker, range(threads)))
@@ -436,7 +456,7 @@ class TestRealPostgres:
     def test_failed_append_rolls_back_and_releases_lock(
         self, pg_backend: PostgresBackend
     ) -> None:
-        def bad_build(seq: int, prev: str):
+        def bad_build(seq: int, prev: str) -> Entry:
             raise RuntimeError("builder exploded")
 
         with pytest.raises(RuntimeError, match="builder exploded"):
