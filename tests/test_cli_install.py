@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import types
@@ -99,8 +100,13 @@ class TestClaudeCodeHook:
                  "tool_input": {"command": "ls"}}
         proc = subprocess.run(
             [sys.executable, str(shim)], input=json.dumps(event).encode(),
+            # SYSTEMROOT passthrough: without it a spawned python.exe can
+            # fail interpreter-side init on Windows (SSLError 0xa080024 on
+            # the 0.1.5 MR); it is not one of the vars under test.
             env={"WAXSEAL_TRAIL": str(trail), "PATH": "/usr/bin:/bin",
-                 "PYTHONPATH": str(Path(__file__).parent.parent / "src")},
+                 "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
+                 **({"SYSTEMROOT": os.environ["SYSTEMROOT"]}
+                    if "SYSTEMROOT" in os.environ else {})},
             capture_output=True,
         )
         # Exit 0 on every path: exit 2 would veto the user's tool call.

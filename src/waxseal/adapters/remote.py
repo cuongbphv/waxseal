@@ -32,6 +32,7 @@ stale tail (CLAUDE.md rule 7).
 
 from __future__ import annotations
 
+import functools
 import json
 import urllib.error
 import urllib.parse
@@ -140,7 +141,20 @@ class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
         raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
 
 
-_OPENER: Final = urllib.request.build_opener(_RefuseRedirects)
+@functools.lru_cache(maxsize=1)
+def _opener() -> urllib.request.OpenerDirector:
+    """Built on the first request, never at import.
+
+    ``build_opener`` instantiates HTTPSHandler, which creates an SSL context
+    — as a module-level constant that side effect ran on EVERY import of this
+    module, so every hook paid SSL initialization for trails that never touch
+    a network, and on windows/3.14 CI (newer bundled OpenSSL, the hook tests'
+    minimal subprocess env) it raised SSLError 0xa080024 at import — upstream
+    of the hooks' fail-open, which can only guard code that runs after the
+    module loads. Regression-pinned by test_package.py's
+    ``test_no_module_builds_a_urllib_opener_at_import``.
+    """
+    return urllib.request.build_opener(_RefuseRedirects)
 
 
 def urllib_transport(*, timeout: float = 10.0) -> Transport:
@@ -170,7 +184,7 @@ def urllib_transport(*, timeout: float = 10.0) -> Transport:
             request.url, data=request.body, headers=request.headers, method=request.method
         )
         try:
-            with _OPENER.open(req, timeout=timeout) as resp:  # noqa: S310
+            with _opener().open(req, timeout=timeout) as resp:  # noqa: S310
                 return RemoteResponse(
                     status=resp.status, headers=dict(resp.headers), body=resp.read()
                 )

@@ -19,6 +19,7 @@ event on stdin.
 
 import base64
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +29,23 @@ from waxseal import AuditLog
 
 HOOK_PATH = Path(__file__).parent.parent.parent / "src" / "waxseal" / "integrations" / "codex.py"
 SRC = str(Path(__file__).parent.parent.parent / "src")
+
+def _spawn_env(**overrides: str) -> dict[str, str]:
+    """A scrubbed env that can still start CPython on Windows.
+
+    SYSTEMROOT is how the CRT and OpenSSL find the OS (CryptGenRandom lives
+    under it); without it a spawned python.exe can fail interpreter-side
+    initialization in ways that look like library bugs — the 0.1.5 MR saw
+    SSLError 0xa080024 on windows/3.14 the moment an import chain touched
+    an SSL context. Passing it through is not a hole in the scrub: the vars
+    under test (HOME and friends) stay fully controlled by `overrides`.
+    """
+    base = {"PYTHONPATH": SRC}
+    if "SYSTEMROOT" in os.environ:  # POSIX has no such var; Windows needs it
+        base["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+    base.update(overrides)
+    return base
+
 
 
 def run_hook(
@@ -167,7 +185,7 @@ class TestDefaultTrailLocation:
             [sys.executable, str(HOOK_PATH)],
             input=json.dumps(pre_tool_use()),
             capture_output=True, text=True, timeout=30,
-            env={"PYTHONPATH": SRC, "HOME": str(tmp_path)},
+            env=_spawn_env(HOME=str(tmp_path)),
         )
         assert proc.returncode == 0
         from waxseal.domain.segments import project_slug
@@ -184,7 +202,7 @@ class TestDefaultTrailLocation:
             [sys.executable, str(HOOK_PATH)],
             input=json.dumps(pre_tool_use()),
             capture_output=True, text=True, timeout=30,
-            env={"PYTHONPATH": SRC, "HOME": str(tmp_path), "CODEX_HOME": str(tmp_path / "cx")},
+            env=_spawn_env(HOME=str(tmp_path), CODEX_HOME=str(tmp_path / "cx")),
         )
         assert proc.returncode == 0
         from waxseal.domain.segments import project_slug
