@@ -43,6 +43,15 @@ jobs:
       # check nobody performs (fg4.47): fg4.45's TestLedgerField landed 4
       # real int|None/tuple|None errors straight through CI green.
       - run: uv run --extra dev mypy tests/
+      # The other platform's mypy view, from every runner: fcntl/msvcrt
+      # attribute gating in typeshed differs per --platform, and the 0.1.5 MR
+      # only surfaced 6 win32-only errors after three OTHER masked failures
+      # were peeled off Windows runs one by one. ~5s buys the cross-check on
+      # the first, cheapest job instead of the last, slowest one.
+      - run: uv run --extra dev mypy --platform win32
+      - run: uv run --extra dev mypy --platform win32 tests/
+      - run: uv run --extra dev mypy --platform linux
+      - run: uv run --extra dev mypy --platform linux tests/
       - run: uv run --extra dev ruff check .
       # CLAUDE.md: golden vectors are cross-checked by scripts that implement
       # SPEC.md prose directly instead of importing waxseal. A vector suite

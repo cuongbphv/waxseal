@@ -25,6 +25,35 @@ import pytest
 
 from tests.adapters.test_segment_archive import NOW, FakeImportServer, FakeLockS3Client
 from waxseal import AuditLog, Checkpoint
+
+if sys.platform != "win32":
+    # Module-level guard, not an in-function assert: `mypy --platform win32
+    # tests/` (the windows-latest CI step) analyzes nested-function bodies
+    # regardless of any narrowing in their enclosing scope, so fcntl attribute
+    # access anywhere reachable-by-syntax fails with attr-defined there — the
+    # 0.1.5 MR's fourth masked failure class. A module-level platform block is
+    # the one exclusion form mypy honors for the whole definition within.
+    import fcntl
+
+    def _flock_state(lock_path: Path) -> str:
+        """One non-blocking probe of ``lock_path``: 'held' or 'free'."""
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                return "held"
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return "free"
+        finally:
+            os.close(fd)
+
+else:
+    # Same name and signature so `mypy --platform win32` finds it defined
+    # when it analyzes the nested probe below (nested bodies are analyzed
+    # even when every call site is skipif-ed off Windows). Never runs there.
+    def _flock_state(lock_path: Path) -> str:
+        raise AssertionError("flock probe is POSIX-only")
 from waxseal.adapters.segment_archive import s3_destination, server_import_destination
 from waxseal.domain.archive import ArchiveReport, ArchiveState
 from waxseal.domain.header import GENESIS_PREV_HASH
@@ -704,20 +733,20 @@ class TestSegmentArchiveAtRotation:
         from the archive destination. The first must see the lock held, or the
         probe proves nothing about the second.
         """
-        import fcntl
+        # The skipif marker above keeps this body off Windows at RUNTIME, but
+        # mypy analyzes decorated bodies regardless, and `mypy --platform
+        # win32 tests/` (the windows-latest CI step) has no fcntl attributes
+        # to give it — 6 attr-defined errors, unmasked on the 0.1.5 MR once
+        # the earlier pytest step stopped failing first. The assert is the
+        # narrowing mypy DOES understand; at runtime it is trivially true.
+        # (The probing itself lives in module-level `_flock_state`, inside the
+        # platform block at the top of this file — see the comment there.)
+        assert sys.platform != "win32"
 
         probes: dict[str, str] = {}
 
         def probe(label: str) -> None:
-            fd = os.open(tmp_path / "segments.lock", os.O_CREAT | os.O_RDWR, 0o600)
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                probes[label] = "free"
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            except OSError:
-                probes[label] = "held"
-            finally:
-                os.close(fd)
+            probes[label] = _flock_state(tmp_path / "segments.lock")
 
         def notice(message: str) -> None:
             if "rotated at" in message:

@@ -176,7 +176,11 @@ class TestDropRecorderSidecar:
         log.append(payload={"i": 0}, payload_type=PT)
         tmp_path.chmod(0o500)
         try:
-            ok = log.try_append(payload=object(), payload_type=PT)  # type: ignore[arg-type]
+            # unused-ignore is listed too: under `mypy --platform win32` the
+            # skip above makes this line unreachable, the arg-type error never
+            # fires, and a bare ignore turns into its own unused-ignore error
+            # (the documented mypy idiom for platform-dependent ignores).
+            ok = log.try_append(payload=object(), payload_type=PT)  # type: ignore[arg-type,unused-ignore]
         finally:
             tmp_path.chmod(0o700)
         assert ok is False  # try_append still fails open, never raises
