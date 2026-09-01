@@ -35,7 +35,9 @@ import ast
 import importlib
 import sys
 import types
+from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 import pytest
 
@@ -43,7 +45,7 @@ from waxseal.integrations import _trail
 
 
 @pytest.fixture(autouse=True)
-def clean_env(monkeypatch: pytest.MonkeyPatch):
+def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("WAXSEAL_TRAIL", "HERMES_HOME", "CODEX_HOME", "OPENCLAW_HOME"):
         monkeypatch.delenv(name, raising=False)
 
@@ -97,7 +99,7 @@ class TestSharedResolver:
         assert resolved == Path.home() / "x.jsonl"
 
     def test_the_env_value_is_taken_verbatim(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # Deliberately NOT expanded, because that is what the four modules
         # which already honoured this variable have always done, and this
@@ -124,7 +126,7 @@ class TestSharedResolver:
         assert "REFUSED" in capsys.readouterr().err
 
     def test_a_leading_tilde_is_refused_with_a_label_naming_var_value_and_fix(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # waxseal-fg4.4. WAXSEAL_TRAIL=~/x.jsonl set by a NON-SHELL setter (a
         # systemd unit, a compose file, a config template) reaches the process
@@ -146,7 +148,7 @@ class TestSharedResolver:
         assert str(fallback) in err            # where writes actually go
 
     def test_a_bare_tilde_is_refused_too(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # "~" and "~operator/trail.jsonl" are the same bug as "~/x.jsonl":
         # the refusal is on the leading character, not on a "~/" prefix.
@@ -157,7 +159,7 @@ class TestSharedResolver:
             assert "REFUSED" in capsys.readouterr().err
 
     def test_a_tilde_elsewhere_in_the_path_is_a_legitimate_path(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # "~" is a legal character in a POSIX file name. Only a LEADING one
         # is the shell-expansion bug; refusing the rest would break a
@@ -168,7 +170,7 @@ class TestSharedResolver:
         assert capsys.readouterr().err == ""
 
     def test_the_refusal_does_not_raise_and_keeps_the_writer_writing(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # Fall back, do not refuse to write. A trail that silently stops is
         # the failure this library exists to make visible, and the host
@@ -184,7 +186,7 @@ class TestSharedResolver:
         assert "REFUSED" in capsys.readouterr().err
 
     def test_an_explicit_argument_is_unaffected_by_the_refusal(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # The refusal is scoped to the env rung. An explicit "~" argument is
         # a caller writing Python, where expanduser() is the documented
@@ -215,11 +217,13 @@ class TestSharedResolver:
 
 
 @pytest.fixture()
-def langchain(monkeypatch: pytest.MonkeyPatch):
+def langchain(monkeypatch: pytest.MonkeyPatch) -> Iterator[type]:
     pkg = types.ModuleType("langchain_core")
     callbacks = types.ModuleType("langchain_core.callbacks")
-    callbacks.BaseCallbackHandler = type("BaseCallbackHandler", (), {"raise_error": False})
-    pkg.callbacks = callbacks
+    setattr(  # noqa: B010
+        callbacks, "BaseCallbackHandler", type("BaseCallbackHandler", (), {"raise_error": False})
+    )
+    setattr(pkg, "callbacks", callbacks)  # noqa: B010
     monkeypatch.setitem(sys.modules, "langchain_core", pkg)
     monkeypatch.setitem(sys.modules, "langchain_core.callbacks", callbacks)
     name = "waxseal.integrations.langchain"
@@ -230,10 +234,10 @@ def langchain(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture()
-def crewai(monkeypatch: pytest.MonkeyPatch):
+def crewai(monkeypatch: pytest.MonkeyPatch) -> Iterator[type]:
     class _Bus:
-        def on(self, event_type: type):
-            def decorator(fn):
+        def on(self, event_type: type) -> Callable[[Callable[..., object]], Callable[..., object]]:
+            def decorator(fn: Callable[..., object]) -> Callable[..., object]:
                 return fn
 
             return decorator
@@ -242,11 +246,15 @@ def crewai(monkeypatch: pytest.MonkeyPatch):
 
     class BaseEventListener:
         def __init__(self) -> None:
-            self.setup_listeners(bus)
+            # setup_listeners is the subclass's contract (crewai's
+            # template-method pattern) -- WaxsealEventListener provides it,
+            # this fake base class does not, matching the real
+            # crewai.events.BaseEventListener.
+            self.setup_listeners(bus)  # type: ignore[attr-defined]
 
     events = types.ModuleType("crewai.events")
-    events.BaseEventListener = BaseEventListener
-    events.crewai_event_bus = bus
+    setattr(events, "BaseEventListener", BaseEventListener)  # noqa: B010
+    setattr(events, "crewai_event_bus", bus)  # noqa: B010
     for attr in (
         "ToolUsageStartedEvent", "ToolUsageFinishedEvent", "ToolUsageErrorEvent",
         "TaskStartedEvent", "TaskCompletedEvent", "TaskFailedEvent",
@@ -254,7 +262,7 @@ def crewai(monkeypatch: pytest.MonkeyPatch):
     ):
         setattr(events, attr, type(attr, (), {}))
     pkg = types.ModuleType("crewai")
-    pkg.events = events
+    setattr(pkg, "events", events)  # noqa: B010
     monkeypatch.setitem(sys.modules, "crewai", pkg)
     monkeypatch.setitem(sys.modules, "crewai.events", events)
     name = "waxseal.integrations.crewai"
@@ -265,9 +273,9 @@ def crewai(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture()
-def openai_agents(monkeypatch: pytest.MonkeyPatch):
+def openai_agents(monkeypatch: pytest.MonkeyPatch) -> Iterator[type]:
     stub = types.ModuleType("agents")
-    stub.RunHooks = type("RunHooks", (), {})
+    setattr(stub, "RunHooks", type("RunHooks", (), {}))  # noqa: B010
     monkeypatch.setitem(sys.modules, "agents", stub)
     name = "waxseal.integrations.openai_agents"
     sys.modules.pop(name, None)
@@ -285,33 +293,33 @@ LIBRARY_DEFAULTS = {
 
 
 @pytest.fixture(params=sorted(LIBRARY_DEFAULTS))
-def library_integration(request):
+def library_integration(request: pytest.FixtureRequest) -> tuple[type, str]:
     cls = request.getfixturevalue(request.param)
     return cls, LIBRARY_DEFAULTS[request.param]
 
 
 class TestLibraryIntegrationPrecedence:
     def test_explicit_trail_argument_beats_the_env_var(
-        self, library_integration, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, library_integration: tuple[type, str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         cls, _ = library_integration
         monkeypatch.setenv("WAXSEAL_TRAIL", str(tmp_path / "from-env.jsonl"))
         assert cls(tmp_path / "explicit.jsonl")._trail == tmp_path / "explicit.jsonl"
 
     def test_env_var_is_honoured_when_no_argument_is_passed(
-        self, library_integration, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, library_integration: tuple[type, str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         cls, _ = library_integration
         monkeypatch.setenv("WAXSEAL_TRAIL", str(tmp_path / "from-env.jsonl"))
         assert cls()._trail == tmp_path / "from-env.jsonl"
 
     def test_documented_default_survives_with_no_argument_and_no_env(
-        self, library_integration
+        self, library_integration: tuple[type, str]
     ) -> None:
         cls, default = library_integration
         assert cls()._trail == Path(default).expanduser()
 
-    def test_the_default_did_not_change_shape(self, library_integration) -> None:
+    def test_the_default_did_not_change_shape(self, library_integration: tuple[type, str]) -> None:
         # The pre-0.1.5 signature carried the default as the parameter's own
         # value; it is now a None sentinel so that "caller passed nothing"
         # is distinguishable from "caller passed the default path" — the
@@ -321,13 +329,13 @@ class TestLibraryIntegrationPrecedence:
         assert cls()._trail == Path(default).expanduser()
 
     def test_a_string_argument_is_still_accepted_and_expanded(
-        self, library_integration
+        self, library_integration: tuple[type, str]
     ) -> None:
         cls, _ = library_integration
         assert cls("~/given-as-str.jsonl")._trail == Path.home() / "given-as-str.jsonl"
 
     def test_home_env_beats_path_home_in_the_default(
-        self, library_integration, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, library_integration: tuple[type, str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # waxseal-fg4.20. All three resolved the bottom rung with
         # Path(DEFAULT_TRAIL).expanduser(), which goes through
@@ -351,7 +359,7 @@ class TestLibraryIntegrationPrecedence:
         assert cls()._trail == tmp_path / "posix-home" / tail
 
     def test_path_home_is_the_fallback_when_no_home_env(
-        self, library_integration, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, library_integration: tuple[type, str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # The other half of the rule: Path.home() is consulted only when
         # there is no HOME at all, so the fix does not strand a host that
@@ -369,7 +377,7 @@ class TestLibraryIntegrationPrecedence:
 
 
 @pytest.fixture(params=["hermes", "hermes_gateway"])
-def hermes_module(request):
+def hermes_module(request: pytest.FixtureRequest) -> types.ModuleType:
     module = importlib.import_module(f"waxseal.integrations.{request.param}")
     module._logs.clear()
     return module
@@ -377,14 +385,14 @@ def hermes_module(request):
 
 class TestHermesPrecedence:
     def test_env_var_beats_hermes_home(
-        self, hermes_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, hermes_module: types.ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
         monkeypatch.setenv("WAXSEAL_TRAIL", str(tmp_path / "from-env.jsonl"))
         assert hermes_module._trail_path() == tmp_path / "from-env.jsonl"
 
     def test_hermes_home_beats_the_home_fallback(
-        self, hermes_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, hermes_module: types.ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
         assert hermes_module._trail_path() == (
@@ -392,7 +400,7 @@ class TestHermesPrecedence:
         )
 
     def test_home_env_beats_path_home_in_the_fallback(
-        self, hermes_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, hermes_module: types.ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # waxseal-fg4.3. Both hermes modules resolved the bottom rung with a
         # bare Path.home(), which goes through ntpath on Windows and IGNORES
@@ -408,7 +416,7 @@ class TestHermesPrecedence:
         )
 
     def test_path_home_is_the_fallback_when_no_home_env(
-        self, hermes_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, hermes_module: types.ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # Same coverage the Path.home monkeypatch used to carry, now stated
         # against the corrected rule: Path.home() is consulted only when
@@ -420,7 +428,7 @@ class TestHermesPrecedence:
         )
 
     def test_the_env_var_actually_moves_the_written_trail(
-        self, hermes_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, hermes_module: types.ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # Resolving the path is not the claim; writing there is. Without
         # this the module could honour the variable in _trail_path() and
@@ -436,7 +444,7 @@ class TestHermesPrecedence:
         assert not (tmp_path / "hermes-home").exists()
 
     def test_a_drop_is_recorded_beside_the_env_named_trail_not_the_default(
-        self, hermes_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self, hermes_module: types.ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # Fail-open must stay labelled AT THE PATH THE OPERATOR NAMED. A
         # drop filed next to the host default would be invisible to anyone
@@ -472,12 +480,14 @@ _ROUTING_EVENT = {"hook_event_name": "PreToolUse", "cwd": "/work/project"}
 
 
 @pytest.fixture(params=sorted(ALREADY_HONOURING))
-def already_honouring(request):
+def already_honouring(
+    request: pytest.FixtureRequest,
+) -> tuple[Callable[[], object], tuple[str, str], Path]:
     from waxseal.domain.segments import project_slug
 
     module = importlib.import_module(request.param)
     host_dir, sub, routed = ALREADY_HONOURING[request.param]
-    raw = getattr(module, "_trail_path", None) or module.resolve_trail
+    raw: Any = getattr(module, "_trail_path", None) or module.resolve_trail
     if not routed:
         return raw, (host_dir, sub), Path("trail.jsonl")
     tail = Path("trails") / project_slug("/work/project") / "trail.00000.jsonl"
@@ -486,7 +496,10 @@ def already_honouring(request):
 
 class TestNoRegressionForTheOriginalFour:
     def test_env_var_still_wins(
-        self, already_honouring, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        already_honouring: tuple[Callable[[], object], tuple[str, str], Path],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         resolve, _, _tail = already_honouring
         monkeypatch.setenv("WAXSEAL_TRAIL", str(tmp_path / "from-env.jsonl"))
@@ -494,14 +507,20 @@ class TestNoRegressionForTheOriginalFour:
         assert resolve() == tmp_path / "from-env.jsonl"
 
     def test_default_location_is_unchanged(
-        self, already_honouring, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        already_honouring: tuple[Callable[[], object], tuple[str, str], Path],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         resolve, (host_dir, sub), tail = already_honouring
         monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
         assert resolve() == tmp_path / "posix-home" / host_dir / sub / tail
 
     def test_home_env_still_beats_path_home(
-        self, already_honouring, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        already_honouring: tuple[Callable[[], object], tuple[str, str], Path],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         # The Windows ntpath split test_trail_path_defaults.py documents:
         # extracting a shared resolver must not have moved this rung.
@@ -623,7 +642,11 @@ class TestEveryIntegrationRefusesALeadingTilde:
     TILDE = "~/set-by-a-compose-file.jsonl"
 
     def test_library_integrations_fall_back_to_their_documented_default(
-        self, library_integration, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+        self,
+        library_integration: tuple[type, str],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         cls, default = library_integration
         monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
@@ -633,7 +656,11 @@ class TestEveryIntegrationRefusesALeadingTilde:
         assert "REFUSED" in capsys.readouterr().err
 
     def test_hermes_modules_fall_back_to_hermes_home(
-        self, hermes_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+        self,
+        hermes_module: types.ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
         monkeypatch.setenv("WAXSEAL_TRAIL", self.TILDE)
@@ -643,7 +670,11 @@ class TestEveryIntegrationRefusesALeadingTilde:
         assert "REFUSED" in capsys.readouterr().err
 
     def test_the_originally_honouring_four_fall_back_to_the_host_default(
-        self, already_honouring, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+        self,
+        already_honouring: tuple[Callable[[], object], tuple[str, str], Path],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         resolve, (host_dir, sub), tail = already_honouring
         monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
@@ -652,7 +683,7 @@ class TestEveryIntegrationRefusesALeadingTilde:
         assert "REFUSED" in capsys.readouterr().err
 
     def test_the_claude_code_remote_probe_does_not_double_print(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # claude_code is the one module that reads env_trail() a second time,
         # to ask whether the value names a chain SERVER. A "~" value is not a
@@ -667,7 +698,7 @@ class TestEveryIntegrationRefusesALeadingTilde:
         assert capsys.readouterr().err.count("REFUSED") == 1
 
     def test_a_chain_server_url_is_still_honoured(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # The refusal must not touch the remote rung: a URL cannot begin with
         # "~", and env_trail() stays the raw reader precisely so the scheme
