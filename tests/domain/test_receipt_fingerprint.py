@@ -81,7 +81,13 @@ class TestReceiptFingerprint:
         # frame's descriptor silently move the other's identity.
         from waxseal.domain.fingerprint import DESCRIPTOR_PREFIX
 
-        assert RECEIPT_DESCRIPTOR_PREFIX != DESCRIPTOR_PREFIX
+        # Ternary Evidence Principle regression guard (CLAUDE.md item 5),
+        # same shape as tests/domain/test_witnessing.py's: the two Final
+        # byte-string literals are provably distinct today, which is exactly
+        # why mypy flags the comparison as non-overlapping -- the assertion
+        # exists to catch a future edit that collapses the two prefixes onto
+        # the same bytes, not to model runtime uncertainty.
+        assert RECEIPT_DESCRIPTOR_PREFIX != DESCRIPTOR_PREFIX  # type: ignore[comparison-overlap]
 
     def test_receipt_fingerprint_is_independent_of_the_header_fingerprint(self) -> None:
         from waxseal.domain.fingerprint import fingerprint

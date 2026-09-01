@@ -15,8 +15,10 @@ argv), not the signer sub-protocol itself again.
 
 from __future__ import annotations
 
+import http.server
 import re
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -59,10 +61,10 @@ def signer_cmd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 @pytest.fixture
-def two_write_nodes():
-    started = []
+def two_write_nodes() -> Iterator[Callable[[], list[str]]]:
+    started: list[tuple[http.server.HTTPServer, http.server.HTTPServer]] = []
 
-    def factory():
+    def factory() -> list[str]:
         url_a, server_a = start_fake_node(write_node())
         url_b, server_b = start_fake_node(write_node())
         started.append((server_a, server_b))
@@ -76,7 +78,10 @@ def two_write_nodes():
 
 class TestRegistryPublish:
     def test_unknown_fingerprint_exits_1(
-        self, signer_cmd: str, two_write_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         urls = two_write_nodes()
         code = main(
@@ -90,7 +95,7 @@ class TestRegistryPublish:
         assert "not a fingerprint" in err
 
     def test_missing_signer_cmd_exits_1(
-        self, monkeypatch: pytest.MonkeyPatch, two_write_nodes,
+        self, monkeypatch: pytest.MonkeyPatch, two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         monkeypatch.delenv("WAXSEAL_EVM_SIGNER_CMD", raising=False)
@@ -119,7 +124,10 @@ class TestRegistryPublish:
         assert "at least 2" in err
 
     def test_happy_path_prints_chain_id_and_tx(
-        self, signer_cmd: str, two_write_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         urls = two_write_nodes()
         code = main(
@@ -163,7 +171,10 @@ class TestRegistryPublish:
 
 class TestBondDeposit:
     def test_non_positive_amount_exits_1(
-        self, signer_cmd: str, two_write_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         urls = two_write_nodes()
         code = main(
@@ -177,7 +188,10 @@ class TestBondDeposit:
         assert "must be positive" in err
 
     def test_happy_path_exits_0(
-        self, signer_cmd: str, two_write_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         urls = two_write_nodes()
         code = main(
@@ -206,7 +220,7 @@ class TestBondDeposit:
         assert "at least 2" in err
 
     def test_missing_signer_cmd_exits_1_before_sending(
-        self, monkeypatch: pytest.MonkeyPatch, two_write_nodes,
+        self, monkeypatch: pytest.MonkeyPatch, two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         monkeypatch.delenv("WAXSEAL_EVM_SIGNER_CMD", raising=False)
@@ -223,11 +237,11 @@ class TestBondDeposit:
 
 
 class TestBondProve:
-    def _checkpoint(self, seq: int, entry_hash: str, root: str) -> dict:
+    def _checkpoint(self, seq: int, entry_hash: str, root: str) -> dict[str, object]:
         return {"seq": seq, "entry_hash": entry_hash, "root": root}
 
     def test_missing_file_exits_1(
-        self, signer_cmd: str, two_write_nodes, tmp_path: Path,
+        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         urls = two_write_nodes()
@@ -242,7 +256,7 @@ class TestBondProve:
         assert "cannot read" in err
 
     def test_invalid_json_exits_1(
-        self, signer_cmd: str, two_write_nodes, tmp_path: Path,
+        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         proof_path = tmp_path / "proof.json"
@@ -259,7 +273,7 @@ class TestBondProve:
         assert "not valid JSON" in err
 
     def test_missing_kind_exits_1(
-        self, signer_cmd: str, two_write_nodes, tmp_path: Path,
+        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         proof_path = tmp_path / "proof.json"
@@ -276,7 +290,7 @@ class TestBondProve:
         assert "'kind' must be" in err
 
     def test_equivocation_missing_field_exits_1(
-        self, signer_cmd: str, two_write_nodes, tmp_path: Path,
+        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         proof_path = tmp_path / "proof.json"
@@ -293,7 +307,7 @@ class TestBondProve:
         assert "malformed equivocation proof" in err
 
     def test_equivocation_structurally_inadmissible_exits_1(
-        self, signer_cmd: str, two_write_nodes, tmp_path: Path,
+        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         # Same checkpoint on both sides: not divergent, so validate() names
@@ -326,7 +340,7 @@ class TestBondProve:
         assert "not_divergent" in err
 
     def test_equivocation_happy_path_exits_0(
-        self, signer_cmd: str, two_write_nodes, tmp_path: Path,
+        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         import json
@@ -356,7 +370,7 @@ class TestBondProve:
         assert "tx=0x" in out
 
     def test_non_extension_happy_path_calls_submit_non_extension(
-        self, signer_cmd: str, two_write_nodes, tmp_path: Path,
+        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         import json
@@ -390,7 +404,7 @@ class TestBondProve:
         assert "tx=0x" in out
 
     def test_checkpoint_not_an_object_is_malformed(
-        self, signer_cmd: str, two_write_nodes, tmp_path: Path,
+        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         import json
@@ -421,7 +435,7 @@ class TestBondProve:
         assert "must be a JSON object" in err
 
     def test_leaf_claim_not_an_object_is_malformed(
-        self, signer_cmd: str, two_write_nodes, tmp_path: Path,
+        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         import json

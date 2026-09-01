@@ -27,6 +27,7 @@ import base64
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -56,13 +57,17 @@ def audit_entry(**overrides: object) -> SimpleNamespace:
     return SimpleNamespace(**fields)
 
 
-def read_line(trail: Path, line_no: int = 0) -> dict:
+def read_line(trail: Path, line_no: int = 0) -> dict[str, Any]:
     line = trail.read_text().splitlines()[line_no]
-    return json.loads(line)
+    result: dict[str, Any] = json.loads(line)
+    return result
 
 
-def read_payload(trail: Path, line_no: int = 0) -> dict:
-    return json.loads(base64.b64decode(read_line(trail, line_no)["payload_b64"]))
+def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
+    result: dict[str, Any] = json.loads(
+        base64.b64decode(read_line(trail, line_no)["payload_b64"])
+    )
+    return result
 
 
 class TestPayloadShape:
@@ -205,7 +210,10 @@ class TestDecisionMapping:
 
 class TestNeverVetoesAGT:
     def test_open_failure_never_raises_and_labels_the_drop(
-        self, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
             AuditLog, "open",
@@ -219,7 +227,7 @@ class TestNeverVetoesAGT:
         assert len(drops.read_text().splitlines()) == 1
 
     def test_try_append_failure_never_raises_and_labels_the_drop(
-        self, tmp_path: Path, capsys
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         blocked = tmp_path / "blocked"
         blocked.write_text("a file where the trail dir should be")
@@ -227,11 +235,11 @@ class TestNeverVetoesAGT:
         assert "dropped" in capsys.readouterr().err
 
     def test_malformed_entry_never_raises_and_labels_the_drop(
-        self, tmp_path: Path, capsys
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         class Poison:
             @property
-            def data(self) -> dict:
+            def data(self) -> dict[str, object]:
                 raise RuntimeError("entry is not what it claims to be")
 
         trail = tmp_path / "trail.jsonl"
@@ -241,7 +249,9 @@ class TestNeverVetoesAGT:
         assert drops.exists()
         assert AuditLog.open(trail).verify(measure_drops=False).checked == 0
 
-    def test_write_batch_never_raises_per_entry_failure(self, tmp_path: Path, capsys) -> None:
+    def test_write_batch_never_raises_per_entry_failure(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         blocked = tmp_path / "blocked"
         blocked.write_text("a file where the trail dir should be")
         sink = WaxsealAuditSink(blocked / "trail.jsonl")
@@ -270,7 +280,7 @@ class TestVerifyIntegrityAndClose:
         assert reason is not None and "boom" in reason
 
     def test_close_is_a_no_op(self, tmp_path: Path) -> None:
-        assert WaxsealAuditSink(tmp_path / "trail.jsonl").close() is None
+        WaxsealAuditSink(tmp_path / "trail.jsonl").close()  # must not raise
 
 
 class TestTrailResolution:

@@ -13,12 +13,15 @@ disagreeing, unreachable).
 from __future__ import annotations
 
 import base64
+import http.server
 import json
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
 from tests._fake_evm_rpc import (
+    CallHandler,
     dynamic_bytes,
     full_node,
     head_return,
@@ -47,10 +50,10 @@ def make_trail(path: Path, n: int = 1) -> None:
 
 
 @pytest.fixture
-def two_nodes():
-    started = []
+def two_nodes() -> Iterator[Callable[[CallHandler], list[str]]]:
+    started: list[tuple[http.server.HTTPServer, http.server.HTTPServer]] = []
 
-    def factory(handler):
+    def factory(handler: CallHandler) -> list[str]:
         url_a, server_a = start_fake_node(handler)
         url_b, server_b = start_fake_node(handler)
         started.append((server_a, server_b))
@@ -64,7 +67,10 @@ def two_nodes():
 
 class TestVerifyLiveness:
     def test_live_is_exit_0(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -80,7 +86,10 @@ class TestVerifyLiveness:
         assert "ledger liveness: live" in out
 
     def test_delinquent_is_exit_2_never_1(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -148,7 +157,10 @@ class TestVerifyLiveness:
         assert exc.value.code == 2
 
     def test_a_genuine_break_still_wins_over_ledger_unverifiable(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         # BROKEN (a real tamper) must survive combination with an
         # UNVERIFIABLE ledger dimension: Verdict.join keeps the worse
@@ -177,7 +189,10 @@ class TestVerifyLiveness:
 
 class TestVerifyRegistry:
     def test_agrees_is_exit_0(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -194,7 +209,10 @@ class TestVerifyRegistry:
         assert f"ledger registry {TRAIL_FINGERPRINT}: agrees" in out
 
     def test_disagrees_is_exit_2_never_1(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -211,7 +229,10 @@ class TestVerifyRegistry:
         assert "registry_disagreement" in out
 
     def test_registry_only_without_liveness_is_supported(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         # --registry does not require --liveness: the ledger dimension only
         # asks the chain about whichever flags were actually given.
@@ -228,7 +249,10 @@ class TestVerifyRegistry:
         assert f"ledger registry {TRAIL_FINGERPRINT}: agrees" in out
 
     def test_registry_no_entries_without_liveness(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "empty.jsonl"
         path.touch()
@@ -269,7 +293,10 @@ class TestVerifyRegistry:
 
 class TestReport:
     def test_json_mode_carries_a_ledger_key(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -287,7 +314,10 @@ class TestReport:
         assert "live" in payload["ledger"]["detail"]
 
     def test_markdown_mode_carries_a_ledger_section(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -301,7 +331,10 @@ class TestReport:
         assert "ledger liveness: live" in out
 
     def test_delinquent_is_exit_2_never_1_in_report_too(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)

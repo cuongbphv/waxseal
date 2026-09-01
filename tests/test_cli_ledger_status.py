@@ -17,12 +17,15 @@ single-fake test would never exercise the actual code path an operator hits.
 
 from __future__ import annotations
 
+import http.server
 import json
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
 from tests._fake_evm_rpc import (
+    CallHandler,
     bond_return,
     dynamic_bytes,
     full_node,
@@ -54,15 +57,17 @@ def make_trail(path: Path, n: int = 1) -> None:
 
 
 @pytest.fixture
-def two_nodes():
-    def _start(handler):
+def two_nodes() -> Iterator[Callable[[CallHandler], list[str]]]:
+    def _start(
+        handler: CallHandler,
+    ) -> tuple[list[str], tuple[http.server.HTTPServer, http.server.HTTPServer]]:
         url_a, server_a = start_fake_node(handler)
         url_b, server_b = start_fake_node(handler)
         return [url_a, url_b], (server_a, server_b)
 
-    started: list = []
+    started: list[tuple[http.server.HTTPServer, http.server.HTTPServer]] = []
 
-    def factory(handler):
+    def factory(handler: CallHandler) -> list[str]:
         urls, servers = _start(handler)
         started.append(servers)
         return urls
@@ -108,7 +113,10 @@ class TestUsageErrors:
 
 class TestLivenessOnly:
     def test_live_exits_0(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         import time
 
@@ -129,7 +137,10 @@ class TestLivenessOnly:
         assert "ledger-status: ok" in out
 
     def test_delinquent_exits_1(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -149,7 +160,10 @@ class TestLivenessOnly:
         assert "ledger-status: broken" in out
 
     def test_no_deadline_configured_is_unmeasured_exit_2(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -210,7 +224,10 @@ class TestLivenessOnly:
         assert url_a in out and url_b in out
 
     def test_json_mode_shape(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -230,7 +247,10 @@ class TestLivenessOnly:
         assert finding["verdict"] == "ok"
 
     def test_trail_id_override(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -248,7 +268,10 @@ class TestLivenessOnly:
 
 class TestRegistry:
     def test_agrees_exits_0(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -265,7 +288,10 @@ class TestRegistry:
         assert f"registry {TRAIL_FINGERPRINT}: agrees" in out
 
     def test_disagrees_exits_2_never_1(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -309,7 +335,10 @@ class TestRegistry:
         assert "registry" in out and "DISAGREEMENT" in out
 
     def test_no_entries_on_trail_is_nothing_to_check(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "empty.jsonl"
         path.touch()  # exists, 0 entries — AuditLog.open() alone would not create it
@@ -327,7 +356,10 @@ class TestRegistry:
 
 class TestBond:
     def test_malformed_bond_answer_is_unreachable_exit_2(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         from tests._fake_evm_rpc import hexdata, word
 
@@ -349,7 +381,10 @@ class TestBond:
         assert "amount_wei=" not in out
 
     def test_bonded_exits_0(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -366,7 +401,10 @@ class TestBond:
         assert "amount_wei=" in out
 
     def test_slashed_exits_1(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -382,7 +420,10 @@ class TestBond:
         assert "bond: slashed" in out
 
     def test_unbonded_exits_1(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
@@ -425,7 +466,10 @@ class TestBond:
 
 class TestCombinedFindingsUseWorstVerdict:
     def test_delinquent_liveness_beats_registry_disagreement(
-        self, tmp_path: Path, two_nodes, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        two_nodes: Callable[[CallHandler], list[str]],
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         # BROKEN (delinquent) must win over UNVERIFIABLE (registry disagree)
         # under Verdict.join's severity order, exactly as reconcile-tickets's

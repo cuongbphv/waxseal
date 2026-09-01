@@ -8,8 +8,10 @@ publish`/`bond deposit|prove`, since `EvmAnchorSink` sits on the exact same
 
 from __future__ import annotations
 
+import http.server
 import json
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -50,10 +52,10 @@ def signer_cmd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 @pytest.fixture
-def two_write_nodes():
-    started = []
+def two_write_nodes() -> Iterator[Callable[[], list[str]]]:
+    started: list[tuple[http.server.HTTPServer, http.server.HTTPServer]] = []
 
-    def factory():
+    def factory() -> list[str]:
         url_a, server_a = start_fake_node(write_node())
         url_b, server_b = start_fake_node(write_node())
         started.append((server_a, server_b))
@@ -72,7 +74,7 @@ def make_trail(path: Path) -> None:
 
 class TestEvmAnchor:
     def test_happy_path_records_an_evm_receipt(
-        self, tmp_path: Path, signer_cmd: str, two_write_nodes,
+        self, tmp_path: Path, signer_cmd: str, two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
@@ -93,7 +95,7 @@ class TestEvmAnchor:
         assert sidecar["receipt"] == f"evm:31337:1:{TX_HASH}"
 
     def test_verify_anchors_sees_the_evm_receipt_as_structurally_ok_but_unverifiable_by_name(
-        self, tmp_path: Path, signer_cmd: str, two_write_nodes,
+        self, tmp_path: Path, signer_cmd: str, two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         # `verify --anchors` checks the checkpoint MATH (already correct,
@@ -121,7 +123,10 @@ class TestEvmAnchor:
         assert "unknown_receipt_type" in out or "unverifiable by name" in out.lower()
 
     def test_missing_signer_cmd_exits_1_and_records_nothing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, two_write_nodes,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         monkeypatch.delenv("WAXSEAL_EVM_SIGNER_CMD", raising=False)
@@ -155,7 +160,7 @@ class TestEvmAnchor:
         assert "could not prepare the anchor sink" in err
 
     def test_unreadable_consistency_proof_file_exits_1(
-        self, tmp_path: Path, signer_cmd: str, two_write_nodes,
+        self, tmp_path: Path, signer_cmd: str, two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
@@ -173,7 +178,7 @@ class TestEvmAnchor:
         assert "could not prepare the anchor sink" in err
 
     def test_consistency_proof_file_is_read_and_passed_through(
-        self, tmp_path: Path, signer_cmd: str, two_write_nodes,
+        self, tmp_path: Path, signer_cmd: str, two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
@@ -192,7 +197,7 @@ class TestEvmAnchor:
         assert code == 0
 
     def test_evm_trail_id_override(
-        self, tmp_path: Path, signer_cmd: str, two_write_nodes,
+        self, tmp_path: Path, signer_cmd: str, two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
