@@ -2,20 +2,30 @@
 
 Unit tests run against a scripted fake DBAPI connection that checks the
 serialization PROTOCOL (advisory xact lock taken before the tail read, insert
-in the same transaction, %s paramstyle). The TestRealPostgres suite runs only
-when WAXSEAL_PG_DSN is set (psycopg ships in the dev extra), e.g. with a
-throwaway server:
+in the same transaction, %s paramstyle). TestRealPostgres runs against a real
+server (psycopg ships in the dev extra), started by
+`docker compose -f server/docker-compose.yml up -d postgres`.
 
-    docker run -d --name waxseal-pg -e POSTGRES_PASSWORD=waxseal \
-      -e POSTGRES_DB=waxseal -p 5433:5432 postgres:16
-    WAXSEAL_PG_DSN="postgresql://postgres:waxseal@localhost:5433/waxseal" \
-      uv run pytest tests/adapters/test_postgres.py
+These eleven tests skipped on every local run for a year not because no
+database was there, but because they looked for WAXSEAL_PG_DSN while the
+server suite next door connected to its own default and passed 42 tests
+against the same live server (waxseal-fg4.2, measured 31/08/2026). A skip
+condition that asks "is an env var set" answers a different question from
+"is a database reachable", and the difference was eleven tamper-detection
+tests reading as green. The default DSN below is the server's, so one
+running database serves both suites; WAXSEAL_PG_DSN still overrides it.
 
-Each real test drops and recreates the table for isolation — point the DSN
-at a disposable database, never a production one.
+Reachability, not configuration, decides. When no database answers, the skip
+names the DSN it tried and calls the count UNMEASURED — tests/conftest.py
+prints that as its own run-summary line, because "11 skipped" among 2400
+passes is exactly the collapse CLAUDE.md rule 5 forbids.
+
+Each test gets a fresh schema and drops it afterwards, so pointing the
+default at a shared development database cannot touch anything in `public`.
 """
 
 import os
+import uuid
 
 import pytest
 
@@ -178,33 +188,85 @@ class TestProtocol:
         assert store.rows == []
 
 
+# The server's own default (server/tests/test_operators_postgres.py and
+# server/docker-compose.yml). Shared on purpose: one `docker compose up`
+# measures both suites, which is what the wheel's env-var-only condition
+# silently opted out of.
+DEFAULT_DSN = "postgresql://waxseal:waxseal-dev@127.0.0.1:55432/waxseal"
+DSN = os.environ.get("WAXSEAL_PG_DSN", DEFAULT_DSN)
+
+# tests/conftest.py keys its run-summary line on this word. A skip that only
+# says "skipped" is indistinguishable from a pass in the totals line.
+UNMEASURED = "UNMEASURED"
+
+
+def _postgres_reachable(dsn: str) -> bool:
+    """Whether a server answers at `dsn`. Never raises: any failure means
+    "not available", which is a labelled absence and never a pass."""
+    try:
+        import psycopg
+    except ImportError:
+        return False
+    try:
+        with psycopg.connect(dsn, connect_timeout=3) as conn:
+            conn.execute("SELECT 1")
+    except Exception:  # noqa: BLE001 - every failure is the same answer here
+        return False
+    return True
+
+
+PG_REACHABLE = _postgres_reachable(DSN)
+PG_SKIP_REASON = (
+    f"{UNMEASURED}: no PostgreSQL answered at {DSN}, so the real-backend "
+    "tamper-detection tests did not run and made no claim either way — start one with "
+    "`docker compose -f server/docker-compose.yml up -d postgres`, or set WAXSEAL_PG_DSN"
+)
+
+_active_schema: str | None = None
+
+
 @pytest.fixture()
-def pg_backend() -> "PostgresBackend":
-    """Fresh backend against the real server; drops the table for isolation."""
+def pg_backend():
+    """Fresh backend in a schema of its own, dropped afterwards.
+
+    A schema per test rather than a DROP TABLE in a shared one: the default
+    DSN now points at a database the server also uses, and a test suite must
+    not be able to delete anything an operator put there.
+    """
+    global _active_schema
     psycopg = pytest.importorskip("psycopg")
-    dsn = os.environ["WAXSEAL_PG_DSN"]
+    schema = f"waxseal_wheel_test_{uuid.uuid4().hex[:12]}"
 
     def connect():
-        return psycopg.connect(dsn)
+        conn = psycopg.connect(DSN)
+        conn.execute(f'SET search_path TO "{schema}"')
+        return conn
 
-    with connect() as conn:
-        conn.execute("DROP TABLE IF EXISTS waxseal_entries")
-        conn.commit()
-    return PostgresBackend(connect)
+    with psycopg.connect(DSN) as admin:
+        admin.execute(f'CREATE SCHEMA "{schema}"')
+        admin.commit()
+    _active_schema = schema
+    try:
+        yield PostgresBackend(connect)
+    finally:
+        _active_schema = None
+        with psycopg.connect(DSN) as admin:
+            admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+            admin.commit()
 
 
 def pg_execute(sql: str, params: tuple = ()) -> None:
+    """Tamper with the table out of band, in the schema the active fixture made."""
     import psycopg
 
-    with psycopg.connect(os.environ["WAXSEAL_PG_DSN"]) as conn:
+    assert _active_schema is not None, "pg_execute needs the pg_backend fixture"
+    with psycopg.connect(DSN) as conn:
+        conn.execute(f'SET search_path TO "{_active_schema}"')
         conn.execute(sql, params)
         conn.commit()
 
 
-@pytest.mark.skipif(
-    not os.environ.get("WAXSEAL_PG_DSN"),
-    reason="set WAXSEAL_PG_DSN to run against a real Postgres",
-)
+@pytest.mark.skipif(not PG_REACHABLE, reason=PG_SKIP_REASON)
 class TestRealPostgres:
     # -- happy path -----------------------------------------------------------
     def test_append_and_verify(self, pg_backend: PostgresBackend) -> None:

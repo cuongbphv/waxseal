@@ -67,7 +67,7 @@ confidence) — collapsing to two values leaves no third option. "Migration 060"
 clothing: an unknown/unmeasured state got forced into a binary and came out on the wrong
 side.
 
-This codebase already applies the principle, by name or not, in (at least) nine places:
+This codebase already applies the principle, by name or not, in (at least) ten places:
 
 1. **Verdict chain**: `ok` / `broken` / `unverifiable` (`domain/verify.py`), now also
    formalized as the `Verdict` type (`src/waxseal/domain/verdict.py`) — a new instance
@@ -104,10 +104,22 @@ This codebase already applies the principle, by name or not, in (at least) nine 
    chain integrity — under a mutation that broke archiving entirely, the chain, the
    rotation binding and the new segment all still verified `ok`. A defect no verdict can
    see is why the third value has to be asserted directly, never inferred from one.
+10. **RFC 3161 signature checking** (`src/waxseal/adapters/rfc3161_verify.py`) —
+    `signature_valid` / `signature_invalid` / `signature_unchecked`, reusing `Verdict`
+    rather than growing a parallel three-valued type beside it. The first instance where
+    the third value has THREE causes that each need a DIFFERENT fix: once a bundle IS
+    named, the `rfc3161` extra is not installed, the bundle could not be read, or the
+    token's CMS is a shape this build cannot parse. Every unchecked label therefore names
+    its own cause AND its own remedy — install the extra, repoint `--tsa-ca-file`, or fall
+    back to `openssl ts -verify` — because "unchecked" with no remedy is only marginally
+    better than silence: an operator who cannot tell which of the three they hit can act
+    on none of them. Unreadable stays unchecked, never invalid; only a signature that
+    verifiably fails, or a signer that verifiably reaches none of the operator's anchors,
+    earns `signature_invalid`.
 
 Rule 5 below is the SPECIFIC instance of this general principle that the chain-integrity
 metric needed. An implementer who has internalized the general principle, not just rule
-5's wording, should be able to find a tenth place it applies without being told.
+5's wording, should be able to find an eleventh place it applies without being told.
 
 ## Architecture (layer DAG, enforced by tests/architecture/)
 
@@ -213,7 +225,15 @@ operator-supplied parameters (`--lam`/`--c`/`--w`/`--rho`/`--delta`/`--t-max` re
 technology, not the cadence, is wrong — `delta > t_max`), exit 2 = an invalid measurement
 or a missing required flag. `receipt` is read-only against the trail and its sidecar; it
 writes extracted
-receipt/frame files only into the operator-named `--out` directory. `waxseal segments
+receipt/frame files only into the operator-named `--out` directory. `verify` and
+`report` accept `--tsa-ca-file <bundle.pem>`, engaging the optional `waxseal[rfc3161]`
+signature dimension over the RFC 3161 receipts in the `.anchors` sidecar — exit 1 =
+`signature_invalid` (checked, and false), exit 2 = `signature_unchecked` (the extra is
+absent, the bundle unreadable, or the CMS a shape this build cannot parse), never a
+silent 0. waxseal names no default trust anchor: choosing one would decide whom an
+operator trusts without saying so on any line of output. Without the flag no SPEC §17
+exit code changes and the receipts are checked structurally only, which the run says
+out loud rather than passing over in silence. `receipt` is unchanged. `waxseal segments
 <dir>` takes the DIRECTORY holding a project's sealed segments, not a trail file:
 read-only over every segment in it, appending nothing. Exit 0/1/2 come from
 `Verdict.to_exit_code`, so an unknown fingerprint in one segment never masks a real break
