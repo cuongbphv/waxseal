@@ -72,14 +72,20 @@ def declare_topology(
     anchor_sinks: int = 2,
     witness: bool = True,
     pin_separate: bool = True,
+    ledger: bool | None = None,
 ) -> None:
     state = json.loads(pin.read_text())
-    state["declared_topology"] = {
+    topology: dict[str, object] = {
         "seal_escrow": seal_escrow,
         "anchor_sinks": anchor_sinks,
         "witness": witness,
         "pin_separate": pin_separate,
     }
+    if ledger is not None:
+        # waxseal-fg4.45: only written when explicitly given, matching
+        # domain/pinning.py's own omit-when-undeclared round-trip.
+        topology["ledger"] = ledger
+    state["declared_topology"] = topology
     pin.write_text(json.dumps(state))
 
 
@@ -254,6 +260,40 @@ class TestDeclaredIsNotMeasured:
         # A declaration must not raise the rung: rung 3 stays unmeasured.
         assert "rung 3: NOT MEASURED" in out
         assert "witness=true" in out
+
+    def test_a_declared_ledger_does_not_become_a_measured_one(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # waxseal-fg4.45: the ledger dimension's own version of the witness
+        # test immediately above — preflight opens no network connection to
+        # check either one, so a DECLARED ledger authority must ride along
+        # as a caveat on the NOT MEASURED line, never raise the rung.
+        trail = tmp_path / "trail.jsonl"
+        make_trail(trail, sealed=True)
+        assert main(["anchor", str(trail)]) == 0
+        pin = tmp_path / "pin.json"
+        write_pin(trail, pin)
+        declare_topology(pin, ledger=True)
+        capsys.readouterr()
+        _, out = preflight(capsys, str(trail), "--pin", str(pin))
+        assert "rung 3: NOT MEASURED" in out
+        assert "ledger=true" in out
+        line = next(ln for ln in out.splitlines() if ln.strip().startswith("ledger (F4)"))
+        assert "NOT MEASURED" in line
+        assert "declared, not measured" in line
+
+    def test_no_declared_ledger_reads_as_not_measured_not_declared_false(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Rule 5, on the ledger row specifically: no pin at all must print
+        # plain NOT MEASURED, with no "declared" caveat invented for a
+        # topology that never mentioned ledger.
+        trail = tmp_path / "trail.jsonl"
+        make_trail(trail)
+        _, out = preflight(capsys, str(trail))
+        line = next(ln for ln in out.splitlines() if ln.strip().startswith("ledger (F4)"))
+        assert "NOT MEASURED" in line
+        assert "declared" not in line
 
 
 class TestNotMeasuredIsNeverZero:

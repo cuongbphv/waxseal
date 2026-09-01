@@ -12,13 +12,21 @@ The reading of the table this module commits to, stated because the table's
 prose does not spell it out and two readings are possible. Rung 2's attacker
 holds "trail + keyfile" and is stopped by "anchors: an external record of the
 old root"; rung 3's holds "trail + keyfile + `.anchors`" and is stopped by an
-"external anchor: the TSA / calendar / witness holds its own copy". "External"
-on rung 2 therefore means external to the TRAIL FILE — any `.anchors` record
-at all, the local `file` sink included, is a record that attacker does not
-hold — and only on rung 3 does it mean external to the HOST. The rejected
-reading, "external means off-host on both rows", would make rungs 2 and 3
-require exactly the same thing, and the table would have no reason to carry
-two rows.
+"external anchor: the TSA / calendar / witness / ledger holds its own copy".
+"External" on rung 2 therefore means external to the TRAIL FILE — any
+`.anchors` record at all, the local `file` sink included, is a record that
+attacker does not hold — and only on rung 3 does it mean external to the
+HOST. The rejected reading, "external means off-host on both rows", would
+make rungs 2 and 3 require exactly the same thing, and the table would have
+no reason to carry two rows.
+
+The ledger dimension (waxseal-fg4.45, F4's on-chain anchor/liveness/registry
+layer) joins rung 3 the same way a witness already does, rather than
+becoming a seventh row: it is one more record kept under a DIFFERENT
+administrative authority than the trail's writer, which is exactly what
+"external anchor" already names in general terms, and the six-row table
+itself (threat-model.md section 5) is not this bead's to extend — that is
+F5, an explicit, separately-approved SPEC append.
 
 Four states, not two. A rung's stopper is PRESENT, ABSENT, NOT MEASURED, or —
 for the top two rungs — there is NO MECHANISM at all. NOT MEASURED is the
@@ -91,6 +99,17 @@ class PreflightObservation:
     Path knowledge stays in `cli.py`, which fills each ``detail`` in: this
     module must not learn where a sidecar lives (the layer DAG forbids the
     domain any filesystem knowledge at all).
+
+    ``ledger`` (waxseal-fg4.45, F4's on-chain ledger dimension) joins
+    ``witness`` at rung 3 rather than gaining a rung of its own: threat-model.md
+    section 5 still tabulates six rows, unchanged by this bead (extending
+    that table is F5, an explicit, separately-approved SPEC append this bead
+    is not), and a ledger — like a witness — is one more record kept under a
+    DIFFERENT administrative authority than the process that writes the
+    trail, which is exactly what rung 3's stopper already names in general
+    terms ("an external record"). Never network-reachable from `preflight`
+    (see the module docstring: this command opens no connection at all), so
+    it is ``NOT_MEASURED`` the same way ``witness`` always is here.
     """
 
     seal: Observed
@@ -98,6 +117,7 @@ class PreflightObservation:
     external_anchor: Observed
     aggregate_binding: Observed
     witness: Observed
+    ledger: Observed
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +171,8 @@ _NEEDS_ANCHOR: Final = (
 _NEEDS_EXTERNAL: Final = (
     "an anchor sink that keeps its own copy off this host — `waxseal anchor "
     "--tsa-url URL` (RFC 3161, SPEC 17), `--ots-calendar URL` "
-    "(OpenTimestamps, SPEC 18), or a witness (`--witness URL`, SPEC 14)"
+    "(OpenTimestamps, SPEC 18), a witness (`--witness URL`, SPEC 14), or an "
+    "on-chain ledger (`waxseal anchor --evm-rpc URL --evm-liveness ADDR`, F4)"
 )
 _NEEDS_AGGREGATE: Final = (
     "an aggregate binding inside an anchored checkpoint (SPEC 15) — anchor a "
@@ -168,10 +189,10 @@ _DETAIL_COLLUSION: Final = (
 )
 
 _OPERATIONAL_REQUIREMENT: Final = (
-    "The seal key, the anchor sink, and the witness must each sit under a "
-    "DIFFERENT administrative authority than the process that writes the "
-    "trail; no configuration flag substitutes for that, and waxseal cannot "
-    "check it for you (threat-model.md section 5)"
+    "The seal key, the anchor sink, the witness, and the ledger must each "
+    "sit under a DIFFERENT administrative authority than the process that "
+    "writes the trail; no configuration flag substitutes for that, and "
+    "waxseal cannot check it for you (threat-model.md section 5)"
 )
 
 _CONTIGUOUS_MEANING: Final = (
@@ -183,12 +204,13 @@ _CONTIGUOUS_MEANING: Final = (
 
 
 def _state_of(*observed: Observed) -> RungState:
-    """Combine the halves of one rung's stopper.
+    """Combine the alternate stoppers of one rung (rung 3 now takes three:
+    external anchor, witness, and — waxseal-fg4.45 — ledger).
 
-    Order matters and is not arbitrary: one confirmed half is enough to stop
-    the rung, so PRESENT wins first; otherwise a single unmeasured half is
-    enough to make the whole rung unmeasured, because a run that did not look
-    cannot report an absence it never established.
+    Order matters and is not arbitrary: one confirmed alternate is enough to
+    stop the rung, so PRESENT wins first; otherwise a single unmeasured
+    alternate is enough to make the whole rung unmeasured, because a run
+    that did not look cannot report an absence it never established.
     """
     if any(o.found is True for o in observed):
         return RungState.PRESENT
@@ -219,9 +241,17 @@ def ladder_for(observation: PreflightObservation) -> LadderReading:
         Rung(
             number=3,
             attacker_holds="trail + keyfile + `.anchors`",
-            stopper="external anchor: the TSA / calendar / witness holds its own copy",
-            state=_state_of(observation.external_anchor, observation.witness),
-            detail=f"{observation.external_anchor.detail}; {observation.witness.detail}",
+            stopper=(
+                "external anchor: the TSA / calendar / witness / ledger holds "
+                "its own copy"
+            ),
+            state=_state_of(
+                observation.external_anchor, observation.witness, observation.ledger
+            ),
+            detail=(
+                f"{observation.external_anchor.detail}; {observation.witness.detail}; "
+                f"{observation.ledger.detail}"
+            ),
             needs=_NEEDS_EXTERNAL,
         ),
         Rung(

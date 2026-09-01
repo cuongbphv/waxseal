@@ -34,13 +34,15 @@ def observation(
     external: bool | None = False,
     aggregate: bool | None = False,
     witness: bool | None = None,
+    ledger: bool | None = None,
 ) -> PreflightObservation:
     """An observation with every dimension explicit.
 
     The defaults are the BARE trail: nothing sealed, nothing anchored, and a
     witness that was never contacted (``None``) — which is what a preflight
     run can actually say about a witness, since it opens no network
-    connection.
+    connection. ``ledger`` (waxseal-fg4.45) defaults the same way, for the
+    same reason: preflight opens no network connection to check it either.
     """
     return PreflightObservation(
         seal=Observed(seal, "seal detail"),
@@ -48,6 +50,7 @@ def observation(
         external_anchor=Observed(external, "external detail"),
         aggregate_binding=Observed(aggregate, "aggregate detail"),
         witness=Observed(witness, "witness detail"),
+        ledger=Observed(ledger, "ledger detail"),
     )
 
 
@@ -126,8 +129,30 @@ class TestNotMeasuredIsNotAbsent:
         assert reading.rungs[2].state is RungState.NOT_MEASURED
 
     def test_a_measured_absence_on_every_half_is_absent(self) -> None:
-        reading = ladder_for(observation(seal=True, anchors=True, witness=False))
+        reading = ladder_for(
+            observation(seal=True, anchors=True, witness=False, ledger=False)
+        )
         assert reading.rungs[2].state is RungState.ABSENT
+
+    def test_an_unmeasured_ledger_alone_cannot_make_rung_three_absent(self) -> None:
+        # waxseal-fg4.45: external and witness are both measured absent, but
+        # ledger was never checked this run (--rpc/--liveness not given) —
+        # one unmeasured alternate is still enough to make the whole rung
+        # NOT MEASURED, the same rule the pre-existing witness/external pair
+        # already established above.
+        reading = ladder_for(
+            observation(seal=True, anchors=True, witness=False, ledger=None)
+        )
+        assert reading.rungs[2].state is RungState.NOT_MEASURED
+
+    def test_a_present_ledger_alone_stops_rung_three(self) -> None:
+        # waxseal-fg4.45: neither external nor witness is present, but a
+        # configured, passing ledger check is — rung 3's stopper is PRESENT
+        # from the ledger alone, the same way it already is from witness
+        # alone (test_a_present_half_beats_an_unmeasured_half below).
+        reading = ladder_for(observation(seal=True, anchors=True, ledger=True))
+        assert reading.rungs[2].state is RungState.PRESENT
+        assert reading.stops_at == 3
 
     def test_a_present_half_beats_an_unmeasured_half(self) -> None:
         reading = ladder_for(observation(seal=True, anchors=True, external=True))

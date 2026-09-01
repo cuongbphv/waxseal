@@ -54,6 +54,7 @@ from waxseal.domain.segments import SegmentRead
 from waxseal.domain.separation import (
     SeparationTopology,
     counted_authorities,
+    ledger_shortfall,
     render_counted_authorities,
     render_separation_degree,
     separation_degree,
@@ -957,6 +958,29 @@ def _verify(
         witness_verdicts = _witness_verdicts(log, witnesses)
         observed_witness_consistent = _observed_witness_consistent(witness_verdicts)
 
+    # Ledger (waxseal-fg4.45), measured here for the same reason anchors and
+    # witnesses already are above: `_pin_check` needs THIS run's ledger
+    # result to compare against a declared_topology.ledger, and can only do
+    # that if the check has already run by the time `_pin_check` is called.
+    # F4 originally computed this AFTER `_pin_check` (still true in the
+    # `report` builder below at the time of writing) — printing was
+    # unaffected either way, since `_ledger_check` is idempotent, but the
+    # comparison inside `_pin_check` was structurally unreachable: nothing
+    # had been measured yet for it to read.
+    ledger_check: _Check | None = None
+    observed_ledger_ok: bool | None = None
+    if ledger_liveness is not None or ledger_registry is not None:
+        assert ledger_trail_id is not None  # main() always fills this in
+        ledger_check = _ledger_check(
+            log.entries(),
+            rpc_urls=ledger_rpc_urls,
+            liveness=ledger_liveness,
+            registry=ledger_registry,
+            trail_id=ledger_trail_id,
+            now_fn=now_fn,
+        )
+        observed_ledger_ok = _observed_ledger_ok(ledger_check)
+
     pending_pin: PinState | None = None
     if pin_path is not None:
         assert target is not None  # main() always passes both together
@@ -973,6 +997,7 @@ def _verify(
             declare_expect_anchor_binding=declare_expect_anchor_binding,
             declare_max_anchor_age_s=declare_max_anchor_age_s,
             declare_topology=declare_topology,
+            observed_ledger_ok=observed_ledger_ok,
         )
         print(check.line)
         codes.append(check.exit_code)
@@ -988,16 +1013,11 @@ def _verify(
             print(_witness_line(verdict))
         codes.append(_witness_exit_code(witness_verdicts))
 
-    if ledger_liveness is not None or ledger_registry is not None:
-        assert ledger_trail_id is not None  # main() always fills this in
-        ledger_check = _ledger_check(
-            log.entries(),
-            rpc_urls=ledger_rpc_urls,
-            liveness=ledger_liveness,
-            registry=ledger_registry,
-            trail_id=ledger_trail_id,
-            now_fn=now_fn,
-        )
+    if ledger_check is not None:
+        # Printed here, in the ORIGINAL position, even though it was
+        # computed earlier above: only the computation moved, matching the
+        # anchor_check/witness_verdicts precedent this function already
+        # follows for the same reason.
         print(ledger_check.line)
         codes.append(ledger_check.exit_code)
 
@@ -1586,6 +1606,25 @@ def _observed_witness_consistent(verdicts: list[WitnessVerdict]) -> bool:
     return any(v.status == WITNESS_CONSISTENT for v in verdicts)
 
 
+def _observed_ledger_ok(check: _Check) -> bool:
+    """Whether this run's ledger check (waxseal-fg4.45, F4's
+    ``--rpc``/``--liveness``/``--registry``) corroborated the declared
+    ledger authority: the "observed" half of a declared-vs-observed
+    separation comparison, the ledger dimension's own
+    ``_observed_witness_consistent``. Only ``Verdict.OK`` counts — a
+    delinquent liveness finding, a registry disagreement, AND an
+    unreachable RPC endpoint (``_ledger_check`` can never itself distinguish
+    the last from the first two; all three land on ``Verdict.UNVERIFIABLE``,
+    see that function's docstring) all fold to ``False`` here, the same
+    precedent set for an unreachable-vs-inconsistent witness: neither is a
+    ledger this run actually confirmed agreement with. The caller decides
+    whether this dimension was measured AT ALL this run (``None`` when
+    neither flag was given) — this function is only ever called once that
+    is already known to be true.
+    """
+    return check.verdict is Verdict.OK
+
+
 def _witness_api_key() -> str | None:
     # Same rule as the chain backend: credentials come from the environment,
     # never from argv (where they would land in shell history and `ps`).
@@ -1612,6 +1651,7 @@ def _pin_check(
     declare_expect_anchor_binding: bool = False,
     declare_max_anchor_age_s: int | None = None,
     declare_topology: SeparationTopology | None = None,
+    observed_ledger_ok: bool | None = None,
 ) -> tuple[_Check, PinState | None]:
     """Check the trail against what this verifier last confirmed.
 
@@ -1629,6 +1669,18 @@ def _pin_check(
     below is skipped entirely, the same way an undeclared topology skips it.
     An empty tuple for ``observed_anchor_records`` is a DIFFERENT, meaningful
     value: anchors WERE checked this run, and the sidecar held zero records.
+
+    ``observed_ledger_ok`` (waxseal-fg4.45) is the ledger dimension's own
+    "what THIS run measured" value, the same shape as
+    ``observed_witness_consistent`` and gated the same way at the call site:
+    ``None`` means this run passed neither ``--rpc``/``--liveness`` nor
+    ``--registry``, so the ledger comparison below is skipped entirely, not
+    treated as "ledger not corroborated". ``True`` only when
+    ``_ledger_check``'s verdict was ``Verdict.OK`` this run — delinquent,
+    disagreeing, AND unreachable all fold to ``False`` here, the same
+    precedent ``_observed_witness_consistent`` already sets for an
+    unreachable-vs-inconsistent witness: neither is a ledger this run
+    actually confirmed agreement with.
 
     ``declare_expect_anchor_binding``/``declare_max_anchor_age_s``/
     ``declare_topology`` are what THIS run's CLI flags asked to declare
@@ -1764,18 +1816,18 @@ def _pin_check(
 
     head = checkpoint_for(hashes)
 
-    # The pin matches, but three more declared-vs-observed comparisons can
+    # The pin matches, but four more declared-vs-observed comparisons can
     # still turn this into an exit-2 finding. Checked in this fixed order,
     # anchor_policy_downgrade FIRST, then anchor_staleness, then
-    # separation_shortfall, and documented here because all three land on
-    # _Check/CheckSummary, which carries only one `reason`: when a run
-    # happens to trip more than one at once, this ordering decides which
-    # single reason string surfaces. Not security-critical among the three
-    # (every outcome here is exit 2/unverifiable either way), just a
-    # tiebreak, but anchor_policy_downgrade goes first because it is the
-    # direct F2 finding (SPEC §15 replay-plus-truncate protection silently
-    # stripped) this release's own analysis singles out as the most
-    # consequential exit-2 case.
+    # ledger_shortfall (waxseal-fg4.45), then separation_shortfall, and
+    # documented here because all four land on _Check/CheckSummary, which
+    # carries only one `reason`: when a run happens to trip more than one at
+    # once, this ordering decides which single reason string surfaces. Not
+    # security-critical among the four (every outcome here is exit
+    # 2/unverifiable either way), just a tiebreak, but anchor_policy_downgrade
+    # goes first because it is the direct F2 finding (SPEC §15
+    # replay-plus-truncate protection silently stripped) this release's own
+    # analysis singles out as the most consequential exit-2 case.
     #
     # anchor_policy_downgrade (W5/F2): only compared when the operator asked
     # for the check AND this run actually checked anchors at all: `None`
@@ -1862,6 +1914,41 @@ def _pin_check(
                     expect_anchor_binding=effective_expect_anchor_binding,
                 ),
             )
+
+    # ledger_shortfall (waxseal-fg4.45): only compared when a ledger
+    # authority was actually declared AND this run actually checked it via
+    # --rpc/--liveness/--registry: `None` means "not measured this run",
+    # never "not corroborated" (rule 5) — the same shape anchor_staleness
+    # above uses for its own not-measured-this-run case, and the reason
+    # `ledger_shortfall`/`separation_shortfall` are gated independently
+    # (`domain/separation.py`'s docstring on why they are sibling functions,
+    # not one function with a third parameter).
+    if (
+        stored.declared_topology is not None
+        and observed_ledger_ok is not None
+        and ledger_shortfall(stored.declared_topology, observed_ledger_ok=observed_ledger_ok)
+    ):
+        # Exit 2, never exit 1: a shortfall is "we observed less than
+        # declared": an absence of corroborating evidence for the declared
+        # ledger authority, not evidence the trail itself was tampered with.
+        return (
+            _Check(
+                CheckSummary(ok=True, checked=stored.checkpoint.seq + 1,
+                             reason="ledger_shortfall", unverifiable=True),
+                f"pin ok but ledger_shortfall: declared ledger=true, this run "
+                f"observed ledger_ok={observed_ledger_ok} — NOT evidence of "
+                "tampering, the trail itself still verifies",
+            ),
+            PinState(
+                target=target,
+                chain_id=chain_id,
+                checkpoint=head,
+                pinned_ts=now,
+                declared_topology=effective_declared_topology,
+                max_anchor_age_s=effective_max_anchor_age_s,
+                expect_anchor_binding=effective_expect_anchor_binding,
+            ),
+        )
 
     # A declared topology can still say this run observed LESS independence
     # than the operator claimed. Only compared when a topology was actually
@@ -2005,6 +2092,23 @@ def _report(
         witness_verdicts = tuple(_witness_verdicts(log, witnesses))
         observed_witness_consistent = _observed_witness_consistent(list(witness_verdicts))
 
+    # Ledger (waxseal-fg4.45), measured here — before the pin check, same
+    # reorder as _verify's and for the same reason: _pin_check needs THIS
+    # run's ledger result to compare against a declared_topology.ledger.
+    ledger_check: _Check | None = None
+    observed_ledger_ok: bool | None = None
+    if ledger_liveness is not None or ledger_registry is not None:
+        assert ledger_trail_id is not None  # main() always fills this in
+        ledger_check = _ledger_check(
+            entries,
+            rpc_urls=ledger_rpc_urls,
+            liveness=ledger_liveness,
+            registry=ledger_registry,
+            trail_id=ledger_trail_id,
+            now_fn=now_fn,
+        )
+        observed_ledger_ok = _observed_ledger_ok(ledger_check)
+
     pin: CheckSummary | None = None
     pending_pin: PinState | None = None
     if pin_path is not None:
@@ -2022,6 +2126,7 @@ def _report(
             declare_expect_anchor_binding=declare_expect_anchor_binding,
             declare_max_anchor_age_s=declare_max_anchor_age_s,
             declare_topology=declare_topology,
+            observed_ledger_ok=observed_ledger_ok,
         )
         pin = pin_check.summary
     if trail is not None:
@@ -2043,17 +2148,10 @@ def _report(
     # own derivation, never inferred as 0 or 1 either way.
     declared_topology = pending_pin.declared_topology if pending_pin is not None else None
 
-    ledger_check: _Check | None = None
-    if ledger_liveness is not None or ledger_registry is not None:
-        assert ledger_trail_id is not None  # main() always fills this in
-        ledger_check = _ledger_check(
-            entries,
-            rpc_urls=ledger_rpc_urls,
-            liveness=ledger_liveness,
-            registry=ledger_registry,
-            trail_id=ledger_trail_id,
-            now_fn=now_fn,
-        )
+    # ledger_check itself was already computed above, before the pin check
+    # (waxseal-fg4.45) — only its computation moved, matching `_verify`'s own
+    # anchor_check/witness_verdicts precedent; nothing below this line reads
+    # anything that was not already true before this bead.
 
     report = build_report(
         result,
@@ -2594,6 +2692,12 @@ _PREFLIGHT_WITNESS: Final = (
     "`waxseal verify --witness URL` is what checks one (SPEC 14)"
 )
 
+_PREFLIGHT_LEDGER: Final = (
+    "preflight contacts no ledger: it opens no network connection at all, "
+    "so a ledger is never ABSENT here, only unmeasured; "
+    "`waxseal verify --rpc URL --liveness ADDR` is what checks one (F4)"
+)
+
 
 def _declared_bool(value: bool) -> str:
     # "true"/"false" rather than Python's True/False: this line sits beside
@@ -2946,6 +3050,15 @@ def _preflight(path: str, *, pin_path: Path | None) -> int:
         witness_detail += "; this pin DECLARES witness=true (declared, not measured)"
     witness = Observed(None, witness_detail)
 
+    # ledger (waxseal-fg4.45): same shape as witness immediately above, for
+    # the same reason — preflight opens no network connection, so this is
+    # NOT_MEASURED unconditionally, with a declared-but-not-measured pin
+    # topology riding along in the same line rather than a second one.
+    ledger_detail = _PREFLIGHT_LEDGER
+    if pin.topology is not None and pin.topology.ledger:
+        ledger_detail += "; this pin DECLARES ledger=true (declared, not measured)"
+    ledger = Observed(None, ledger_detail)
+
     print(f"preflight: {trail}")
     print(_preflight_trail_line(trail))
     for line in _preflight_segment_lines(trail):
@@ -2959,6 +3072,7 @@ def _preflight(path: str, *, pin_path: Path | None) -> int:
     for line in anchors.lines:
         print(line)
     print(f"  witness (SPEC 14): {_observed_label(witness)} — {witness.detail}")
+    print(f"  ledger (F4): {_observed_label(ledger)} — {ledger.detail}")
     for line in pin.lines:
         print(line)
     print(_preflight_separate_storage_line(pin.topology))
@@ -2973,6 +3087,7 @@ def _preflight(path: str, *, pin_path: Path | None) -> int:
                 external_anchor=anchors.external,
                 aggregate_binding=anchors.aggregate,
                 witness=witness,
+                ledger=ledger,
             )
         )
     ):
