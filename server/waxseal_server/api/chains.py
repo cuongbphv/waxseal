@@ -28,7 +28,6 @@ from waxseal_server.domain.errors import (
     MalformedEnvelope,
     PreconditionFailed,
 )
-from waxseal_server.domain.settings import rpc_endpoints
 from waxseal_server.domain.identifiers import (
     require_chain_id,
     require_issued_spec,
@@ -44,6 +43,7 @@ from waxseal_server.domain.operators import (
     SCOPE_TRAILS_READ,
     SCOPE_VERIFY_RUN,
 )
+from waxseal_server.domain.settings import rpc_endpoints
 from waxseal_server.runtime.cli import READ_ONLY_COMMANDS
 
 #: Reads offered over a live chain. Every one of these is in

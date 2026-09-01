@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from waxseal_server.__main__ import build, main
 
 
