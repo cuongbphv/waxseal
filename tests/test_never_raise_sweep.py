@@ -80,6 +80,13 @@ import waxseal.domain as _domain_pkg
 from tests.domain.test_properties import _lone_surrogate_char, _text_with_lone_surrogate
 from waxseal.adapters import anchors as _anchors_module
 from waxseal.adapters.anchors import read_anchor_records
+from waxseal.domain.abi import AbiError
+from waxseal.domain.abi import decode_address as abi_decode_address
+from waxseal.domain.abi import decode_bool as abi_decode_bool
+from waxseal.domain.abi import decode_bytes as abi_decode_bytes
+from waxseal.domain.abi import decode_bytes32 as abi_decode_bytes32
+from waxseal.domain.abi import decode_uint as abi_decode_uint
+from waxseal.domain.abi import decode_words as abi_decode_words
 from waxseal.domain.anchoring import verify_consistency, verify_membership
 from waxseal.domain.checkpoint import Checkpoint, verify_checkpoint
 from waxseal.domain.export import (
@@ -88,7 +95,7 @@ from waxseal.domain.export import (
     bundle_from_json,
     verify_proof_bundle,
 )
-from waxseal.domain.fingerprint import fingerprint
+from waxseal.domain.fingerprint import DESCRIPTOR_PREFIX, fingerprint
 from waxseal.domain.handoff import HandoffBinding, binding_holds
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
 from waxseal.domain.ots import decode_receipt as ots_decode_receipt
@@ -102,7 +109,7 @@ from waxseal.domain.pinning import (
     parse_pin_state,
 )
 from waxseal.domain.receipts import ReceiptSidecar, parse_receipt_line, reconcile_receipts
-from waxseal.domain.registry import VersionRegistry
+from waxseal.domain.registry import VersionRegistry, decode_descriptor
 from waxseal.domain.rfc3161 import (
     DerError,
     check_timestamp_resp,
@@ -176,6 +183,12 @@ def discover_entry_points() -> dict[str, object]:
 # catch drift in EITHER direction -- see module docstring.
 FUZZED_ENTRY_POINTS: frozenset[str] = frozenset(
     {
+        "waxseal.domain.abi.decode_address",
+        "waxseal.domain.abi.decode_bool",
+        "waxseal.domain.abi.decode_bytes",
+        "waxseal.domain.abi.decode_bytes32",
+        "waxseal.domain.abi.decode_uint",
+        "waxseal.domain.abi.decode_words",
         "waxseal.domain.anchoring.verify_consistency",
         "waxseal.domain.anchoring.verify_membership",
         "waxseal.domain.checkpoint.verify_checkpoint",
@@ -199,6 +212,7 @@ FUZZED_ENTRY_POINTS: frozenset[str] = frozenset(
         "waxseal.domain.verify.verify_chain",
         "waxseal.domain.witnessing.check_witnessed",
         "waxseal.domain.receipts.parse_receipt_line",
+        "waxseal.domain.registry.decode_descriptor",
         "waxseal.adapters.anchors.read_anchor_records",
     }
 )
@@ -891,3 +905,80 @@ class TestParseReceiptLineNeverRaises:
             ),
         )
         reconcile_receipts(entry_hashes, sidecar)
+
+
+# --------------------------------------------------------------------------
+# domain/abi.py -- an ABI return is remote input. It arrives from whichever
+# RPC endpoint answered, which under this project's own threat model is not
+# assumed honest: an eclipsed client is talking to the attacker.
+# --------------------------------------------------------------------------
+
+_ABI_BYTES = st.one_of(
+    st.binary(max_size=200),
+    st.binary(min_size=32, max_size=32),
+    st.builds(lambda n: b"\x00" * n, st.integers(0, 128)),
+)
+
+
+class TestAbiDecodersNeverRaiseUnexpectedly:
+    """Each decoder documents exactly one failure type, ``AbiError``.
+
+    Anything else escaping -- an ``IndexError`` off a slice, an
+    ``OverflowError`` off a declared length -- is malformed input reaching
+    un-hardened code, which is the bug this sweep exists to find.
+    """
+
+    @_FUZZ_SETTINGS
+    @given(data=_ABI_BYTES)
+    def test_decode_words(self, data: bytes) -> None:
+        with contextlib.suppress(AbiError):
+            abi_decode_words(data)
+
+    @_FUZZ_SETTINGS
+    @given(data=_ABI_BYTES)
+    def test_decode_uint(self, data: bytes) -> None:
+        with contextlib.suppress(AbiError):
+            abi_decode_uint(data)
+
+    @_FUZZ_SETTINGS
+    @given(data=_ABI_BYTES)
+    def test_decode_bool(self, data: bytes) -> None:
+        with contextlib.suppress(AbiError):
+            abi_decode_bool(data)
+
+    @_FUZZ_SETTINGS
+    @given(data=_ABI_BYTES)
+    def test_decode_address(self, data: bytes) -> None:
+        with contextlib.suppress(AbiError):
+            abi_decode_address(data)
+
+    @_FUZZ_SETTINGS
+    @given(data=_ABI_BYTES)
+    def test_decode_bytes32(self, data: bytes) -> None:
+        with contextlib.suppress(AbiError):
+            abi_decode_bytes32(data)
+
+    @_FUZZ_SETTINGS
+    @given(data=_ABI_BYTES, index=st.integers(-4, 8))
+    def test_decode_bytes(self, data: bytes, index: int) -> None:
+        with contextlib.suppress(AbiError):
+            abi_decode_bytes(data, index=index)
+
+
+# --------------------------------------------------------------------------
+# domain/registry.py -- a descriptor read off a public contract that anyone
+# can write to. It is RENDERED to an operator, never turned into a verdict,
+# and it must not be able to take a verify down on its way there.
+# --------------------------------------------------------------------------
+
+
+class TestDecodeDescriptorNeverRaises:
+    @_FUZZ_SETTINGS
+    @given(
+        raw=st.one_of(
+            st.binary(max_size=200),
+            st.builds(lambda body: DESCRIPTOR_PREFIX + body, st.binary(max_size=200)),
+        )
+    )
+    def test_never_raises(self, raw: bytes) -> None:
+        decode_descriptor(raw)
