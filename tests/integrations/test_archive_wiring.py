@@ -208,7 +208,8 @@ def drive(
         # test below leaves it alone.
         monkeypatch.setattr(module, "DEFAULT_MAX_SEGMENT_BYTES", TINY)
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(event_for(name))))
-    return module.main()
+    exit_code: int = module.main()
+    return exit_code
 
 
 def rotate(
