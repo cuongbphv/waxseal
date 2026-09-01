@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib
 import sys
 import types
+from collections.abc import Iterator
 
 import pytest
 
@@ -56,29 +57,35 @@ class _ClientWithKeyInRepr:
 
 
 def _stub_host_frameworks(monkeypatch: pytest.MonkeyPatch) -> None:
+    # setattr(), not `events.BaseEventListener = ...`: types.ModuleType has no
+    # declared attributes of its own, so a plain dot-assignment is exactly
+    # the attr-defined error mypy exists to catch -- setattr is the same
+    # runtime effect without pretending the fake module is statically typed.
     events = types.ModuleType("crewai.events")
-    events.BaseEventListener = type("BaseEventListener", (), {})
+    setattr(events, "BaseEventListener", type("BaseEventListener", (), {}))
     for name in _CREWAI_EVENT_NAMES:
         setattr(events, name, type(name, (), {}))
     crewai = types.ModuleType("crewai")
-    crewai.events = events
+    setattr(crewai, "events", events)
     monkeypatch.setitem(sys.modules, "crewai", crewai)
     monkeypatch.setitem(sys.modules, "crewai.events", events)
 
     callbacks = types.ModuleType("langchain_core.callbacks")
-    callbacks.BaseCallbackHandler = type("BaseCallbackHandler", (), {})
+    setattr(callbacks, "BaseCallbackHandler", type("BaseCallbackHandler", (), {}))
     langchain_core = types.ModuleType("langchain_core")
-    langchain_core.callbacks = callbacks
+    setattr(langchain_core, "callbacks", callbacks)
     monkeypatch.setitem(sys.modules, "langchain_core", langchain_core)
     monkeypatch.setitem(sys.modules, "langchain_core.callbacks", callbacks)
 
     agents = types.ModuleType("agents")
-    agents.RunHooks = type("RunHooks", (), {})
+    setattr(agents, "RunHooks", type("RunHooks", (), {}))
     monkeypatch.setitem(sys.modules, "agents", agents)
 
 
 @pytest.fixture(params=REDACTING_MODULES)
-def integration(request, monkeypatch: pytest.MonkeyPatch):
+def integration(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[types.ModuleType]:
     _stub_host_frameworks(monkeypatch)
     sys.modules.pop(request.param, None)
     module = importlib.import_module(request.param)
@@ -87,26 +94,26 @@ def integration(request, monkeypatch: pytest.MonkeyPatch):
 
 
 class TestScalarsKeepTheirIdentity:
-    def test_none_is_not_folded_to_zero_or_empty_string(self, integration) -> None:
+    def test_none_is_not_folded_to_zero_or_empty_string(self, integration: types.ModuleType) -> None:
         # Rule 5: None ≠ 0. "the host sent no value" and "the host sent 0"
         # must stay two different things once they are on the chain.
         assert integration._sanitize(None) is None
         assert integration._sanitize(0) == 0
         assert integration._sanitize(0) is not None
 
-    def test_booleans_are_not_flattened_into_numbers(self, integration) -> None:
+    def test_booleans_are_not_flattened_into_numbers(self, integration: types.ModuleType) -> None:
         # from_cache=False and from_cache=0 read the same to a careless
         # sanitizer and differently to anyone auditing the trail.
         assert integration._sanitize(False) is False
         assert integration._sanitize(True) is True
 
-    def test_numbers_pass_through_unchanged(self, integration) -> None:
+    def test_numbers_pass_through_unchanged(self, integration: types.ModuleType) -> None:
         assert integration._sanitize(12) == 12
         assert integration._sanitize(3.5) == 3.5
 
 
 class TestSequencesAreWalkedNotStringified:
-    def test_secret_nested_in_a_list_is_redacted(self, integration) -> None:
+    def test_secret_nested_in_a_list_is_redacted(self, integration: types.ModuleType) -> None:
         # Redact-before-hash applies at every depth: an argv list is the
         # most ordinary place an agent puts an exported key.
         out = integration._sanitize(["bash", "-c", f"export OPENAI_API_KEY={SECRET}"])
@@ -114,7 +121,7 @@ class TestSequencesAreWalkedNotStringified:
         assert SECRET not in str(out)
         assert REDACTED in out[2]
 
-    def test_tuple_contents_are_walked_and_land_as_a_json_array(self, integration) -> None:
+    def test_tuple_contents_are_walked_and_land_as_a_json_array(self, integration: types.ModuleType) -> None:
         # Without the sequence branch a tuple falls to the repr catch-all and
         # the whole argv becomes one opaque string in the payload.
         out = integration._sanitize(("bash", f"--token={SECRET}"))
@@ -122,7 +129,7 @@ class TestSequencesAreWalkedNotStringified:
         assert out[0] == "bash"
         assert SECRET not in out[1]
 
-    def test_nested_containers_are_walked_to_the_bottom(self, integration) -> None:
+    def test_nested_containers_are_walked_to_the_bottom(self, integration: types.ModuleType) -> None:
         out = integration._sanitize(
             {"steps": [{"cmd": f"curl -H 'Authorization: Bearer {SECRET}'"}]}
         )
@@ -130,18 +137,20 @@ class TestSequencesAreWalkedNotStringified:
 
 
 class TestObjectsWithNoJsonForm:
-    def test_repr_fallback_is_redacted_before_it_can_land(self, integration) -> None:
+    def test_repr_fallback_is_redacted_before_it_can_land(self, integration: types.ModuleType) -> None:
         out = integration._sanitize(_ClientWithKeyInRepr())
         assert SECRET not in out
         assert REDACTED in out
 
-    def test_an_arbitrary_object_never_raises(self, integration) -> None:
+    def test_an_arbitrary_object_never_raises(self, integration: types.ModuleType) -> None:
         # The observer runs inside the host's call path; a TypeError here
         # would surface to the user as the host failing, not the trail.
         assert isinstance(integration._sanitize(object()), str)
 
-    def test_oversized_repr_is_clipped_with_a_visible_marker(self, integration) -> None:
-        limit = integration.MAX_FIELD_CHARS
+    def test_oversized_repr_is_clipped_with_a_visible_marker(
+        self, integration: types.ModuleType
+    ) -> None:
+        limit: int = integration.MAX_FIELD_CHARS
 
         class _Huge:
             def __repr__(self) -> str:
