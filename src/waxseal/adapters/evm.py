@@ -77,6 +77,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import operator
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -403,13 +404,29 @@ class EvmLedgerReader:
         )
         return _nonempty(f"{url}: {what}", _hex_bytes(f"{url}: {what}", result))
 
-    def _agree(self, what: str, ask: Callable[[str], T]) -> T:
+    def _agree(
+        self,
+        what: str,
+        ask: Callable[[str], T],
+        *,
+        agree: Callable[[T, T], bool] = operator.eq,
+    ) -> T:
         """Ask every endpoint; return the answer only if they agree.
 
         Disagreement is checked BEFORE the quorum, because a measured
         conflict outranks a partial silence: two endpoints contradicting each
         other is a finding even when a third was unreachable, and reporting
         the outage instead would lose it.
+
+        `agree` defaults to plain equality, which is exactly right for every
+        caller except `latest_checkpoint` (fg4.42: `OnChainCheckpoint.block_time`
+        is a miner-influenced value domain/liveness.py's own docstring calls
+        immaterial, so two honest endpoints must not be forced through exact
+        equality on it). Audited before adding this parameter: `deadline_s`,
+        `registry_lookup`, `bond_status`, and `on_chain_delinquency` all want
+        their answers compared exactly, so the default keeps every one of
+        them unchanged rather than asking them to pass a comparator they
+        have no use for.
         """
         answers: list[tuple[str, T]] = []
         silences: list[str] = []
@@ -419,7 +436,7 @@ class EvmLedgerReader:
             except LedgerUnreachable as exc:
                 silences.append(str(exc))
         for (url_a, value_a), (url_b, value_b) in itertools.combinations(answers, 2):
-            if value_a != value_b:
+            if not agree(value_a, value_b):
                 raise LedgerDisagreement(
                     f"{what}: endpoints disagree — {url_a} answered {value_a!r}, "
                     f"{url_b} answered {value_b!r}"
@@ -429,6 +446,14 @@ class EvmLedgerReader:
                 f"{what}: {len(answers)} of {len(self._urls)} endpoints answered, below the "
                 f"{MIN_ENDPOINTS} an agreement needs: {'; '.join(silences)}"
             )
+        # Whichever endpoint answered first, unconditionally — not min/max.
+        # For `latest_checkpoint` this decides what `block_time` comes back
+        # when the two agreed only under `_checkpoints_agree`'s tolerance:
+        # since that field is already documented as immaterial at the
+        # hour-scale granularity liveness deadlines use, which of two
+        # near-identical timestamps is returned cannot change any decision,
+        # so there is nothing behind picking a tie-break rule more elaborate
+        # than "first".
         return answers[0][1]
 
     # -------------------------------------------------------- LedgerReader
@@ -458,7 +483,7 @@ class EvmLedgerReader:
                 block_time=decode_uint(words[3]),
             )
 
-        return self._agree(f"latest_checkpoint({chain_id})", ask)
+        return self._agree(f"latest_checkpoint({chain_id})", ask, agree=_checkpoints_agree)
 
     def deadline_s(self, chain_id: str) -> int | None:
         address = self._address("liveness")
@@ -603,6 +628,32 @@ def _words(what: str, raw: bytes, expected: int) -> tuple[bytes, ...]:
             "reading a contract whose return shape it does not know"
         )
     return words
+
+
+def _checkpoints_agree(
+    a: OnChainCheckpoint | None, b: OnChainCheckpoint | None
+) -> bool:
+    """`_agree`'s comparator for `latest_checkpoint` (fg4.42).
+
+    `OnChainCheckpoint.block_time`'s own docstring (domain/liveness.py) calls
+    it "a miner-influenced value with a tolerance of seconds, which is
+    immaterial against deadlines measured in hours" — so it must not
+    participate in deciding whether two RPC endpoints agree.
+    `chain_id`/`seq`/`entry_hash`/`root` are NOT tolerant fields; a
+    difference in any of those is compared exactly and IS a real
+    disagreement. When either side is a measured absence (`None`), plain
+    `==` already does the right thing (`None == None` agrees, `None` next
+    to a checkpoint does not), so it is only the two-checkpoint case that
+    needs the field-by-field comparison below.
+    """
+    if isinstance(a, OnChainCheckpoint) and isinstance(b, OnChainCheckpoint):
+        return (a.chain_id, a.seq, a.entry_hash, a.root) == (
+            b.chain_id,
+            b.seq,
+            b.entry_hash,
+            b.root,
+        )
+    return a == b
 
 
 class EvmLedgerSink:

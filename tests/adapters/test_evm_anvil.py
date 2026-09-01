@@ -136,6 +136,37 @@ def _mine(url: str, blocks: int = 1) -> None:
     _rpc(url, "anvil_mine", [hex(blocks)])
 
 
+def _block_timestamp(url: str) -> int:
+    return int(_rpc(url, "eth_getBlockByNumber", ["latest", False])["result"]["timestamp"], 16)
+
+
+def _skew_next_block(url: str, reference_ts: int, skew_s: int) -> None:
+    """fg4.42: push one node's NEXT mined block at least `skew_s` seconds
+    past `reference_ts`, without `time.sleep` (CLAUDE.md rule 8 — a test
+    must never pass by sleeping; the skew must be a controlled measurement,
+    not a race against the wall clock). Ganache-compatible
+    `evm_setNextBlockTimestamp` only affects the ONE block mined right after
+    this call, so the caller must not interleave another transaction before
+    the one it means to skew."""
+    current = _block_timestamp(url)
+    _rpc(url, "evm_setNextBlockTimestamp", [max(current, reference_ts) + skew_s])
+
+
+def _last_seen_block_time(chain: Deployment, url: str, trail: str) -> int:
+    out = _run(
+        f"{FOUNDRY_BIN}/cast",
+        "call",
+        "--rpc-url",
+        url,
+        str(chain.contracts.liveness),
+        "lastSeen(bytes32)(uint64,bytes32,bytes32,uint64)",
+        "0x" + trail_id_for(trail).hex(),
+    ).splitlines()
+    # cast decorates a large uint with a `[1.788e9]` magnitude annotation;
+    # the exact decimal is always the first whitespace-separated token.
+    return int(out[3].strip().split()[0])
+
+
 def _cast_send(url: str, to: str, calldata: bytes) -> None:
     """Send one transaction WITHOUT the adapter, and wait for it as `cast`
     does. Used only where the sink's own finality wait would perturb what the
@@ -359,6 +390,43 @@ class TestAgreementAcrossTwoRealChains:
         assert found is not None
         assert (found.seq, found.entry_hash, found.root) == (7, "ab" * 32, "cd" * 32)
         assert found.block_time > 0
+
+    def test_a_couple_seconds_of_real_clock_skew_between_the_two_anchors_still_agrees(
+        self, chain: Deployment
+    ) -> None:
+        """fg4.42: the SAME checkpoint, anchored by two independent
+        transactions on two independent chains, whose block clocks are
+        forced two real seconds apart (`_skew_next_block`, never
+        `time.sleep`). Before the fix this reproduced fg4.41's flake exactly:
+        `_agree` compared `OnChainCheckpoint` with plain `!=`, `block_time`
+        included, and raised a false `LedgerDisagreement` between two honest
+        nodes. `OnChainCheckpoint.block_time`'s own docstring
+        (domain/liveness.py) calls this tolerance immaterial; `_agree`'s
+        `_checkpoints_agree` comparator (adapters/evm.py) now excludes it,
+        and this is the real-chain proof that the adapter honours that."""
+        trail = "waxseal-fg4-42-clock-skew"
+        checkpoint = Checkpoint(seq=1, entry_hash="11" * 32, root="22" * 32)
+        url_a, url_b = chain.urls
+
+        sink_a = _sink(chain, url_a)
+        sink_a.register_trail(trail, DEV_ADDRESS, DEADLINE_S)
+        EvmAnchorSink(sink_a, trail, UrlCarryingSigner(url_a)).anchor(checkpoint)
+        ts_a = _last_seen_block_time(chain, url_a, trail)
+
+        sink_b = _sink(chain, url_b)
+        sink_b.register_trail(trail, DEV_ADDRESS, DEADLINE_S)
+        _skew_next_block(url_b, ts_a, skew_s=2)  # right before the submit tx, on purpose
+        EvmAnchorSink(sink_b, trail, UrlCarryingSigner(url_b)).anchor(checkpoint)
+        ts_b = _last_seen_block_time(chain, url_b, trail)
+
+        # The skew this test exists to survive actually happened — otherwise
+        # this would just be TestAgreementAcrossTwoRealChains's first test
+        # again, and would prove nothing about fg4.42.
+        assert ts_b - ts_a >= 2
+
+        found = _reader(chain).latest_checkpoint(trail)
+        assert found is not None
+        assert (found.seq, found.entry_hash, found.root) == (1, "11" * 32, "22" * 32)
 
     def test_the_submit_landing_proves_python_and_solidity_sign_the_same_bytes(
         self, chain: Deployment
