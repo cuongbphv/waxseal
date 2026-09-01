@@ -101,6 +101,7 @@ from waxseal.domain.pinning import (
     check_pin_target,
     parse_pin_state,
 )
+from waxseal.domain.receipts import ReceiptSidecar, parse_receipt_line, reconcile_receipts
 from waxseal.domain.registry import VersionRegistry
 from waxseal.domain.rfc3161 import (
     DerError,
@@ -197,6 +198,7 @@ FUZZED_ENTRY_POINTS: frozenset[str] = frozenset(
         "waxseal.domain.sealing.verify_seals",
         "waxseal.domain.verify.verify_chain",
         "waxseal.domain.witnessing.check_witnessed",
+        "waxseal.domain.receipts.parse_receipt_line",
         "waxseal.adapters.anchors.read_anchor_records",
     }
 )
@@ -836,3 +838,56 @@ class TestReadAnchorRecordsOnlyRaisesDocumentedTypes:
             sidecar.write_text("\n".join(lines) + "\n", encoding="utf-8")
             with contextlib.suppress(ValueError, KeyError, TypeError):
                 read_anchor_records(trail)
+
+
+# --------------------------------------------------------------------------
+# domain/receipts.py
+# --------------------------------------------------------------------------
+
+
+class TestParseReceiptLineNeverRaises:
+    """Documented contract (domain/receipts.py): a verdict, never a crash.
+
+    Nothing is suppressed here, unlike ``read_anchor_records`` above: the
+    `.receipts` reader documents NO raising exception at all, because SPEC.md
+    section 19 assigns a verdict to every unreadable line (a break for this
+    project's own bytes, unverifiable for a newer version) and a raise would
+    deny the caller the very distinction the table exists to make.
+
+    ``reconcile_receipts`` is fuzzed through the same examples: it consumes
+    whatever the parser emitted, so the two are one hostile-input path."""
+
+    @staticmethod
+    @st.composite
+    def _hostile_receipt_line(draw: st.DrawFn) -> str:
+        obj = {
+            "v": draw(st.one_of(st.integers(0, 3), _JSON_HOSTILE_VALUE)),
+            "seq": draw(_JSON_HOSTILE_VALUE),
+            "entry_hash": draw(_JSON_HOSTILE_VALUE),
+            "receipt_seq": draw(_JSON_HOSTILE_VALUE),
+            "receipt_head": draw(_JSON_HOSTILE_VALUE),
+            "source": draw(_JSON_HOSTILE_VALUE),
+            "ts": draw(_JSON_HOSTILE_VALUE),
+        }
+        try:
+            return json.dumps(obj)
+        except (TypeError, ValueError):
+            return '{"v": 999}'
+
+    @_FUZZ_SETTINGS
+    @given(
+        lines=st.lists(
+            st.one_of(_hostile_receipt_line(), st.text(max_size=100)), max_size=5
+        ),
+        entry_hashes=st.lists(_HEXLIKE, max_size=4),
+    )
+    def test_hostile_records_become_verdicts_never_exceptions(
+        self, lines: list[str], entry_hashes: list[str]
+    ) -> None:
+        sidecar = ReceiptSidecar(
+            present=True,
+            lines=tuple(
+                parse_receipt_line(line, line_no=i) for i, line in enumerate(lines, start=1)
+            ),
+        )
+        reconcile_receipts(entry_hashes, sidecar)

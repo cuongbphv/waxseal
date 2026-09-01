@@ -720,6 +720,10 @@ def _verify(
             print(_witness_line(verdict))
         codes.append(_witness_exit_code(witness_verdicts))
 
+    receipts_check = _receipts_check(log, trail)
+    print(receipts_check.line)
+    codes.append(receipts_check.exit_code)
+
     # τ (waxseal-mfi, closing conformance.md gap G1): printed unconditionally,
     # never only when --pin is given: "not declared" must be as loud as any
     # other rule-5 "not measured" state, not something an operator only sees
@@ -766,6 +770,109 @@ def _print_drop_count(trail: Path | None) -> None:
     count = read_drop_count(trail)
     if count is not None:
         print(f"dropped_writes >= {count} (measured minimum, from {trail}.drops)")
+
+
+# Rule 5, one sidecar over from `.drops`: no `.receipts` file at all is "not
+# recorded", never "checked, found nothing" and never a failure. Printed on
+# every run, including the runs where nothing was recorded, because an
+# absence an operator only sees by asking is an absence they will not see.
+_RECEIPTS_ABSENT_LINE: Final = (
+    "receipts: not recorded (no .receipts sidecar — per-append acknowledgment "
+    "was never measured here, which is NOT the same as measured and clean)"
+)
+
+# A summary alone cannot carry absent-vs-empty: both are `ok=True, checked=0`.
+# The reason string and the line above are what keep them apart, so the two are
+# defined once, together, instead of rebuilt at each return.
+_RECEIPTS_NOT_RECORDED: Final = CheckSummary(
+    ok=True, checked=0, reason="no_receipts_recorded"
+)
+
+# SPEC.md section 19's honest limit, printed rather than filed in a doc: the
+# sidecar is as attacker-writable as the trail beside it, so this check is
+# worth exactly what it defeats and no more.
+_RECEIPTS_LIMIT_NOTE: Final = (
+    "the sidecar is as attacker-writable as the trail beside it — a rewrite "
+    "that curates BOTH passes this check; only the server's own receipt chain "
+    "(REMOTE.md section 10) catches that"
+)
+
+
+def _receipts_check(log: AuditLog, trail: Path | None) -> _Check:
+    """Reconcile the `.receipts` sidecar against the trail as it stands now.
+
+    A receipt is a second authority's write-time acknowledgment that entry
+    `seq` carried `entry_hash`, so an edit to any acknowledged entry is
+    contradicted from the very next append onward rather than at the next
+    checkpoint — the rewrite window falls from the anchor cadence to one entry.
+
+    Not gated behind a flag, unlike `--anchors`: there is nothing external to
+    contact and nothing to pay for, and the absent case has to print anyway.
+    """
+    from waxseal.adapters.receipts import read_receipts, receipts_path
+    from waxseal.domain.receipts import ReceiptRecord, reconcile_receipts
+
+    if trail is None:
+        # A URL target has no local sidecar location at all, the same state as
+        # never having recorded one.
+        return _Check(_RECEIPTS_NOT_RECORDED, _RECEIPTS_ABSENT_LINE)
+    try:
+        sidecar = read_receipts(trail)
+    except OSError as e:
+        # An environment fact, not a record-level finding: this build has no
+        # coverage here, which is exit 2 and a label, never tampering.
+        return _Check(
+            CheckSummary(ok=True, checked=0, reason=None, unverifiable=True),
+            f"receipts: {receipts_path(trail)} could not be read ({e}) — "
+            "unverifiable, NOT evidence of tampering",
+        )
+    if not sidecar.present:
+        return _Check(_RECEIPTS_NOT_RECORDED, _RECEIPTS_ABSENT_LINE)
+
+    # entry_hashes() materializes the whole trail, so it is only paid for when
+    # there is at least one readable record to compare against.
+    hashes = (
+        log.entry_hashes()
+        if any(isinstance(line, ReceiptRecord) for line in sidecar.lines)
+        else []
+    )
+    result = reconcile_receipts(hashes, sidecar)
+    notes: list[str] = []
+    if result.unreadable_versions:
+        versions = ", ".join(sorted(set(result.unreadable_versions)))
+        notes.append(
+            f"{len(result.unreadable_versions)} record(s) in an unreadable format "
+            f"version ({versions}) — unverifiable by name, NOT evidence of tampering"
+        )
+    if result.verdict is Verdict.BROKEN:
+        where = (
+            f"seq={result.broken_seq}"
+            if result.broken_seq is not None
+            # A malformed record names no trustworthy seq: the field that would
+            # have named one is the field that failed to parse.
+            else f"line {result.broken_line}"
+        )
+        line = f"RECEIPTS BROKEN at {where}: {result.reason}"
+    elif result.checked:
+        line = f"receipts ok (checked={result.checked}, latest=seq {result.latest_seq})"
+        notes.append(_RECEIPTS_LIMIT_NOTE)
+    else:
+        line = (
+            "receipts: sidecar present, 0 record(s) — checked, found nothing "
+            "(NOT the same as no sidecar at all)"
+        )
+    for note in notes:
+        line += f"\n  note: {note}"
+    return _Check(
+        CheckSummary(
+            ok=result.verdict is not Verdict.BROKEN,
+            checked=result.checked,
+            reason=result.reason,
+            unverifiable=result.verdict is Verdict.UNVERIFIABLE,
+            notes=tuple(notes),
+        ),
+        line,
+    )
 
 
 def _anchor_check(log: AuditLog, trail: Path, *, tsa_ca_file: Path | None = None) -> _Check:

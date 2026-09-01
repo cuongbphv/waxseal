@@ -14,6 +14,16 @@ one anchoring already gives local backends: anchor the head independently
 rather than
 trusting the server's own history as the last word.
 
+Per-append receipts (SPEC.md section 19, REMOTE.md section 10): when the server
+returns `receipt_seq`/`receipt_head` on a `201` and the caller named a local
+trail to keep them beside, each acknowledgment is filed in a `.receipts`
+sidecar. That is corroboration, never the evidence itself — the entry is
+already durable when the `201` arrives, so a sidecar that cannot be written is
+labelled and moved past, never allowed to fail or retry an append that
+succeeded. It shrinks the rewrite window from the anchor cadence to one entry,
+and no further: a rewrite that curates BOTH the trail and the sidecar passes
+this check, and only the server's own receipt chain catches that.
+
 CAS retry mirrors s3.py's conditional-write precedent: the server checks
 (seq, prev_hash) atomically server-side; a 409 means another writer won the
 race, so the client re-reads /head and rebuilds. It never forges ahead on a
@@ -26,12 +36,17 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Final
 
 from waxseal.adapters._envelope import from_obj, to_obj
+from waxseal.adapters.receipts import append_receipt
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry
+from waxseal.domain.receipts import RECEIPT_HEX64
 
 _MAX_RACE_RETRIES = 32  # s3.py's own ceiling: same rationale, not a new number
 # Pagination has no natural retry ceiling like a CAS race does, but an
@@ -58,6 +73,46 @@ class RemoteResponse:
 
 
 Transport = Callable[[RemoteRequest], RemoteResponse]
+
+
+def _warn_receipt(message: str) -> None:
+    warnings.warn(f"receipt sidecar: {message}", RuntimeWarning, stacklevel=3)
+
+
+def _receipt_fields(body: bytes) -> tuple[tuple[int, str] | None, str | None]:
+    """Read `(receipt_seq, receipt_head)` out of a `201` body.
+
+    Returns ``(fields, complaint)``. Both None is the quiet case REMOTE.md
+    section 10 requires: a server that does not implement receipts is doing its
+    job, not degrading. A complaint is anything this client cannot use, and it
+    is never written: a half-understood acknowledgment stored in THIS project's
+    own format would surface later as `malformed_receipt_record` — a break
+    manufactured out of a server's bad field, with no tampering anywhere.
+    """
+    if not body.strip():
+        return None, None
+    try:
+        obj = json.loads(body)
+    except ValueError:
+        return None, "the 201 body is not JSON"
+    if not isinstance(obj, dict):
+        return None, f"the 201 body is not a JSON object (got {type(obj).__name__})"
+    if "receipt_seq" not in obj and "receipt_head" not in obj:
+        return None, None
+    if "receipt_seq" not in obj or "receipt_head" not in obj:
+        # REMOTE.md section 10: both or neither. One alone names a position in
+        # a chain with no head, or a head at no position.
+        return None, "the 201 body carries only one of receipt_seq/receipt_head"
+    receipt_seq, receipt_head = obj["receipt_seq"], obj["receipt_head"]
+    if not isinstance(receipt_seq, int) or isinstance(receipt_seq, bool) or receipt_seq < 0:
+        return None, f"receipt_seq is not a non-negative integer ({receipt_seq!r})"
+    if (
+        not isinstance(receipt_head, str)
+        or len(receipt_head) != 64
+        or not set(receipt_head) <= RECEIPT_HEX64
+    ):
+        return None, f"receipt_head is not 64 lowercase hex characters ({receipt_head!r})"
+    return (receipt_seq, receipt_head), None
 
 
 class RemoteError(RuntimeError):
@@ -125,6 +180,10 @@ def urllib_transport(*, timeout: float = 10.0) -> Transport:
     return transport
 
 
+def _default_now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
 class RemoteBackend:
     def __init__(
         self,
@@ -134,11 +193,20 @@ class RemoteBackend:
         api_key: str | None = None,
         chain_id: str = "default",
         timeout: float = 10.0,
+        receipts_trail: Path | str | None = None,
+        now_fn: Callable[[], str] | None = None,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._transport = transport or urllib_transport(timeout=timeout)
         self._api_key = api_key
         self._chain_id = chain_id
+        # The trail path the `.receipts` sidecar is named after, exactly as
+        # `.anchors` is named after the trail it anchors. None means the
+        # caller named nowhere to keep acknowledgments, which is "not
+        # recorded" and never an error: a receipt is corroboration, and this
+        # backend's chain lives server-side either way.
+        self._receipts_trail = None if receipts_trail is None else Path(receipts_trail)
+        self._now = now_fn or _default_now
 
     def _url(self, path: str) -> str:
         # chain_id is caller-supplied (AuditLog.open(chain_id=...)), so quote it
@@ -173,6 +241,7 @@ class RemoteBackend:
                 )
             )
             if resp.status == 201:
+                self._record_receipt(entry, resp.body)
                 return entry
             if resp.status == 409:
                 continue  # lost the race server-side: re-read /head, rebuild
@@ -181,6 +250,42 @@ class RemoteBackend:
             f"append lost the server-side race {_MAX_RACE_RETRIES} times; "
             "writer contention is pathological"
         )
+
+    # -- per-append receipts (SPEC.md section 19) -------------------------------
+    def _record_receipt(self, entry: Entry, body: bytes) -> None:
+        """File the server's acknowledgment beside the trail, best-effort.
+
+        Nothing here may raise: the entry is already durable server-side when
+        this runs, so a failure that propagated would report a persisted entry
+        as a dropped write (the accounting error `AttestationFailure` exists to
+        prevent one layer up). Every degradation is warned instead of
+        swallowed — rule 6 — because a sidecar that silently stopped recording
+        looks exactly like a server that never issued a receipt.
+        """
+        if self._receipts_trail is None:
+            return
+        try:
+            fields, complaint = _receipt_fields(body)
+            if complaint is not None:
+                _warn_receipt(f"{complaint}; nothing recorded for seq={entry.header.seq}")
+                return
+            if fields is None:
+                return
+            receipt_seq, receipt_head = fields
+            append_receipt(
+                self._receipts_trail,
+                seq=entry.header.seq,
+                entry_hash=entry.entry_hash,
+                receipt_seq=receipt_seq,
+                receipt_head=receipt_head,
+                source=self._base,
+                ts=self._now(),
+            )
+        except Exception as e:
+            # Deliberately broader than OSError, and for drops.py's reason: a
+            # broken now_fn is a failed record exactly like a full disk, not a
+            # different class of problem this path is allowed to raise on.
+            _warn_receipt(f"could not record the acknowledgment for seq={entry.header.seq}: {e!r}")
 
     def entries(self) -> Iterator[Entry]:
         cursor: str | None = None
