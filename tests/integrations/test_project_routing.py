@@ -16,11 +16,14 @@ import json
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from waxseal import AuditLog
+from waxseal.domain.header import Entry
 from waxseal.domain.segments import project_slug
 from waxseal.sources.rotation import DEFAULT_MAX_SEGMENT_BYTES
 
@@ -38,17 +41,20 @@ PROJECT = "/work/some project"
 
 
 def event_for(hook: str, cwd: str | None = PROJECT) -> dict[str, object]:
-    base: dict[str, object] = {
+    events: dict[str, dict[str, object]] = {
         "claude_code": {"hook_event_name": "PreToolUse", "tool_name": "Bash"},
         "codex": {"hook_event_name": "PreToolUse", "tool_name": "shell"},
         "cursor": {"hook_event_name": "beforeShellExecution", "command": "ls"},
-    }[hook]
+    }
+    base: dict[str, object] = events[hook]
     if cwd is not None:
         base = {**base, "cwd": cwd}
     return base
 
 
-def run(hook: str, event: dict[str, object] | str, home: Path, **env_extra: str):
+def run(
+    hook: str, event: dict[str, object] | str, home: Path, **env_extra: str
+) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if k not in ("WAXSEAL_TRAIL", "CODEX_HOME")}
     env.update({"PYTHONPATH": SRC, "HOME": str(home)})
     env.update(env_extra)
@@ -109,7 +115,7 @@ class TestRoutedByProject:
         ).exists()
 
     def test_cursor_falls_back_to_workspace_roots(self, tmp_path: Path) -> None:
-        event = {
+        event: dict[str, object] = {
             "hook_event_name": "beforeShellExecution",
             "command": "ls",
             "workspace_roots": [PROJECT, "/work/other"],
@@ -244,14 +250,19 @@ class TestInProcessRouting:
     """
 
     @pytest.fixture(params=HOOK_NAMES)
-    def hook_module(self, request: pytest.FixtureRequest):
+    def hook_module(
+        self, request: pytest.FixtureRequest
+    ) -> tuple[types.ModuleType, str]:
         import importlib
 
         return importlib.import_module(f"waxseal.integrations.{request.param}"), request.param
 
     @staticmethod
     def drive(
-        monkeypatch: pytest.MonkeyPatch, module, event: dict[str, object], home: Path
+        monkeypatch: pytest.MonkeyPatch,
+        module: types.ModuleType,
+        event: dict[str, object],
+        home: Path,
     ) -> int:
         import io
 
@@ -259,12 +270,13 @@ class TestInProcessRouting:
         monkeypatch.delenv("CODEX_HOME", raising=False)
         monkeypatch.setenv("HOME", str(home))
         monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(event)))
-        return module.main()
+        exit_code: int = module.main()
+        return exit_code
 
     def test_the_routed_segment_is_written_and_the_move_is_announced(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        hook_module,
+        hook_module: tuple[types.ModuleType, str],
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
@@ -279,7 +291,7 @@ class TestInProcessRouting:
     def test_a_second_append_announces_nothing(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        hook_module,
+        hook_module: tuple[types.ModuleType, str],
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
@@ -292,7 +304,7 @@ class TestInProcessRouting:
     def test_an_event_with_no_cwd_is_labelled_every_time(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        hook_module,
+        hook_module: tuple[types.ModuleType, str],
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
@@ -306,12 +318,12 @@ class TestInProcessRouting:
     def test_a_non_string_cwd_is_treated_as_absent(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        hook_module,
+        hook_module: tuple[types.ModuleType, str],
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         module, name = hook_module
-        event = {**event_for(name, cwd=None), "cwd": 17}
+        event: dict[str, object] = {**event_for(name, cwd=None), "cwd": 17}
         assert self.drive(monkeypatch, module, event, tmp_path) == 0
         assert "cannot route per project" in capsys.readouterr().err
 
@@ -324,7 +336,7 @@ class TestInProcessRouting:
         import importlib
 
         module = importlib.import_module("waxseal.integrations.cursor")
-        event = {
+        event: dict[str, object] = {
             "hook_event_name": "beforeSubmitPrompt",
             "prompt": "hello",
             "workspace_roots": [PROJECT, "/work/other"],
@@ -341,7 +353,7 @@ class TestInProcessRouting:
         import importlib
 
         module = importlib.import_module("waxseal.integrations.cursor")
-        event = {
+        event: dict[str, object] = {
             "hook_event_name": "beforeShellExecution",
             "command": "ls",
             "cwd": PROJECT,
@@ -391,7 +403,7 @@ class TestInProcessRouting:
     def test_an_unopenable_trail_records_its_drop_beside_the_active_segment(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        hook_module,
+        hook_module: tuple[types.ModuleType, str],
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
@@ -411,7 +423,9 @@ class TestInProcessRouting:
 
 class TestDropsDuringRotation:
     @pytest.fixture(params=HOOK_NAMES)
-    def hook_module(self, request: pytest.FixtureRequest):
+    def hook_module(
+        self, request: pytest.FixtureRequest
+    ) -> tuple[types.ModuleType, str]:
         import importlib
 
         return importlib.import_module(f"waxseal.integrations.{request.param}"), request.param
@@ -419,7 +433,7 @@ class TestDropsDuringRotation:
     def test_a_drop_during_rotation_lands_in_the_new_segments_sidecar(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        hook_module,
+        hook_module: tuple[types.ModuleType, str],
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
@@ -440,7 +454,9 @@ class TestDropsDuringRotation:
 
         real_append = AuditLog.append
 
-        def append_unless_hook_event(self: AuditLog, *, payload: object, payload_type: str):
+        def append_unless_hook_event(
+            self: AuditLog, *, payload: dict[str, Any] | bytes, payload_type: str
+        ) -> Entry:
             # The genesis rotation binding must still get through; only the
             # hook's own event is lost, which is the case under test.
             if payload_type == module.PAYLOAD_TYPE:
