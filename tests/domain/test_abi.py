@@ -25,24 +25,30 @@ from __future__ import annotations
 
 import ast
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from tests import _foundry
 from waxseal.domain import abi
 
 _REPO = Path(__file__).resolve().parents[2]
 _COMPILED_SELECTORS = _REPO / "contracts" / "abi" / "selectors.json"
 
-CAST = shutil.which("cast")
-NEEDS_CAST = pytest.mark.skipif(
-    CAST is None,
+#: Resolved by `tests/_foundry.py`, not here (waxseal-fg4.41): this file used
+#: to ask `shutil.which` and nothing else, so on a machine where foundryup had
+#: installed Foundry without the shell profile being sourced, the two
+#: end-to-end suites measured against real anvil chains in the same run that
+#: this file reported 5x UNMEASURED. The label was honest and the resolution
+#: was the defect.
+CAST = _foundry.tool("cast")
+NEEDS_CAST = _foundry.skip_without_foundry(
     reason=(
-        "UNMEASURED: Foundry's `cast` is not on PATH, so the frozen selectors and "
-        "the calldata encoding were NOT cross-checked against an independent "
-        "implementation this run. Install Foundry (foundryup) and re-run to measure."
+        "UNMEASURED: Foundry's `cast` was found neither on PATH nor in foundryup's "
+        "install directory, so the frozen selectors and the calldata encoding were "
+        "NOT cross-checked against an independent implementation this run. Install "
+        "Foundry (foundryup) and re-run to measure."
     ),
 )
 

@@ -283,3 +283,37 @@ class TestTheOlderCitedFigures:
         )
         wider = (longer / "trail.00000.jsonl").stat().st_size
         assert wider > ROTATION_BINDING_BYTES
+
+
+class TestSpecSection202CitesTheMeasurement:
+    """SPEC section 20.2's by-count paragraph, tied to the numbers above.
+
+    The prose in `sources/rotation.py` was corrected in 0.1.5 and SPEC.md was
+    not, because SPEC.md is a frozen path and the correction was the owner's
+    to make (waxseal-fg4.23 handed the diff back rather than landing it).
+    That left the two halves of one claim disagreeing by an order of
+    magnitude, with nothing failing. This is what would have caught it, and
+    what catches the next drift in either direction: the spec sentence has to
+    quote the measurement this file makes, not a number someone remembers.
+    """
+
+    def _by_count_paragraph(self) -> str:
+        spec = (Path(__file__).resolve().parents[1] / "SPEC.md").read_text()
+        marker = "By-count\ntriggering is not permitted"
+        assert marker in spec, "SPEC section 20.2's by-count sentence moved or was reworded"
+        start = spec.index(marker)
+        return spec[start : spec.index("Reading the closing segment", start)]
+
+    def test_the_spec_no_longer_quotes_the_unmeasured_hundredfold_spread(self) -> None:
+        assert "100x" not in self._by_count_paragraph()
+
+    def test_the_spec_quotes_the_measured_spread(self) -> None:
+        measured = round(CLIPPED_TOOL_RESULT_BYTES / MINIMAL_PROMPT_BYTES)
+        assert f"roughly {measured}x" in self._by_count_paragraph()
+
+    def test_the_spec_names_both_measured_ends_and_the_fixture(self) -> None:
+        # A figure with no fixture is how "~100x" survived four releases.
+        paragraph = self._by_count_paragraph()
+        assert f"{MINIMAL_PROMPT_BYTES} B" in paragraph
+        assert f"{CLIPPED_TOOL_RESULT_BYTES:_} B" in paragraph
+        assert "tests/test_entry_size_receipt.py" in paragraph

@@ -14,7 +14,8 @@ uv run pytest --cov=waxseal
 
 - **TDD is mandatory** (CLAUDE.md): no production code without a failing test first.
   Bug fix = failing repro test first, in the same PR.
-- **Coverage floor: 90%** line coverage over `src/waxseal` (`fail_under = 90`).
+- **Coverage floor: 100%** line and branch coverage over `src/waxseal`
+  (`fail_under = 100`). It is a ratchet: it may go up, never down.
   The floor is a ratchet — it may go up, never down.
 - **Zero runtime dependencies.** `[project] dependencies` stays `[]`. Optional
   clients (boto3, psycopg) are injected by the caller, never imported by waxseal.
@@ -32,7 +33,7 @@ uv run pytest --cov=waxseal
 ## Before opening a PR
 
 ```bash
-uv run pytest --cov=waxseal   # all green, coverage >= 90%
+uv run pytest --cov=waxseal   # all green, coverage 100%
 uv run mypy                   # strict mode, configured in pyproject
 uv run ruff check .
 ```

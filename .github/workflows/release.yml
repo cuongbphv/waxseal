@@ -14,7 +14,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: "3.12"
-      # CLAUDE.md: all green + coverage floor (>=90%) before any release.
+      # CLAUDE.md: all green + coverage floor (100%) before any release.
       - run: uv run --extra dev pytest --cov=waxseal
 
   build:

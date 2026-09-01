@@ -180,7 +180,7 @@ ignore_missing_imports = true
 # cryptography lives in the `rfc3161` extra, never in `dependencies` (CLAUDE.md
 # rule 1), so it is legitimately absent on a correct install. It DOES ship its
 # own types, so this override exists only for the absent-on-this-machine case;
-# the imports are inside `adapters/rfc3161_verify.py::_load_backend`, guarded,
+# the imports are inside `adapters/rfc3161_verify.py::_verify`, guarded,
 # and their ImportError is a reported `signature_unchecked` state, not a crash.
 [[tool.mypy.overrides]]
 module = ["cryptography.*"]

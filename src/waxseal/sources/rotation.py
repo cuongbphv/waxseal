@@ -8,8 +8,8 @@ for a minimal `UserPromptSubmit` event against 6_374 B for a `PostToolUse`
 event whose output is clipped at `MAX_FIELD_CHARS`, both measured through this
 append path in tests/test_entry_size_receipt.py. A count still says almost
 nothing about bytes at 10x. (This paragraph said ~100x through 0.1.5 and cited
-nothing; SPEC section 20.2 still does. The measurement is the receipt that was
-missing, and a spec correction is the owner's call, not this file's.)
+nothing, and so did SPEC section 20.2 until the owner landed the same
+correction there; the measurement is the receipt both were missing.)
 Manual-only was rejected because hooks run unattended, and unbounded growth is
 the bug being fixed, not a state an operator will notice.
 
