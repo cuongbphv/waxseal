@@ -241,12 +241,20 @@ class TestDocumentationLinks:
     - `test_every_linked_path_exists`: appending `[x](nope/gone.md)` to
       `docs/paper/outline.md` fails with
       `docs/paper/outline.md -> nope/gone.md` in the diff.
-    - `test_no_linked_path_is_gitignored`: adding `docs/scratch/` to
-      `.gitignore`, writing an untracked `docs/scratch/note.md` and linking it
-      from `docs/paper/outline.md` fails with that path in the diff — the
-      original incident exactly, reproduced from a `docs/` file. Re-ignoring
-      `docs/security/` does NOT reproduce it, because those files are now
-      tracked; see `test_no_linked_path_is_gitignored`.
+    - `test_no_linked_path_is_gitignored`, untracked target: adding
+      `docs/scratch/` to `.gitignore`, writing an untracked
+      `docs/scratch/note.md` and linking it from `docs/paper/outline.md` fails
+      with that path in the diff — the original incident exactly, reproduced
+      from a `docs/` file.
+    - `test_no_linked_path_is_gitignored`, TRACKED target (waxseal-fg4.34):
+      appending `docs/research/landscape.md` to `.gitignore` — a file that is
+      tracked and linked from `CHANGELOG.md`, `README.md`, `README.zh.md` and
+      `docs/plans/waxseal-0.1.5-contract.md` — leaves the test GREEN while the
+      subprocess omits `--no-index`, and turns it RED naming that path once
+      `--no-index` is passed. Re-ignoring `docs/security/`, the original
+      incident's own target, behaves the same way for the same reason: those
+      files are tracked now. This receipt is the whole content of the switch;
+      without it `--no-index` would be an unproven edit.
     - the widened trees: `[x](gone.md)` appended to
       `integrations/openclaw/README.md` fails naming that file, and again from
       `server/README.md` and `examples/banking-poc/README.md`.
@@ -374,11 +382,23 @@ class TestDocumentationLinks:
         )
         # check-ignore exits 0 when something matched, 1 when nothing is
         # ignored; anything else (128: not a repo) means we learned nothing
-        # and must not report that as a pass. It also honours the index, so a
-        # tracked file matching an ignore pattern is not reported — correct
-        # here: a tracked file ships, and shipping is the whole question.
+        # and must not report that as a pass.
+        #
+        # --no-index because check-ignore otherwise honours the INDEX: a file
+        # that is tracked stays "not ignored" however many patterns match it,
+        # so a link to it passed. The owner settled that reading on 01/09/2026
+        # (waxseal-fg4.34) against the recommendation on the bead — an ignore
+        # pattern is intent to STOP shipping a file, so a link to one is a link
+        # to something on its way out, whether or not git still holds it in the
+        # index. Measured before the switch: 478 tracked files, none matched by
+        # an ignore pattern, so the stricter reading orphaned no link and cost
+        # nothing that day. It is future-proofing, and the receipt below is
+        # what makes it more than a no-op edit.
         proc = subprocess.run(
-            [git, "check-ignore", *targets], capture_output=True, text=True, cwd=REPO
+            [git, "check-ignore", "--no-index", *targets],
+            capture_output=True,
+            text=True,
+            cwd=REPO,
         )
         if proc.returncode not in (0, 1):  # pragma: no cover - not a git checkout
             return
