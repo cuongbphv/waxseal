@@ -326,8 +326,13 @@ class TestDocumentationLinks:
     # (server/waxseal_server/static, the compiled portal bundle). Matched as a
     # path segment, so a second copy of any of them — a node_modules under
     # server/web, say — is excluded by the same property rather than by a new
-    # entry in a list someone has to remember to extend.
-    NOT_PROSE_SEGMENTS = frozenset({"node_modules", ".venv", "static"})
+    # entry in a list someone has to remember to extend. `.pytest_cache` joined
+    # the set 01/09/2026: pytest writes its own README there the first time it
+    # runs under `server/`, and that real file inflates this corpus's count on
+    # any machine that has run the server suite locally, while a fresh
+    # checkout never sees it — excluding it makes the count deterministic
+    # across environments instead of depending on local pytest history.
+    NOT_PROSE_SEGMENTS = frozenset({"node_modules", ".venv", "static", ".pytest_cache"})
 
     def docs(self) -> list[Path]:
         return sorted(

@@ -77,7 +77,14 @@ DOC_GLOBS = (
 )
 
 # Not hand-written prose: gitignored dependency trees and build output.
-NOT_PROSE_SEGMENTS = frozenset({"node_modules", ".venv", "static"})
+# `.pytest_cache` is pytest's own auto-generated README explaining the
+# directory's purpose (created the first time `pytest` runs under `server/`,
+# a real file on disk this glob would otherwise happily match) -- found live
+# 01/09/2026 inflating the corpus count on a machine that had run the server
+# suite locally, while a fresh checkout never sees it. Excluding it makes the
+# corpus deterministic across environments instead of depending on local
+# pytest history.
+NOT_PROSE_SEGMENTS = frozenset({"node_modules", ".venv", "static", ".pytest_cache"})
 
 
 def docs() -> list[Path]:
@@ -128,7 +135,13 @@ class TestEpistemicTagVocabulary:
         # Lower bounds, not exact counts: documents may be added freely, only a
         # collapse of the scan is a bug.
         scanned = docs()
-        assert len(scanned) >= 40, scanned
+        # Lowered from 40 to 35 (01/09/2026, owner decision): docs/plans/**
+        # and docs/research/** moved out of the published tree into the
+        # gitignored .docs/, a real shrink of the corpus. 39 remain at the
+        # time of this change (measured with `.pytest_cache` correctly
+        # excluded, see NOT_PROSE_SEGMENTS above); the bound stays a genuine
+        # floor below that, not the exact count.
+        assert len(scanned) >= 35, scanned
         chosen = set(scanned)
         for pattern in DOC_GLOBS:
             assert chosen.intersection(REPO.glob(pattern)) != set(), pattern
