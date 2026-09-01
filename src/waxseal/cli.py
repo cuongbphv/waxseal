@@ -3499,6 +3499,29 @@ def _ledger_status(
     return overall.to_exit_code()
 
 
+def _split_signer_command(command: str, *, windows: bool) -> list[str]:
+    """Split ``WAXSEAL_EVM_SIGNER_CMD`` into argv without mangling Windows paths.
+
+    ``shlex.split`` in its default POSIX mode treats a backslash as an escape,
+    so ``D:\\a\\waxseal\\.venv\\Scripts\\python.exe fake_signer.py`` came out
+    as ``DawaxsealvenvScriptspython.exe`` and every Windows CI job failed the
+    entire ledger-write surface with WinError 2 (0.1.5 MR, 01/09/2026 — masked
+    until then because an earlier failing step always stopped the suite first).
+    On Windows a backslash is a path separator, never an escape: split in
+    non-POSIX mode, which preserves it, then strip the double quotes non-POSIX
+    mode leaves attached so a spaced path is still one argv element.
+    """
+    import shlex
+
+    if not windows:
+        return shlex.split(command)
+    parts = shlex.split(command, posix=False)
+    return [
+        part[1:-1] if len(part) >= 2 and part[0] == '"' and part[-1] == '"' else part
+        for part in parts
+    ]
+
+
 class ExternalEvmSigner:
     """A ``TransactionSigner`` (ports/ledger.py) that shells out to an
     operator-supplied program named by ``WAXSEAL_EVM_SIGNER_CMD`` — never a
@@ -3534,9 +3557,9 @@ class ExternalEvmSigner:
         self.public_id = self.address
 
     def _argv(self, *args: str) -> list[str]:
-        import shlex
+        import os
 
-        return [*shlex.split(self._command), *args]
+        return [*_split_signer_command(self._command, windows=os.name == "nt"), *args]
 
     def _run(self, *args: str, input_text: str | None = None) -> str:
         import subprocess

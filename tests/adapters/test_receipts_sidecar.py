@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import json
 import stat
+import sys
 from pathlib import Path
+
+import pytest
 
 from waxseal.adapters.receipts import append_receipt, read_receipts, receipts_path
 from waxseal.domain.receipt_fingerprint import receipt_fingerprint
@@ -80,6 +83,8 @@ def test_appending_never_rewrites_an_existing_record(tmp_path: Path) -> None:
 
 def test_sidecar_is_created_0600(tmp_path: Path) -> None:
     # As sensitive as the trail it corroborates (attest.py's precedent).
+    if sys.platform == "win32":
+        pytest.skip("POSIX permission bits")  # test_jsonl.py's precedent
     trail = tmp_path / "trail.jsonl"
     append_receipt(
         trail, seq=0, entry_hash=H0, receipt_seq=0, receipt_head=HEAD, source="s", ts="t"

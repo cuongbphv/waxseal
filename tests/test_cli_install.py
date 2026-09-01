@@ -139,7 +139,10 @@ def test_openclaw_installs_nothing_and_prints_the_schedule(
     assert main(["install", "openclaw", "--home", str(tmp_path)]) == 0
     assert list(tmp_path.iterdir()) == []
     out = capsys.readouterr().out
-    assert "python -m waxseal.integrations.openclaw" in out
+    # sys.executable, not a bare "python": on Windows it ends in python.exe,
+    # so the old "python -m ..." substring only ever matched by accident of
+    # POSIX paths ending in /python (caught by the win CI matrix, 01/09).
+    assert f"{sys.executable} -m waxseal.integrations.openclaw" in out
     assert "waxseal verify" in out
 
 

@@ -110,7 +110,9 @@ class TestEpistemicTagVocabulary:
     def test_no_document_translates_the_epistemic_tag(self) -> None:
         offenders = []
         for doc in docs():
-            for lineno, line in enumerate(doc.read_text().splitlines(), start=1):
+            # encoding named: Windows' default is cp1252, which cannot decode
+            # this UTF-8 corpus (all 8 win CI jobs, UnicodeDecodeError, 01/09).
+            for lineno, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), start=1):
                 offenders += [
                     f"{doc.relative_to(REPO)}:{lineno}: {tag}"
                     for tag in translated_tags_in(line)
@@ -147,7 +149,7 @@ class TestEpistemicTagVocabulary:
             assert chosen.intersection(REPO.glob(pattern)) != set(), pattern
 
         tagged = {
-            doc.relative_to(REPO): len(SANCTIONED_RE.findall(doc.read_text()))
+            doc.relative_to(REPO): len(SANCTIONED_RE.findall(doc.read_text(encoding="utf-8")))
             for doc in scanned
         }
         # The English half of the corpus carries hedges...

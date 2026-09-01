@@ -16,11 +16,45 @@ from pathlib import Path
 
 import pytest
 
-from waxseal.cli import ExternalEvmSigner, _evm_signer
+from waxseal.cli import ExternalEvmSigner, _evm_signer, _split_signer_command
 from waxseal.ports.ledger import LedgerError
 
 ADDRESS = "0x" + "aa" * 20
 SIGNATURE = "11" * 65
+
+
+class TestSplitSignerCommand:
+    """Both flavors run on every OS — the flavor is a parameter, not the host.
+
+    The Windows flavor exists because of a real incident: POSIX shlex.split
+    ate the backslashes out of `D:\\a\\waxseal\\.venv\\Scripts\\python.exe`,
+    and all 22 ledger-write/anchor/signer tests failed on every Windows CI
+    job with WinError 2 — invisible until the 0.1.5 MR, because an earlier
+    failing step had always stopped the suite before reaching them.
+    """
+
+    def test_windows_flavor_keeps_backslashes(self) -> None:
+        argv = _split_signer_command(
+            r"D:\a\waxseal\.venv\Scripts\python.exe C:\t\fake_signer.py", windows=True
+        )
+        assert argv == [r"D:\a\waxseal\.venv\Scripts\python.exe", r"C:\t\fake_signer.py"]
+
+    def test_windows_flavor_unquotes_a_spaced_path(self) -> None:
+        argv = _split_signer_command(r'"C:\Program Files\py\python.exe" sign.py', windows=True)
+        assert argv == [r"C:\Program Files\py\python.exe", "sign.py"]
+
+    def test_posix_flavor_is_plain_shlex(self) -> None:
+        argv = _split_signer_command("/usr/bin/python3 '/tmp/my signer.py'", windows=False)
+        assert argv == ["/usr/bin/python3", "/tmp/my signer.py"]
+
+    def test_the_signer_uses_the_running_hosts_flavor(self) -> None:
+        # The call site must pass the real platform, not a hardcoded flavor.
+        import inspect
+
+        from waxseal.cli import ExternalEvmSigner
+
+        source = inspect.getsource(ExternalEvmSigner._argv)
+        assert 'os.name == "nt"' in source
 
 
 FAKE_SIGNER = f'''
