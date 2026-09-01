@@ -33,11 +33,13 @@ from waxseal_server.domain.errors import (
     InvalidIdentifier,
     MalformedEnvelope,
     NoSuchOperator,
+    NoSuchSetting,
     OperatorExists,
     UnsupportedTrailFormat,
 )
 from waxseal_server.domain.operators import Operator, Principal, Role, scopes_for_role
 from waxseal_server.ports.operators import OperatorStore
+from waxseal_server.ports.settings import SettingsStore
 from waxseal_server.runtime.cli import CliOutcome, WaxsealCli
 from waxseal_server.storage.chains import ChainStore
 from waxseal_server.storage.imports import ImportStore
@@ -52,6 +54,7 @@ STATUS_FOR_ERROR: Final[dict[type[Exception], tuple[int, str]]] = {
     MalformedEnvelope: (400, "malformed_envelope"),
     UnsupportedTrailFormat: (400, "unsupported_trail_format"),
     NoSuchOperator: (404, "no_such_operator"),
+    NoSuchSetting: (404, "no_such_setting"),
     OperatorExists: (409, "operator_exists"),
     DamagedReceiptLog: (422, "damaged_receipt_log"),
 }
@@ -81,11 +84,16 @@ def _synthetic(username: str) -> Operator:
 
 @dataclass(frozen=True, slots=True)
 class Services:
+    #: The frozen environment this process started with. Read-only everywhere.
     settings: Settings
     chains: ChainStore
     imports: ImportStore
     witnesses: WitnessStore
     operators: OperatorStore
+    #: Operator-changeable configuration. Deliberately a DIFFERENT field from
+    #: `settings`: one is the environment and cannot be written, the other is
+    #: the store and holds no credential.
+    config: SettingsStore
     cli: WaxsealCli
 
 

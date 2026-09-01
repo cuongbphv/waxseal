@@ -28,7 +28,7 @@ import PageHeader from '@/components/ui/PageHeader.vue'
 import PillButton from '@/components/ui/PillButton.vue'
 import TintPanel from '@/components/ui/TintPanel.vue'
 import ScopeStatement from '@/components/app/ScopeStatement.vue'
-import TokenField from '@/components/app/TokenField.vue'
+import AuthNeeded from '@/components/app/AuthNeeded.vue'
 import TrailEntriesTab from '@/components/trail/TrailEntriesTab.vue'
 import TrailSegmentsTab from '@/components/trail/TrailSegmentsTab.vue'
 import TrailSidecarsTab from '@/components/trail/TrailSidecarsTab.vue'
@@ -145,7 +145,7 @@ watch(
     :error="verify.error.value"
     @retry="verify.run"
   >
-    <template #unauthorized><TokenField /></template>
+    <template #unauthorized><AuthNeeded /></template>
 
     <TintPanel v-if="verify.data.value && verdictState" :tone="verdictState.tone" role="status">
       <template #aside>
@@ -185,7 +185,7 @@ watch(
       :error="actionOutcome.error.value"
       @retry="actionOutcome.run"
     >
-      <template #unauthorized><TokenField /></template>
+      <template #unauthorized><AuthNeeded /></template>
       <OutputPanel
         v-if="actionOutcome.data.value"
         :argv="actionOutcome.data.value.argv"

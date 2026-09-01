@@ -9,6 +9,12 @@
  *
  * `line` is the short form the CLI prints beside a verdict; `statement` is the
  * paragraph. Nothing here paraphrases either.
+ *
+ * The paragraph form is COLLAPSED, never shortened. Its wording is what an
+ * assessor cites, so trimming it to fit a screen is not available — but a
+ * qualification nobody finishes reading is not doing its job either, so the
+ * short line is the summary and the full text is one click below it. Both come
+ * from the server; neither is retyped here.
  */
 
 import { useI18n } from '@/lib/i18n'
@@ -20,10 +26,18 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <p v-if="scope" class="scope" :class="`scope--${form}`">
+  <p v-if="scope && form === 'line'" class="scope scope--line">
     <span class="label">{{ t('scopeLabel') }}</span>
-    <span>{{ form === 'line' ? scope.line : scope.statement }}</span>
+    <span>{{ scope.line }}</span>
   </p>
+
+  <details v-else-if="scope" class="scope-details">
+    <summary>
+      <span class="label">{{ t('scopeLabel') }}</span>
+      <span class="summary-line">{{ scope.line }}</span>
+    </summary>
+    <p class="scope scope--statement">{{ scope.statement }}</p>
+  </details>
 </template>
 
 <style scoped>
@@ -42,6 +56,23 @@ const { t } = useI18n()
 
 .scope--statement {
   font-size: var(--fs-xs);
+  margin-top: var(--space-4);
+  display: block;
+}
+
+.scope-details > summary {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  flex-wrap: wrap;
+  cursor: pointer;
+  color: var(--color-ink-muted-48);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+
+.summary-line {
+  min-width: 0;
 }
 
 .label {

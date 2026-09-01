@@ -49,6 +49,81 @@ const en = {
   langEn: 'EN',
   motto: 'Verify reports — never edits, never deletes.',
   skipToContent: 'Skip to content',
+  ledgerNoChain: 'No chain on this server to check on-chain.',
+  ledgerNotConfigured: 'Ledger not configured',
+  ledgerMissing: 'Set {keys} in Settings to query it.',
+  ledgerQueried: 'queried',
+  ledgerQueriedWhy: 'Read from the configured RPC endpoints, not assumed.',
+  navSettings: 'Settings',
+  setTitle: 'Settings',
+  setSub: 'The credential, the environment, and the knobs you can change.',
+  setStoredTitle: 'Server settings',
+  setEnvTitle: 'Deployment',
+  setEnvWhy: 'Set in the process environment. Changing these means restarting the server.',
+  setReadOnly: 'read-only',
+  setStored: 'stored',
+  setDefault: 'default',
+  setUnset: 'not configured',
+  setSave: 'Save',
+  setReset: 'Reset',
+  setIsSet: 'set',
+  setIsUnset: 'unset',
+  setSecretWhy: 'A credential. The server reports only whether it is set, never its value.',
+  setBackendMemory: 'in memory',
+  setBackendMemoryWhy: 'No database configured, so these settings are lost on restart.',
+  setBackendPg: 'PostgreSQL',
+  setBackendPgWhy: 'Stored in the database and kept across restarts.',
+  authNeededTitle: 'This read needs a credential',
+  authNeededBody: 'The API token is set once, in Settings.',
+  authNeededLink: 'Go to Settings',
+  /* ------------------------------------------- 0.1.5 reads with inputs */
+  run: 'Run',
+  running: 'Running…',
+  runTail: 'Tail',
+  runCheckpoint: 'Checkpoint',
+
+  navCons: 'Consistency',
+  navHandoff: 'Handoff',
+  navTickets: 'Tickets',
+  navCadence: 'Cadence',
+
+  consTitle: 'Consistency',
+  consSub: 'Does a checkpoint you already hold still sit on this chain?',
+  consChain: 'Chain',
+  consOldSeq: 'Old seq',
+  consOldRoot: 'Old root',
+  consRootShape: '64 hex chars',
+  consNoChains: 'No chains on this server yet.',
+
+  handoffTitle: 'Handoff',
+  handoffSub: 'Check the delegate trail\u2019s bindings against the origin\u2019s history.',
+  handoffDelegate: 'Delegate trail',
+  handoffOrigin: 'Origin trail',
+  handoffNoChains: 'No chains on this server yet.',
+
+  ticketsTitle: 'Tickets',
+  ticketsSub: 'Reconcile issued admission tickets against the trail.',
+  ticketsChain: 'Chain',
+  ticketsIssuer: 'Issuer',
+  ticketsLease: 'Lease size',
+  ticketsIssued: 'Issued range',
+  ticketsNoChains: 'No chains on this server yet.',
+  ticketsUnmeasured: 'Unmeasured \u2014 no issuer data this run',
+  ticketsNoDrops: 'No drop detected',
+  ticketsDropped: '{n} ticket(s) missing',
+  ticketsBlindSpot: 'Blind spot bound {bound}, lease {lease}.',
+
+  cadTitle: 'Cadence',
+  cadSub: 'Cost-optimal anchoring interval from your own measurements.',
+  cadLam: 'Rate \u03bb',
+  cadC: 'Anchor cost',
+  cadW: 'Harm per entry',
+  cadRho: 'Discount \u03c1',
+  cadDelta: 'Anchor latency',
+  cadTMax: 'Max latency',
+  cadM: 'Multiplier',
+  navOpen: 'Open navigation',
+  navClose: 'Close navigation',
 
   /* --------------------------------------------------------------- nav */
   navDash: 'Dashboard',
@@ -78,8 +153,7 @@ const en = {
   nothingYet: 'nothing yet',
   noChains: 'This server holds no chains yet. Append one and it appears here.',
   authNeeded: 'This server requires a bearer credential for /v1 reads.',
-  authOpen:
-    'This server accepts /v1 reads with no credential: no API key has been minted on it and WAXSEAL_API_KEY is unset. Minting the first key is what closes it — /v1/meta reports write_auth: bearer_required from that moment on. A token supplied here is still sent.',
+  authOpen: 'No credential required: no key minted, WAXSEAL_API_KEY unset. Minting the first key closes it.',
   authUnknown: 'The server has not said whether /v1 reads need a credential.',
   authField: 'WAXSEAL_API_KEY',
   authApply: 'Use this token',
@@ -129,8 +203,7 @@ const en = {
   colPayload: 'payload (redacted)',
   colEntryHash: 'entry_hash',
   entriesFoot: 'Payloads are redacted before hashing.',
-  entriesFootWhy:
-    'There is nothing to un-redact and no control to do it with: redaction runs before payload_hash is computed, so the cleartext never reached this server.',
+  entriesFootWhy: 'Redaction runs before payload_hash, so the cleartext never reached this server.',
   entriesEmpty: 'No entries on this chain yet.',
   entriesMore: 'Showing the first {shown} entries. The chain has more.',
   segFoot: 'Rotation at 16 MiB · segments join via the seq-0 rotation binding.',
@@ -180,8 +253,7 @@ const en = {
   preflightTitle: 'Preflight',
   preflightSub: 'Which attacker tier the current configuration stops.',
   preflightUnavailableTitle: 'This build cannot determine a deployment’s tier',
-  preflightUnavailableBody:
-    'The waxseal build behind this server has no preflight subcommand, so nothing here has been measured. The ladder is shown because the tiers are real — the threat model defines them — but no badge below is a finding about this deployment. The command itself shipped in Workstream E: put a newer waxseal behind this server and the reading appears here, with nothing to change.',
+  preflightUnavailableBody: 'This build has no preflight command, so nothing below was measured here.',
   preflightBadgeUnmeasured: 'not measured',
   preflightScopeLine: 'Anchored prefix: tamper-evident, and only within the scope printed above.',
   preflightTailLine: 'Live tail: ',
@@ -191,8 +263,7 @@ const en = {
   ledgerTitle: 'Ledger status',
   ledgerSub: 'evm extra (opt-in) · operator-supplied RPC + contract addresses.',
   ledgerUnavailableTitle: 'No ledger is configured for this deployment',
-  ledgerUnavailableBody:
-    'The evm extra is opt-in and this server has no RPC endpoint and no contract address. The three contracts below are the designed surface, not a deployed one: every status reads “not configured” because nothing was queried. On-chain anchoring ships in Workstream F.',
+  ledgerUnavailableBody: 'The evm extra is opt-in: this server has no RPC endpoint and no contract address, so nothing was queried.',
   ledgerAddrNone: 'no contract address configured',
   rpcTitle: 'RPC readers (≥ 2, finalized)',
   rpcNone: 'No RPC reader is configured.',
@@ -225,8 +296,7 @@ const en = {
     'The endpoints a third party can read without asking this server for anything. Follow a link and the raw JSON opens in a new tab.',
   readApiPublicTitle: 'Public — no credential',
   readApiAuthedTitle: 'Bearer credential required (WAXSEAL_API_KEY)',
-  readApiAuthedNote:
-    'These are listed for completeness and are not linked: a link that 401s teaches nothing. The write path is not reachable from this console at all.',
+  readApiAuthedNote: 'Listed for completeness, not linked: a link that 401s teaches nothing.',
   readApiNeedsChain: 'Pick a chain to build the per-chain links:',
   readApiNoChain: 'This server holds no chain, so there is no per-chain URL to link to.',
   colMethod: 'method',
@@ -264,24 +334,20 @@ const en = {
   operatorNoEmail: 'no email address was recorded for this operator',
   operatorsNone:
     'This server holds no operators yet. `waxseal-server-admin seed` creates the first ones, and the form below adds another.',
-  operatorsFoot:
-    'Two columns from the mock are missing because the server tracks neither: there is no 2FA and no last-active timestamp. A column of em dashes would be worse than no column.',
+  operatorsFoot: 'No 2FA and no last-active column: the server tracks neither.',
   rolesTitle: 'Roles',
   roleAdmin: 'Admin',
-  roleAdminDesc:
-    'Manages the server, its operators and its keys — and still cannot edit an entry, because nobody can. There is no entries:edit scope in this server’s vocabulary, so no key it mints can carry one.',
+  roleAdminDesc: 'Manages the server, its operators and its keys — and still cannot edit an entry, because nobody can.',
   roleAuditor: 'Auditor',
   roleAuditorDesc:
     'Reads trails, runs verify / report / export-proof, imports evidence. Cannot append and cannot manage keys.',
   roleViewer: 'Viewer',
   roleViewerDesc: 'Read-only: the dashboard and the public read-API.',
   roleWriter: 'Writer',
-  roleWriterDesc:
-    'The machine account. It appends and reads the head, and cannot read the trail it is appending to — which is what keeps a leaked writer key from being a leaked audit trail.',
+  roleWriterDesc: 'Machine account. Appends and reads the head; cannot read the trail it writes to.',
   roleHolders: '{count} on this server',
   roleScopesFrom: 'Scopes as this server reports them for {username}.',
-  roleScopesNone:
-    'No active operator holds this role here, so this server has reported no scope set for it. The role exists — its scopes are simply not something this screen measured, and a list typed in here would be a permission model nobody enforces.',
+  roleScopesNone: 'No active operator holds this role, so the server reported no scope set for it.',
 
   /* ------------------------------------------------------------- invite */
   inviteTitle: 'Add an operator',
@@ -297,8 +363,7 @@ const en = {
   inviteCreated: 'Created {username} as {role}. No key has been minted for them yet.',
   inviteErrExists:
     'An operator named {username} already exists on this server. A username is the identity and is never reused, so this creates nothing.',
-  inviteErrRole:
-    'The server rejected that role. It parses a role strictly rather than defaulting an unknown one, because defaulting would be a silent escalation or a silent downgrade depending on which way it fell.',
+  inviteErrRole: 'The server rejected that role. Unknown roles are refused, never defaulted.',
   inviteErrUsername: 'The server rejected that username: {detail}',
   inviteErrOther: 'The server refused: {detail}',
 
@@ -316,8 +381,7 @@ const en = {
   keyRevoked: 'revoked',
   keyRevokedAt: 'revoked {at}',
   keysNone: 'No API key has been minted on this server yet.',
-  keysFoot:
-    'Revoked keys stay listed: a revocation is part of the history an auditor came to read, and a list that hid it would answer “which credentials existed?” with a smaller set than the truth.',
+  keysFoot: 'Revoked keys stay listed: a revocation is part of the history.',
   mintTitle: 'Mint a key',
   mintOperator: 'operator',
   mintLabel: 'label',
@@ -330,8 +394,7 @@ const en = {
   mintErrNoOperator: 'No operator named {username} exists on this server, so nothing was minted.',
   mintErrOther: 'The server refused: {detail}',
   mintedTitle: 'Copy this key now — it is shown once and never again',
-  mintedBody:
-    'The server stored only its SHA-256. There is no reveal button anywhere in this console because there is nothing left to reveal: dismiss this panel and the value is gone from the browser and unrecoverable from the server. Mint a replacement and revoke this one if you lose it.',
+  mintedBody: 'Only the SHA-256 was stored. Copy it now — it cannot be shown again.',
   mintedFor: '{label} · {username}',
   mintedCopy: 'Copy',
   mintedCopied: 'Copied',
@@ -340,8 +403,7 @@ const en = {
   revoking: 'revoking…',
   revokeDone:
     'Revoked {label}. The key is refused from now on and its row stays listed as revoked.',
-  revokeNothing:
-    'That call revoked nothing. {label} was already revoked, or no key on this server has that id — the server answered revoked: false, and reporting it as a success would claim a withdrawal that did not happen.',
+  revokeNothing: 'Nothing was revoked. {label} was already revoked, or no key here has that id.',
   revokeFailed: 'Revoke failed: {detail}',
 
   /* ------------------------------------------------ the credential in hand */
@@ -350,18 +412,14 @@ const en = {
   principalKey: 'key {id}',
   principalScopes: 'What this credential grants, as the server reports it:',
   principalBootstrapTitle: 'The bootstrap key — a credential, not an operator',
-  principalBootstrapBody:
-    'This is WAXSEAL_API_KEY, set in the server’s environment. It has no record in the store, no owner and no history, and it is deliberately not in the operator table below: it exists so a fresh deployment can mint its first real key. Mint one and use that instead.',
+  principalBootstrapBody: 'WAXSEAL_API_KEY from the server environment. Not an operator, and not a row below.',
   principalOpenTitle: 'This server has no credential configured',
-  principalOpenBody:
-    'Every caller is admitted and reported as “unauthenticated”. That is not an operator and is not in the table below. Minting the first API key is what closes this server: /v1/meta then reports write_auth: bearer_required, and this notice goes away.',
+  principalOpenBody: 'Every caller is admitted as “unauthenticated”. Minting the first API key closes this server.',
   principalSyntheticTitle: 'This credential is not one of the operators listed',
-  principalSyntheticBody:
-    'The server answered whoami with is_operator: false, so the principal behind this token has no record in the operator store. It is a credential, not a person, and it is not a row in the table below.',
+  principalSyntheticBody: 'whoami returned is_operator: false — a credential, not a person, and not a row below.',
   principalUnknown: 'The server has not said who this credential is.',
   patTitle: 'Personal access token',
-  patBody:
-    'The bearer token in the field below can be either credential: the bootstrap WAXSEAL_API_KEY from the server’s environment, or any operator key minted here. Both authenticate and they are not the same principal — /v1/whoami is what says which one you are holding. A key travels in an Authorization header and never in a URL or an argv.',
+  patBody: 'Either credential works: the bootstrap WAXSEAL_API_KEY, or an operator key. /v1/whoami says which you hold.',
   adminDocsWhere:
     'Seeding operators and minting the first key is documented in server/docs/deployment.md.',
   tokenTitle: 'Token for this browser tab',
@@ -372,8 +430,7 @@ const en = {
   benchTitle: 'Benchmark',
   benchSub: 'Byte-counting measurements from receipt tests — no wall-clock.',
   benchPublishedTitle: 'Published figures, not a measurement of this deployment',
-  benchPublishedBody:
-    'The four rows below are the numbers recorded in the 0.1.5 CHANGELOG for the reference workload. This server does not benchmark itself and has measured nothing: reading them as a property of the trails on this host would be reading a claim that was never made about it.',
+  benchPublishedBody: 'Figures from the 0.1.5 CHANGELOG reference workload. This server measured nothing.',
   benchFoot:
     'Falsifiability receipts: remove the optimization (deque / offset resume) → test goes red. Numbers land in the CHANGELOG.',
   benchTail: 'tail -n 5 on a 100k-entry trail (bytes read)',
@@ -388,8 +445,7 @@ const en = {
   intSub:
     '9 integrations — record before execution, redact before hashing, never block the host.',
   intDetectTitle: 'Installed state cannot be seen from here',
-  intDetectBody:
-    'These are facts about the library, not about this host: whether a hook is installed lives in the agent framework’s home directory on whichever machine runs the agent, and this server never looks there. Every dot below is grey and means “not detected from here” — not “not installed”.',
+  intDetectBody: 'Not detected from here: a hook lives on the machine running the agent, which this server never reads.',
   provClaudeCode: 'PreToolUse / PostToolUse hooks',
   provCodex: 'lifecycle hooks · ≥ 0.149.0',
   provCursor: 'Agent Hooks (.cursor/hooks.json)',
@@ -435,12 +491,9 @@ const en = {
   stateUnexpectedExitExplain:
     'the command exited with a code this server does not map to a verdict — no verdict was computed',
   stateUnknownExplain: 'this server returned a status this build does not recognise',
-  stateUnverifiableDetail:
-    'One or more rows carry a schema fingerprint this build cannot reproduce. Recomputing them under a tuple they were not signed with would be the one lie a tamper-evidence mechanism must never tell, so they are reported unverifiable by name instead. This is a statement about this verifier, not about the rows.',
-  stateAbsentDetail:
-    'There is no trail at the path the server derived for this chain. Nothing was read and nothing was created. This is not a finding about content.',
-  stateUnavailableDetail:
-    'The waxseal build behind this server does not offer this subcommand. The screen is shown rather than hidden so that “not shipped” is never mistaken for “shipped and found nothing”.',
+  stateUnverifiableDetail: 'Some rows carry a fingerprint this build cannot reproduce — a fact about this verifier, not about the rows.',
+  stateAbsentDetail: 'No trail at the path derived for this chain. Nothing read, nothing created.',
+  stateUnavailableDetail: 'This build does not offer that subcommand. Shown, not hidden, so “not shipped” is never read as “found nothing”.',
 } as const
 
 export type MessageKey = keyof typeof en
@@ -461,6 +514,80 @@ const vi: Record<MessageKey, string> = {
   langEn: 'EN',
   motto: 'Verify chỉ báo cáo — không sửa, không xóa.',
   skipToContent: 'Tới nội dung chính',
+  ledgerNoChain: 'Server chưa có chain nào để kiểm tra on-chain.',
+  ledgerNotConfigured: 'Chưa cấu hình ledger',
+  ledgerMissing: 'Đặt {keys} trong Cài đặt để truy vấn.',
+  ledgerQueried: 'đã truy vấn',
+  ledgerQueriedWhy: 'Đọc từ các RPC endpoint đã cấu hình, không phải suy đoán.',
+  navSettings: 'Cài đặt',
+  setTitle: 'Cài đặt',
+  setSub: 'Credential, biến môi trường, và các tham số bạn sửa được.',
+  setStoredTitle: 'Cấu hình server',
+  setEnvTitle: 'Triển khai',
+  setEnvWhy: 'Đặt trong biến môi trường của process. Muốn đổi thì phải khởi động lại server.',
+  setReadOnly: 'chỉ đọc',
+  setStored: 'đã lưu',
+  setDefault: 'mặc định',
+  setUnset: 'chưa cấu hình',
+  setSave: 'Lưu',
+  setReset: 'Đặt lại',
+  setIsSet: 'đã đặt',
+  setIsUnset: 'chưa đặt',
+  setSecretWhy: 'Là credential. Server chỉ báo đã đặt hay chưa, không bao giờ báo giá trị.',
+  setBackendMemory: 'trong bộ nhớ',
+  setBackendMemoryWhy: 'Chưa cấu hình database, nên các cài đặt này mất khi khởi động lại.',
+  setBackendPg: 'PostgreSQL',
+  setBackendPgWhy: 'Lưu trong database và giữ qua các lần khởi động lại.',
+  authNeededTitle: 'Lệnh đọc này cần credential',
+  authNeededBody: 'API token được đặt một lần, trong Cài đặt.',
+  authNeededLink: 'Tới Cài đặt',
+  run: 'Chạy',
+  running: 'Đang chạy…',
+  runTail: 'Tail',
+  runCheckpoint: 'Checkpoint',
+
+  navCons: 'Nhất quán',
+  navHandoff: 'Chuyển giao',
+  navTickets: 'Vé',
+  navCadence: 'Nhịp anchor',
+
+  consTitle: 'Nhất quán',
+  consSub: 'Checkpoint bạn đang giữ còn nằm trên chain này không?',
+  consChain: 'Chain',
+  consOldSeq: 'Seq cũ',
+  consOldRoot: 'Root cũ',
+  consRootShape: '64 ký tự hex',
+  consNoChains: 'Server chưa có chain nào.',
+
+  handoffTitle: 'Chuyển giao',
+  handoffSub: 'Đối chiếu binding của trail ủy quyền với lịch sử trail gốc.',
+  handoffDelegate: 'Trail ủy quyền',
+  handoffOrigin: 'Trail gốc',
+  handoffNoChains: 'Server chưa có chain nào.',
+
+  ticketsTitle: 'Vé',
+  ticketsSub: 'Đối chiếu vé đã phát hành với trail.',
+  ticketsChain: 'Chain',
+  ticketsIssuer: 'Nơi phát hành',
+  ticketsLease: 'Cỡ lease',
+  ticketsIssued: 'Khoảng đã phát',
+  ticketsNoChains: 'Server chưa có chain nào.',
+  ticketsUnmeasured: 'Chưa đo — không có dữ liệu phát hành',
+  ticketsNoDrops: 'Không phát hiện mất vé',
+  ticketsDropped: 'Thiếu {n} vé',
+  ticketsBlindSpot: 'Giới hạn điểm mù {bound}, lease {lease}.',
+
+  cadTitle: 'Nhịp anchor',
+  cadSub: 'Khoảng anchor tối ưu chi phí, tính từ số đo của bạn.',
+  cadLam: 'Tốc độ λ',
+  cadC: 'Chi phí anchor',
+  cadW: 'Thiệt hại mỗi entry',
+  cadRho: 'Chiết khấu ρ',
+  cadDelta: 'Trễ anchor',
+  cadTMax: 'Trễ tối đa',
+  cadM: 'Hệ số',
+  navOpen: 'Mở menu',
+  navClose: 'Đóng menu',
 
   /* --------------------------------------------------------------- nav */
   navDash: 'Dashboard',
@@ -490,8 +617,7 @@ const vi: Record<MessageKey, string> = {
   nothingYet: 'chưa có gì',
   noChains: 'Server này chưa có chain nào. Ghi một entry và nó sẽ xuất hiện ở đây.',
   authNeeded: 'Server này cần bearer credential cho các lệnh đọc /v1.',
-  authOpen:
-    'Server này nhận lệnh đọc /v1 mà không cần credential: chưa có API key nào được cấp trên nó và WAXSEAL_API_KEY chưa được đặt. Cấp khóa đầu tiên chính là việc đóng nó lại — từ lúc đó /v1/meta báo write_auth: bearer_required. Token nhập ở đây vẫn được gửi.',
+  authOpen: 'Không cần credential: chưa cấp khóa nào, WAXSEAL_API_KEY chưa đặt. Cấp khóa đầu tiên là đóng lại.',
   authUnknown: 'Server chưa cho biết các lệnh đọc /v1 có cần credential hay không.',
   authField: 'WAXSEAL_API_KEY',
   authApply: 'Dùng token này',
@@ -540,8 +666,7 @@ const vi: Record<MessageKey, string> = {
   colPayload: 'payload (đã redact)',
   colEntryHash: 'entry_hash',
   entriesFoot: 'Payload đã redact trước khi hash.',
-  entriesFootWhy:
-    'Không có gì để bỏ redact và cũng không có nút nào làm việc đó: redaction chạy trước khi tính payload_hash, nên bản rõ chưa từng chạm tới server này.',
+  entriesFootWhy: 'Redaction chạy trước khi tính payload_hash, nên bản rõ chưa từng tới server này.',
   entriesEmpty: 'Chain này chưa có entry nào.',
   entriesMore: 'Đang hiển thị {shown} entry đầu. Chain còn nhiều hơn.',
   segFoot: 'Xoay vòng ở 16 MiB · segment nối nhau bằng rotation binding seq-0.',
@@ -591,8 +716,7 @@ const vi: Record<MessageKey, string> = {
   preflightTitle: 'Preflight',
   preflightSub: 'Cấu hình hiện tại chống được bậc nào trong thang năng lực kẻ tấn công.',
   preflightUnavailableTitle: 'Bản build này chưa xác định được bậc của một triển khai',
-  preflightUnavailableBody:
-    'Bản waxseal sau server này không có subcommand preflight, nên chưa có gì được đo. Thang bậc vẫn hiển thị vì các bậc là có thật — threat model định nghĩa chúng — nhưng không badge nào bên dưới là một kết luận về triển khai này. Bản thân lệnh này đã ship ở Workstream E: đặt một bản waxseal mới hơn sau server này thì phần đo sẽ hiện ra, không cần sửa gì.',
+  preflightUnavailableBody: 'Bản build này không có lệnh preflight, nên chưa đo gì bên dưới.',
   preflightBadgeUnmeasured: 'chưa đo',
   preflightScopeLine: 'Tiền tố đã anchor: tamper-evident, và chỉ trong phạm vi in ở trên.',
   preflightTailLine: 'Đuôi đang ghi: ',
@@ -602,8 +726,7 @@ const vi: Record<MessageKey, string> = {
   ledgerTitle: 'Ledger status',
   ledgerSub: 'Extra evm (opt-in) · RPC + địa chỉ contract do operator cung cấp.',
   ledgerUnavailableTitle: 'Triển khai này chưa cấu hình ledger nào',
-  ledgerUnavailableBody:
-    'Extra evm là opt-in và server này không có RPC endpoint lẫn địa chỉ contract. Ba contract bên dưới là bề mặt thiết kế, không phải bề mặt đã triển khai: mọi trạng thái đều đọc là “chưa cấu hình” vì không có gì được truy vấn. Anchor on-chain sẽ có ở Workstream F.',
+  ledgerUnavailableBody: 'Extra evm là opt-in: server này không có RPC endpoint lẫn địa chỉ contract, nên chưa truy vấn gì.',
   ledgerAddrNone: 'chưa cấu hình địa chỉ contract',
   rpcTitle: 'RPC readers (≥ 2, finalized)',
   rpcNone: 'Chưa cấu hình RPC reader nào.',
@@ -636,8 +759,7 @@ const vi: Record<MessageKey, string> = {
     'Những endpoint mà bên thứ ba đọc được mà không cần xin phép server này. Bấm vào link, JSON thô mở ở tab mới.',
   readApiPublicTitle: 'Công khai — không cần credential',
   readApiAuthedTitle: 'Cần bearer credential (WAXSEAL_API_KEY)',
-  readApiAuthedNote:
-    'Liệt kê cho đủ và cố ý không đặt link: một link trả 401 chẳng dạy được gì. Đường ghi hoàn toàn không tiếp cận được từ console này.',
+  readApiAuthedNote: 'Liệt kê cho đủ, không đặt link: link trả 401 chẳng dạy được gì.',
   readApiNeedsChain: 'Chọn một chain để dựng các link theo chain:',
   readApiNoChain: 'Server này chưa có chain nào nên chưa có URL theo chain để liên kết.',
   colMethod: 'method',
@@ -675,24 +797,20 @@ const vi: Record<MessageKey, string> = {
   operatorNoEmail: 'không ghi nhận địa chỉ email nào cho operator này',
   operatorsNone:
     'Server này chưa có operator nào. `waxseal-server-admin seed` tạo những người đầu tiên, và biểu mẫu bên dưới thêm người tiếp theo.',
-  operatorsFoot:
-    'Hai cột trong bản mock bị bỏ đi vì server không theo dõi cả hai: không có 2FA và không có mốc “hoạt động lần cuối”. Một cột toàn dấu gạch ngang còn tệ hơn là không có cột.',
+  operatorsFoot: 'Không có cột 2FA và “hoạt động lần cuối”: server không theo dõi cả hai.',
   rolesTitle: 'Vai trò',
   roleAdmin: 'Admin',
-  roleAdminDesc:
-    'Quản trị server, các operator và các khóa của nó — và vẫn không sửa được một entry, vì không ai sửa được. Trong từ vựng của server này không có scope entries:edit, nên không khóa nào nó cấp phát mang được quyền đó.',
+  roleAdminDesc: 'Quản trị server, operator và khóa — và vẫn không sửa được entry, vì không ai sửa được.',
   roleAuditor: 'Auditor',
   roleAuditorDesc:
     'Đọc trail, chạy verify / report / export-proof, import bằng chứng. Không append được và không quản lý được khóa.',
   roleViewer: 'Viewer',
   roleViewerDesc: 'Chỉ đọc: dashboard và read-API công khai.',
   roleWriter: 'Writer',
-  roleWriterDesc:
-    'Tài khoản máy. Nó append và đọc head, nhưng không đọc được chính trail nó đang ghi vào — nhờ vậy một writer key bị lộ không đồng nghĩa với một audit trail bị lộ.',
+  roleWriterDesc: 'Tài khoản máy. Append và đọc head; không đọc được trail nó ghi vào.',
   roleHolders: '{count} người trên server này',
   roleScopesFrom: 'Scope đúng như server báo cáo cho {username}.',
-  roleScopesNone:
-    'Không operator đang hoạt động nào ở đây giữ vai trò này, nên server chưa báo cáo tập scope nào cho nó. Vai trò vẫn tồn tại — chỉ là màn hình này chưa đo được scope của nó, và một danh sách gõ tay vào đây sẽ là mô hình quyền không ai thực thi.',
+  roleScopesNone: 'Không operator hoạt động nào giữ vai trò này, nên server chưa báo tập scope cho nó.',
 
   /* ------------------------------------------------------------- invite */
   inviteTitle: 'Thêm operator',
@@ -708,8 +826,7 @@ const vi: Record<MessageKey, string> = {
   inviteCreated: 'Đã tạo {username} với vai trò {role}. Chưa cấp khóa nào cho họ.',
   inviteErrExists:
     'Server này đã có operator tên {username}. Username là danh tính và không bao giờ dùng lại, nên lần này không tạo ra gì cả.',
-  inviteErrRole:
-    'Server từ chối vai trò đó. Nó phân giải vai trò một cách nghiêm ngặt thay vì lấy giá trị mặc định cho một vai trò lạ, vì mặc định sẽ là leo thang quyền âm thầm hoặc hạ quyền âm thầm tùy chiều nó rơi.',
+  inviteErrRole: 'Server từ chối vai trò đó. Vai trò lạ bị từ chối, không bao giờ lấy mặc định.',
   inviteErrUsername: 'Server từ chối username đó: {detail}',
   inviteErrOther: 'Server từ chối: {detail}',
 
@@ -727,8 +844,7 @@ const vi: Record<MessageKey, string> = {
   keyRevoked: 'đã thu hồi',
   keyRevokedAt: 'thu hồi {at}',
   keysNone: 'Server này chưa cấp API key nào.',
-  keysFoot:
-    'Khóa đã thu hồi vẫn nằm trong danh sách: một lần thu hồi là một phần của lịch sử mà auditor đến để đọc, và một danh sách giấu nó đi sẽ trả lời câu “đã từng có những credential nào?” bằng một tập nhỏ hơn sự thật.',
+  keysFoot: 'Khóa đã thu hồi vẫn được liệt kê: một lần thu hồi là phần của lịch sử.',
   mintTitle: 'Cấp khóa',
   mintOperator: 'operator',
   mintLabel: 'nhãn',
@@ -741,8 +857,7 @@ const vi: Record<MessageKey, string> = {
   mintErrNoOperator: 'Server này không có operator tên {username}, nên không cấp khóa nào.',
   mintErrOther: 'Server từ chối: {detail}',
   mintedTitle: 'Sao chép khóa này ngay — nó chỉ hiện một lần và không bao giờ hiện lại',
-  mintedBody:
-    'Server chỉ lưu SHA-256 của nó. Trong console này không có nút “hiện lại” ở bất cứ đâu, vì không còn gì để hiện: đóng bảng này là giá trị đó biến mất khỏi trình duyệt và không lấy lại được từ server. Nếu làm mất, hãy cấp khóa mới và thu hồi khóa này.',
+  mintedBody: 'Server chỉ lưu SHA-256. Hãy copy ngay — không thể hiện lại.',
   mintedFor: '{label} · {username}',
   mintedCopy: 'Sao chép',
   mintedCopied: 'Đã chép',
@@ -751,8 +866,7 @@ const vi: Record<MessageKey, string> = {
   revoking: 'đang thu hồi…',
   revokeDone:
     'Đã thu hồi {label}. Từ giờ khóa bị từ chối, và dòng của nó vẫn nằm lại trong danh sách với trạng thái đã thu hồi.',
-  revokeNothing:
-    'Lời gọi đó không thu hồi gì cả. {label} đã bị thu hồi từ trước, hoặc server này không có khóa nào mang id đó — server trả về revoked: false, và báo đó là thành công sẽ là khẳng định một việc thu hồi chưa từng xảy ra.',
+  revokeNothing: 'Không thu hồi gì. {label} đã bị thu hồi trước đó, hoặc không có khóa nào mang id đó.',
   revokeFailed: 'Thu hồi thất bại: {detail}',
 
   /* ------------------------------------------------ the credential in hand */
@@ -761,18 +875,14 @@ const vi: Record<MessageKey, string> = {
   principalKey: 'khóa {id}',
   principalScopes: 'Credential này cho phép những gì, đúng như server báo cáo:',
   principalBootstrapTitle: 'Khóa bootstrap — một credential, không phải một operator',
-  principalBootstrapBody:
-    'Đây là WAXSEAL_API_KEY, đặt trong biến môi trường của server. Nó không có bản ghi nào trong kho, không có chủ sở hữu và không có lịch sử, và nó cố ý không nằm trong bảng operator bên dưới: nó tồn tại để một triển khai mới có thể cấp khóa thật đầu tiên. Hãy cấp một khóa và dùng khóa đó thay thế.',
+  principalBootstrapBody: 'WAXSEAL_API_KEY từ môi trường server. Không phải operator, không có dòng bên dưới.',
   principalOpenTitle: 'Server này chưa cấu hình credential nào',
-  principalOpenBody:
-    'Mọi lời gọi đều được nhận và báo cáo là “unauthenticated”. Đó không phải một operator và không nằm trong bảng bên dưới. Cấp API key đầu tiên chính là việc đóng server này lại: sau đó /v1/meta sẽ báo write_auth: bearer_required, và thông báo này biến mất.',
+  principalOpenBody: 'Mọi lời gọi được nhận là “unauthenticated”. Cấp API key đầu tiên sẽ đóng server này.',
   principalSyntheticTitle: 'Credential này không phải một trong các operator được liệt kê',
-  principalSyntheticBody:
-    'Server trả lời whoami với is_operator: false, nghĩa là principal đứng sau token này không có bản ghi nào trong kho operator. Đó là một credential, không phải một con người, và không phải một dòng trong bảng bên dưới.',
+  principalSyntheticBody: 'whoami trả về is_operator: false — một credential, không phải người, không có dòng bên dưới.',
   principalUnknown: 'Server chưa cho biết credential này là ai.',
   patTitle: 'Personal access token',
-  patBody:
-    'Bearer token ở ô bên dưới có thể là một trong hai credential: WAXSEAL_API_KEY bootstrap lấy từ biến môi trường của server, hoặc bất kỳ khóa operator nào cấp ở đây. Cả hai đều xác thực được và chúng không phải cùng một principal — /v1/whoami là thứ cho biết bạn đang cầm cái nào. Khóa đi trong header Authorization, không bao giờ trong URL hay argv.',
+  patBody: 'Dùng được cả hai: WAXSEAL_API_KEY bootstrap, hoặc khóa operator. /v1/whoami cho biết bạn đang cầm cái nào.',
   adminDocsWhere:
     'Cách seed operator và cấp khóa đầu tiên được ghi trong server/docs/deployment.md.',
   tokenTitle: 'Token cho tab trình duyệt này',
@@ -783,8 +893,7 @@ const vi: Record<MessageKey, string> = {
   benchTitle: 'Benchmark',
   benchSub: 'Số đo byte-counting từ test receipts — không wall-clock.',
   benchPublishedTitle: 'Số đã công bố, không phải phép đo trên triển khai này',
-  benchPublishedBody:
-    'Bốn dòng dưới đây là các con số ghi trong CHANGELOG 0.1.5 cho workload tham chiếu. Server này không tự benchmark và chưa đo gì cả: đọc chúng như một thuộc tính của các trail trên máy này là đọc một khẳng định chưa từng được nói về nó.',
+  benchPublishedBody: 'Số liệu từ workload tham chiếu trong CHANGELOG 0.1.5. Server này chưa đo gì.',
   benchFoot:
     'Biên nhận khả phủ chứng: bỏ tối ưu (deque / offset resume) → test đỏ. Số đo ghi vào CHANGELOG.',
   benchTail: 'tail -n 5 trên trail 100k entry (bytes đọc)',
@@ -798,8 +907,7 @@ const vi: Record<MessageKey, string> = {
   intTitle: 'Integrations',
   intSub: '9 tích hợp — ghi trước khi thực thi, redact trước khi hash, không bao giờ chặn host.',
   intDetectTitle: 'Không nhìn thấy trạng thái cài đặt từ đây',
-  intDetectBody:
-    'Đây là sự thật về thư viện, không phải về máy này: hook đã cài hay chưa nằm trong thư mục home của agent framework trên máy chạy agent, và server này không bao giờ nhìn vào đó. Mọi chấm bên dưới đều xám và có nghĩa “không phát hiện được từ đây” — không phải “chưa cài”.',
+  intDetectBody: 'Không phát hiện được từ đây: hook nằm trên máy chạy agent, server này không đọc tới đó.',
   provClaudeCode: 'PreToolUse / PostToolUse hooks',
   provCodex: 'lifecycle hooks · ≥ 0.149.0',
   provCursor: 'Agent Hooks (.cursor/hooks.json)',
@@ -845,12 +953,9 @@ const vi: Record<MessageKey, string> = {
   stateUnexpectedExitExplain:
     'lệnh thoát với mã mà server này không ánh xạ thành verdict — không có verdict nào được tính',
   stateUnknownExplain: 'server trả về một status mà bản build này không nhận ra',
-  stateUnverifiableDetail:
-    'Một hoặc nhiều row mang schema fingerprint mà bản build này không tái tạo được. Tính lại chúng dưới một tuple mà chúng chưa từng được ký là lời nói dối duy nhất mà một cơ chế tamper-evidence không bao giờ được phép nói, nên chúng được báo là unverifiable by name. Đây là phát biểu về verifier này, không phải về các row đó.',
-  stateAbsentDetail:
-    'Không có trail nào ở đường dẫn server suy ra cho chain này. Không đọc gì và không tạo gì. Đây không phải một kết luận về nội dung.',
-  stateUnavailableDetail:
-    'Bản waxseal sau server này không có subcommand đó. Màn hình vẫn hiện thay vì bị ẩn để “chưa ship” không bao giờ bị hiểu nhầm thành “đã ship và không tìm thấy gì”.',
+  stateUnverifiableDetail: 'Một số row mang fingerprint bản build này không tái tạo được — đây là điều về verifier, không phải về row.',
+  stateAbsentDetail: 'Không có trail ở đường dẫn suy ra cho chain này. Không đọc gì, không tạo gì.',
+  stateUnavailableDetail: 'Bản build này không có subcommand đó. Vẫn hiện thay vì ẩn, để “chưa ship” không bị đọc thành “không tìm thấy gì”.',
 }
 
 const TABLES: Record<Lang, Record<MessageKey, string>> = { en, vi }

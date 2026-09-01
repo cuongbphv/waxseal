@@ -174,6 +174,19 @@
   --card-pad-x: 20px;
   --row-pad-y: 13px;
 
+  /* The two widths the layout changes at. A media query cannot read a custom
+   * property, so the numbers are repeated in the query that uses them — these
+   * declarations are the reference the repetitions must match:
+   *   compact (<= 900px) the sidebar leaves the flow and becomes a drawer
+   *   narrow  (<= 560px) padding and type tighten
+   * Nothing else is allowed to invent a third breakpoint. */
+  --bp-compact: 900px;
+  --bp-narrow: 560px;
+
+  --drawer-scrim: rgb(29 29 31 / 32%);
+  --z-drawer: 40;
+  --z-scrim: 30;
+
   /* Widths the design gives its tables so a narrow window scrolls the table
    * rather than the page. */
   --table-min-trails: 900px;
@@ -195,4 +208,33 @@
   /* The system's only micro-interaction. */
   --press-scale: 0.95;
   --press-scale-soft: 0.97;
+}
+
+/* Layout scalars retuned per breakpoint, and only the scalars.
+ *
+ * Every screen inherits its spacing from these, so tightening a phone layout is
+ * an edit here rather than a media query in each of the fourteen views. The two
+ * widths are the ones declared as --bp-compact and --bp-narrow above; a query
+ * that invents its own number is a bug.
+ */
+@media (max-width: 900px) {
+  :root {
+    --content-pad-x: 20px;
+    --content-pad-y: 20px;
+    --content-gap: 14px;
+    --content-gap-lg: 16px;
+  }
+}
+
+@media (max-width: 560px) {
+  :root {
+    --content-pad-x: 14px;
+    --content-pad-y: 16px;
+    --card-pad-x: 14px;
+    --card-pad-y: 14px;
+    --fs-h1: 21px;
+    --fs-stat: 26px;
+    --space-16: 20px;
+    --space-20: 28px;
+  }
 }

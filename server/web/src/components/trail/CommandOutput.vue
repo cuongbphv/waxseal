@@ -13,7 +13,7 @@ import { useAsyncData } from '@/composables/useAsyncData'
 import AsyncBlock from '@/components/ui/AsyncBlock.vue'
 import OutputPanel from '@/components/ui/OutputPanel.vue'
 import VerdictBadge from '@/components/ui/VerdictBadge.vue'
-import TokenField from '@/components/app/TokenField.vue'
+import AuthNeeded from '@/components/app/AuthNeeded.vue'
 
 const props = defineProps<{ run: () => Promise<Outcome> }>()
 
@@ -27,7 +27,7 @@ const outcome = useAsyncData<Outcome>(() => props.run())
     :error="outcome.error.value"
     @retry="outcome.run"
   >
-    <template #unauthorized><TokenField /></template>
+    <template #unauthorized><AuthNeeded /></template>
     <div v-if="outcome.data.value" class="stack">
       <VerdictBadge :outcome="outcome.data.value" />
       <OutputPanel

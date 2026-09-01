@@ -15,9 +15,23 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 import uvicorn
+from fastapi import FastAPI
 
 from waxseal_server.app import create_app
 from waxseal_server.config import Settings
+
+
+def build() -> FastAPI:
+    """An app built from the environment — the `uvicorn --factory` entry point.
+
+    Exists so a local run can use `--reload`, which needs uvicorn to import and
+    re-import the app itself rather than be handed an instance. `main` below
+    goes through it too, so the reloading path and the container path build the
+    same object from the same environment and cannot drift.
+    """
+    settings = Settings.from_env()
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    return create_app(settings)
 
 
 def main(

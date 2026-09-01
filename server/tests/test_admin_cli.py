@@ -70,12 +70,12 @@ class TestSeed:
         # A machine account has no mailbox. Putting the human's address on it
         # would attribute a credential nobody holds to a person who does.
         store = InMemoryOperatorStore()
-        seed_into(store, email="cuongbphv@gmail.com")
-        assert store.get_operator("admin").email == "cuongbphv@gmail.com"
+        seed_into(store, email="admin@example.test")
+        assert store.get_operator("admin").email == "admin@example.test"
         assert store.get_operator("user-waxseal").email is None
 
     def test_the_seeded_writer_cannot_read_the_trail_it_writes_to(self) -> None:
-        # The reason the dogfood account is a writer and not an admin: the key
+        # The reason the automation account is a writer and not an admin: the key
         # lives on a developer's machine, and leaking it must not leak the trail.
         store = InMemoryOperatorStore()
         seed_into(store)

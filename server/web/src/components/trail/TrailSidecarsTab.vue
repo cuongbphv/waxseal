@@ -21,7 +21,7 @@ import { loadReport } from '@/services/chains'
 import { loadReceiptChecks, type ChainReceiptChecks } from '@/services/receipts'
 import { useAsyncData } from '@/composables/useAsyncData'
 import AsyncBlock from '@/components/ui/AsyncBlock.vue'
-import TokenField from '@/components/app/TokenField.vue'
+import AuthNeeded from '@/components/app/AuthNeeded.vue'
 import SidecarCard from './SidecarCard.vue'
 
 const props = defineProps<{ chainId: string }>()
@@ -102,7 +102,7 @@ const sealkey = computed<Measurement>(() => ({
     :error="report.error.value"
     @retry="report.run"
   >
-    <template #unauthorized><TokenField /></template>
+    <template #unauthorized><AuthNeeded /></template>
 
     <div class="grid">
       <SidecarCard :name="t('sidecarAttest')" :description="t('sidecarAttestDesc')" :status="attest" />

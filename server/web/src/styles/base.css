@@ -129,10 +129,14 @@ input::placeholder {
   border: 0;
 }
 
+/* The hidden offset is its own value, not a spacing step. It was `--space-20`,
+ * which the narrow breakpoint retunes to 28px — shorter than the link itself,
+ * so the link peeked over the top of every phone-width screen. A token that a
+ * media query is allowed to shrink cannot also be what hides something. */
 .skip-link {
   position: absolute;
   left: var(--space-4);
-  top: calc(-1 * var(--space-20));
+  top: -6rem;
   z-index: 20;
   background: var(--color-canvas);
   border: var(--hairline) solid var(--color-hairline);

@@ -15,6 +15,8 @@ import { useRoute } from 'vue-router'
 import { LANGS, useI18n, type Lang, type MessageKey } from '@/lib/i18n'
 import { shortHash } from '@/lib/format'
 import { activeHead } from '@/composables/useActiveChain'
+import { toggleDrawer } from '@/composables/useNavDrawer'
+import StrokeIcon from '@/components/ui/StrokeIcon.vue'
 
 const route = useRoute()
 const { t, lang, setLang } = useI18n()
@@ -44,6 +46,10 @@ const langLabels: Record<Lang, MessageKey> = { vi: 'langVi', en: 'langEn' }
 
 <template>
   <header class="header">
+    <button type="button" class="nav-toggle" :aria-label="t('navOpen')" @click="toggleDrawer">
+      <StrokeIcon name="menu" />
+    </button>
+
     <nav class="crumbs" :aria-label="t('sectionPortal')">
       <span class="server">{{ serverName }}</span>
       <span class="slash" aria-hidden="true">/</span>
@@ -80,13 +86,43 @@ const langLabels: Record<Lang, MessageKey> = { vi: 'langVi', en: 'langEn' }
   gap: var(--space-8);
   padding: var(--header-pad-y) var(--content-pad-x);
   background: var(--color-canvas-80);
+  /* NO hand-written `-webkit-` twin here, and adding one back reopens the bug.
+   * This rule carried both spellings until 01/09/2026; the build's own
+   * autoprefixer then emitted ONLY `-webkit-backdrop-filter`, which Chrome does
+   * not implement, so the header lost its frost and became flat 80% white —
+   * every row of content scrolling beneath it stayed legible straight through
+   * the breadcrumb. Declaring the standard property alone makes the build emit
+   * both spellings. Verified against the built bundle, not the source. */
   backdrop-filter: var(--header-blur);
-  -webkit-backdrop-filter: var(--header-blur);
   border-bottom: var(--hairline) solid var(--color-hairline);
   position: sticky;
   top: 0;
   z-index: 5;
   flex-wrap: wrap;
+}
+
+/* The frost is what earns the 80% background above: a translucent header with
+ * no blur behind it does not hide the content it overlaps. Where the blur
+ * cannot render, the header goes opaque rather than quietly staying
+ * see-through — the same instinct as rule 6, that a degradation must show
+ * itself rather than pass for the working thing. */
+@supports not (backdrop-filter: blur(1px)) {
+  .header {
+    background: var(--color-canvas);
+  }
+}
+
+/* Shown only where the sidebar has left the flow, so it can never be the
+ * second way to reach a nav that is already on screen. */
+.nav-toggle {
+  display: none;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: var(--space-2);
+  margin-right: var(--space-3);
+  border-radius: var(--radius-nav);
+  color: var(--color-ink);
 }
 
 .crumbs {
@@ -96,6 +132,7 @@ const langLabels: Record<Lang, MessageKey> = { vi: 'langVi', en: 'langEn' }
   display: flex;
   gap: var(--space-3);
   align-items: baseline;
+  flex: 1;
 }
 
 .slash {
@@ -159,5 +196,28 @@ const langLabels: Record<Lang, MessageKey> = { vi: 'langVi', en: 'langEn' }
   border-radius: var(--radius-pill);
   background: var(--tint-blue);
   color: var(--color-primary);
+}
+
+@media (max-width: 900px) {
+  .nav-toggle {
+    display: block;
+  }
+
+  /* The host name is the least useful thing here on a small screen: the
+   * operator knows which server they opened. The crumb that says WHERE they
+   * are stays. */
+  .server,
+  .slash {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  /* The head pill is a hash — it cannot usefully shrink, so it drops rather
+   * than wrapping the header onto a third line. It is on the trail screen
+   * itself, which is the only place it is load-bearing. */
+  .head-pill {
+    display: none;
+  }
 }
 </style>

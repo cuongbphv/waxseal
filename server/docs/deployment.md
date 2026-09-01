@@ -3,6 +3,9 @@
 This is a self-hosted application. "SaaS" here means the source ships so anyone
 can run it; waxseal operates no service and holds no data.
 
+> Vietnamese: [`deployment.vi.md`](deployment.vi.md). Both are updated together;
+> where they disagree, this one is correct.
+
 ## What it is
 
 Three surfaces in one process, deliberately kept apart:
@@ -29,11 +32,24 @@ qualification.
 ## Quick start
 
 ```bash
-docker compose -f server/docker-compose.yml up --build
+cd server
+./scripts/start-docker.sh           # PostgreSQL + server + portal, then seed
 # UI and API on http://127.0.0.1:8000
 ```
 
-Without Docker:
+On this machine, no Docker:
+
+```bash
+cd server
+./scripts/build.sh                  # backend deps + frontend bundle
+./scripts/start-local.sh --demo     # demo chains, then serve on :8000
+```
+
+Both are wrappers, not magic — the underlying commands, if you prefer them:
+
+```bash
+docker compose -f server/docker-compose.yml up --build
+```
 
 ```bash
 cd server/web && npm install && npm run build   # optional; the API runs without it
@@ -44,6 +60,36 @@ WAXSEAL_SERVER_DATA_DIR=./data uv run python -m waxseal_server
 If the UI was never built, `/` serves a page that says so and names the build
 command, and `GET /v1/meta` reports `"web_ui": "not_built"`. That is a labelled
 absence, not a missing page.
+
+## Scripts
+
+Everything below is automated in `server/scripts/`. Each takes `--help`.
+
+| Script | What it does |
+|---|---|
+| `build.sh` | Backend deps (`uv sync`), frontend bundle (`npm run build`). `--docker` also builds the image, `--check` also runs pytest + coverage floor + mypy + `vue-tsc`. |
+| `start-local.sh` | Runs the server on this machine. `--demo` seeds demo chains first, `--reload` reloads on source change, `--port` / `--data` override the defaults. |
+| `start-docker.sh` | Brings up PostgreSQL + server + portal, waits for health, then seeds operators. `--down`, `--logs`, `--no-build`. |
+| `seed-demo.sh` | Writes demo chains through the waxseal **library**, so the demo cannot be a shape no real client produces. |
+| `screenshots.sh` | Captures every screen in both languages into `docs/screenshots/<lang>/`. |
+
+```sh
+cd server
+./scripts/build.sh --check          # build everything, then prove it
+./scripts/start-local.sh --demo     # http://127.0.0.1:8000 with data to look at
+./scripts/start-docker.sh           # the real stack, on PostgreSQL
+```
+
+`start-docker.sh` **rebuilds by default**, and that is deliberate: the image
+bakes the built frontend in at build time, so a container started without a
+rebuild serves whatever bundle the last build produced. That is the single most
+common way an edited screen appears to change nothing. `--no-build` exists for
+when you know you want the old bundle.
+
+It also refuses to start when `WAXSEAL_API_KEY` and `WAXSEAL_WITNESS_API_KEY`
+are set to the same value, because a witness holding the chain's write
+credential could append forged entries to the very chain it exists to
+cross-check (REMOTE.md section 8).
 
 ## Operators, roles and API keys
 
@@ -112,6 +158,62 @@ because arguments are visible in a process listing (REMOTE.md section 5).
 | `WAXSEAL_SERVER_DATABASE_URL` | unset | PostgreSQL for operators and API keys. Unset means an in-memory store that forgets them on restart. |
 | `WAXSEAL_API_KEY` | unset | Bootstrap bearer token, admin scopes. |
 | `WAXSEAL_WITNESS_API_KEY` | unset | Bearer token for the witness. Never a chain or operator key. |
+
+### Two kinds of configuration, and why they are separate
+
+Environment variables are what the **process** was started with. Everything in
+the table above is read once at start-up and is read-only at run time: changing
+`WAXSEAL_SERVER_DATA_DIR` means restarting the process that holds those files
+open, and changing a credential from the console it authenticates is how a
+console locks itself out or quietly widens its own access.
+
+Alongside them the server keeps a small **settings store** — operational values
+an operator changes without a redeploy. `GET /v1/settings` returns both halves
+and the Settings screen renders them together, so "what is this server
+configured with" has one answer in one place.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `page_size` | `500` | Entries per page of `/v1/chains/{id}/entries`. |
+| `ledger_rpc_urls` | unset | Comma-separated JSON-RPC endpoints. **Two or more**, see below. |
+| `ledger_liveness_address` | unset | `AnchoringLiveness` contract. Setting it is what turns the Ledger screen on. |
+| `ledger_registry_address` | unset | `FingerprintRegistry` contract. |
+| `ledger_bond_address` | unset | `BondedCheckpoints` contract. Requires `ledger_writer_address`. |
+| `ledger_writer_address` | unset | The writer whose bond to check. |
+| `ledger_trail_id` | unset | On-chain trail identifier. Defaults to the resolved trail path. |
+
+The store lives in the same PostgreSQL as the operators, and falls back to memory
+when `WAXSEAL_SERVER_DATABASE_URL` is unset. Both stores follow that one
+variable deliberately: durable operators with forgetful settings would be a
+deployment that looks configured and silently reverts on restart.
+`GET /v1/settings` reports which backend answered, so a setting that vanished has
+its reason on the screen.
+
+### What the settings store will never hold
+
+Four values are refused **by name**, not merely absent, and the refusal carries
+its reason so nobody adds them later as an oversight:
+
+- `api_key` and `witness_api_key` — credentials. The operator store keeps only a
+  key's SHA-256 precisely so the database cannot leak a live credential, and the
+  witness key belongs to a *different administrative authority*: a shared
+  settings table would put both under one editor.
+- `database_url` — cannot live in the database it names.
+- `data_dir` — held open by the running process.
+
+`GET /v1/settings` reports the three secrets as `state: "set" | "unset"` and
+there is **no field a value could occupy**. That is what stops a "show me the
+configuration" page from becoming a way to read a credential out of a
+deployment. Both mutating routes refuse these keys with `404 no_such_setting`.
+
+### Why the ledger needs two RPC endpoints
+
+`ledger_rpc_urls` refuses a single endpoint, and so does the library behind it:
+one endpoint cannot disagree with itself, so a "cross-check" against it is not
+one. An operator relying on a single voice is blind to exactly the eclipse the
+cross-check exists to detect. Configure two independent providers or leave it
+unset — with fewer than two, `ledger-status` answers `unverifiable` and says why
+rather than reporting a status it could not confirm.
 
 ### Why the trails are not in PostgreSQL
 
@@ -235,6 +337,46 @@ Imported trails are somebody else's evidence: the stored copy is `chmod 0400`
 and lives in its own namespace, so no chain route can address one and no append
 path can reach it.
 
+## The portal
+
+Sixteen screens, bilingual (VI/EN), responsive down to 390px. The sidebar
+becomes an overlay drawer below 900px.
+
+![Dashboard](screenshots/en/01-dashboard.png)
+
+| | |
+|---|---|
+| ![Cadence](screenshots/en/11-cadence.png) | ![Settings](screenshots/en/19-settings.png) |
+| **Cadence** — cost-optimal anchoring interval from the operator's own measurements. Opens no trail. | **Settings** — the credential, the environment, and the knobs. Secrets report `set`/`unset` and nothing else. |
+| ![Tickets](screenshots/en/10-tickets.png) | ![Trail output](screenshots/en/03-trail-output.png) |
+| **Tickets** — a missing ticket is a *detected* drop; no issuer data is *unmeasured*. Never rendered as "0 drops". | **Trail** — every verdict carries the `argv` that produced it, so an operator can reproduce it. |
+
+Full sets: [`docs/screenshots/en/`](screenshots/en/) and
+[`docs/screenshots/vi/`](screenshots/vi/), desktop and phone, regenerated by
+`./scripts/screenshots.sh`.
+
+The API token used to be a card on nine screens; it is now set once, in
+Settings. A credential field repeated twelve times is twelve places to paste a
+key into and twelve places to leave one behind.
+
+### Screenshots are generated, not curated
+
+`screenshots.sh` stands up its own server with its own demo data on a scratch
+port and photographs that — never a real deployment. Two guards run before each
+shutter, because both failures are invisible in review once the frame is a PNG:
+
+- every screen is checked for horizontal overflow;
+- the rendered text is scanned for a home path, an API key or a bearer token.
+
+Paths are pinned under `/tmp/waxseal-demo`, and the interpreter is reached
+through a symlink there. That is not cosmetic: every output panel prints the
+`argv` that produced it, so a frame captured straight from a checkout renders the
+developer's home directory into the published image.
+
+Demo data is written through the waxseal **library**, so it cannot be a shape no
+real client produces. It carries no organisation, no person, no address and no
+credential — placeholder identities only (`agent-a`, `reviewer-1`).
+
 ## Not implemented, and why
 
 Recorded here rather than left for someone to discover, on the same discipline
@@ -265,6 +407,79 @@ the conformance ledger uses: written is not shipped.
 - **No `.receipts` sidecar on the client side.** That is Workstream J2. This
   server already publishes the head a client would store, so the sidecar lands
   without a server change.
+- **No longer on this list: the Ledger screen.** It reported "not configured" and
+  could report nothing else, because there was nowhere to put an RPC endpoint or
+  a contract address. The settings store holds those now and
+  `GET /v1/chains/{id}/ledger-status` runs the command, so the screen shows the
+  real reading. What has *not* changed is the unconfigured case: it is still a
+  labelled state naming the setting that would fix it, never a status nobody
+  read. Note that a working cross-check needs **two** independent RPC providers,
+  which is a procurement decision rather than a configuration one.
+- **`receipt` is not exposed over HTTP.** It is read-only against the trail, but
+  it writes extracted receipt and frame files into an operator-named `--out`
+  directory. A route for it would make this server write files on behalf of a
+  request, and the CLI is the right place to run it.
+
+## The read surface
+
+Sixteen of the wheel's twenty commands are reads. Eleven are reachable over
+HTTP; the four that write are not, and cannot be reached even by name.
+
+| Route | Command | Scope |
+|---|---|---|
+| `GET /v1/chains/{id}/verify` | `verify` | `verify:run` |
+| `GET /v1/chains/{id}/report` | `report --json` | `verify:run` |
+| `GET /v1/chains/{id}/inspect` | `inspect` | `verify:run` |
+| `GET /v1/chains/{id}/segments` | `segments` | `verify:run` |
+| `GET /v1/chains/{id}/preflight` | `preflight` | `verify:run` |
+| `GET /v1/chains/{id}/checkpoint` | `checkpoint` | `verify:run` |
+| `GET /v1/chains/{id}/export-proof/{seq}` | `export-proof` | `proof:export` |
+| `GET /v1/chains/{id}/tail?n=` | `tail` | **`trails:read`** |
+| `GET /v1/chains/{id}/consistency?old_seq=&old_root=` | `consistency` | `verify:run` |
+| `GET /v1/chains/{id}/verify-handoff?origin=` | `verify-handoff` | `verify:run` |
+| `GET /v1/chains/{id}/reconcile-tickets?issuer=&lease_size=&issued=` | `reconcile-tickets --json` | `verify:run` |
+| `GET /v1/chains/{id}/ledger-status` | `ledger-status --json` | `verify:run` |
+| `GET /v1/cadence?lam=&c=&w=&rho=&delta=&t_max=&M=` | `cadence` | `verify:run` |
+
+`anchor`, `install`, `registry` and `bond` write. They are absent from the
+server's read-only command set, so no HTTP request reaches them — CLAUDE.md
+rule 4 ("verify reports, never repairs") expressed as a URL table rather than a
+promise.
+
+Three things in that table are not obvious:
+
+- **`tail` answers to `trails:read`, not `verify:run`.** It prints entry
+  content, so it is the same disclosure as `/entries` and must answer to the
+  same scope. A writer key must not be able to read back the trail it extends.
+- **Every query parameter becomes an element of `argv`**, which is the one place
+  this server turns caller input into a subprocess argument. Each is validated
+  *before* the subprocess exists — a validator that rejects afterwards has
+  already run the command it meant to prevent. Anchored patterns, not `float()`,
+  which accepts `inf`, `nan` and a leading sign.
+- **`verify-handoff --origin` takes a chain id, never a path.** The server
+  resolves it, so a request cannot name an arbitrary file on the host as the
+  origin history.
+
+### `cadence` opens no trail
+
+It is the only read with no chain in it: every input is a measurement the
+operator supplies, so a server holding no chains at all still answers it. Nothing
+is prefilled and no parameter has a default — a cadence computed from a number
+this server chose would be advice nobody measured, printed with the confidence
+of advice somebody did. It returns a recommended *band*, never a bare point.
+
+### `ledger-status` reads its arguments from the settings store
+
+The one read whose arguments do not come from the request. An operator configures
+the endpoints and contracts once in Settings; a caller cannot point this server's
+RPC client at a host of their choosing. Three outcomes, none of them a fabricated
+status:
+
+| State | Meaning |
+|---|---|
+| `configured: false`, `reason: no_liveness_address` | Nothing to run. `missing` names the setting that would fix it. Not an error. |
+| `configured: false`, `reason: bond_without_writer` | A bond address with no writer. Named rather than sent to argparse, which would answer with a usage error — a server bug wearing no verdict. |
+| `configured: true` | The command ran. Its verdict is carried through verbatim, including the `unverifiable` it returns with fewer than two RPC endpoints. |
 
 ## Reads run the CLI
 

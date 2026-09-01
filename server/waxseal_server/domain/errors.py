@@ -61,3 +61,16 @@ class NoSuchOperator(Exception):
     Creating the operator instead would mint a credential with no role, which
     is worse than no credential.
     """
+
+
+class NoSuchSetting(Exception):
+    """A setting key that is not in the registry (HTTP 404).
+
+    Covers two different refusals and says which in the message: a key nobody
+    defined, and a key deliberately kept out of the store because it is a
+    credential or a bootstrap value. Both are refusals rather than 400s — the
+    request is well formed, the setting simply is not one this server has.
+
+    Accepting an unknown key would be worse than refusing it: a typo that saves
+    cleanly is indistinguishable from a change that took effect.
+    """

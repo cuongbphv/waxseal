@@ -33,6 +33,10 @@ export const PORTAL_SECTION: NavSection = {
     { id: 'dashboard', labelKey: 'navDash', icon: 'dashboard', hint: 'chains' },
     { id: 'import', labelKey: 'navImport', icon: 'import', hint: 'imports' },
     { id: 'preflight', labelKey: 'navPreflight', icon: 'preflight', hint: 'none' },
+    { id: 'consistency', labelKey: 'navCons', icon: 'proof', hint: 'none' },
+    { id: 'handoff', labelKey: 'navHandoff', icon: 'handoff', hint: 'none' },
+    { id: 'tickets', labelKey: 'navTickets', icon: 'tickets', hint: 'none' },
+    { id: 'cadence', labelKey: 'navCadence', icon: 'cadence', hint: 'none' },
     { id: 'ledger', labelKey: 'navLedger', icon: 'ledger', hint: 'none' },
     /* No hint: counting receipts costs one request per chain, and a badge is
      * not worth N round trips. Blank is how "not counted" renders. */
@@ -51,6 +55,7 @@ export const ADMIN_SECTION: NavSection = {
     { id: 'keys', labelKey: 'navKeys', icon: 'keys', hint: 'none' },
     { id: 'benchmark', labelKey: 'navBench', icon: 'bench', hint: 'none' },
     { id: 'integrations', labelKey: 'navInt', icon: 'int', hint: 'integrations' },
+    { id: 'settings', labelKey: 'navSettings', icon: 'settings', hint: 'none' },
   ],
 }
 

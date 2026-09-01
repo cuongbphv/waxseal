@@ -1,44 +1,98 @@
 <script setup lang="ts">
-/* Ledger status: the Workstream F surface, none of it configured.
+/* Ledger status — the real reading when it is configured, and a state when not.
  *
- * The three contracts and their descriptions are real design, so they are
- * shown. Their status is not: nothing was queried, because the `evm` extra is
- * opt-in and this deployment has no RPC endpoint and no contract address. Each
- * card therefore reads "not configured" with the neutral tone — never "live",
- * and never a green dot borrowed from a chain that WAS checked.
+ * This screen used to be static: the contracts were real design but their
+ * status was never queried, because there was nowhere to put an RPC endpoint.
+ * Settings holds those now, so the reading here comes from `ledger-status`.
+ *
+ * What has NOT changed is what happens when nothing is configured. That is
+ * reported as a state naming the setting that would fix it — never "live", and
+ * never a green dot borrowed from a chain nobody queried.
  */
 
+import { computed, watch } from 'vue'
 import { useI18n } from '@/lib/i18n'
+import { api } from '@/lib/api'
 import { LEDGER_CONTRACTS } from '@/content'
+import { useAsyncData } from '@/composables/useAsyncData'
+import { useChainDirectory } from '@/composables/useChainDirectory'
 import AppCard from '@/components/ui/AppCard.vue'
+import AsyncBlock from '@/components/ui/AsyncBlock.vue'
+import OutputPanel from '@/components/ui/OutputPanel.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
 import StatusPill from '@/components/ui/StatusPill.vue'
-import FeatureGate from '@/components/app/FeatureGate.vue'
+import TintPanel from '@/components/ui/TintPanel.vue'
+import VerdictBadge from '@/components/ui/VerdictBadge.vue'
+import AuthNeeded from '@/components/app/AuthNeeded.vue'
 
 const { t } = useI18n()
+const directory = useChainDirectory()
+
+/* Per-chain, because the on-chain status is about one trail's anchors. */
+const chain = computed(() => directory.ids.value?.[0] ?? null)
+
+const status = useAsyncData(() => {
+  const id = chain.value
+  if (id === null) throw new Error('no chain')
+  return api.ledgerStatus(id)
+})
+
+watch(chain, (id) => {
+  if (id !== null) void status.run()
+})
+
+const configured = computed(() => status.data.value?.configured === true)
+const missing = computed(() => status.data.value?.missing ?? [])
 </script>
 
 <template>
   <PageHeader :title="t('ledgerTitle')" :subtitle="t('ledgerSub')" />
 
-  <FeatureGate feature="ledger" />
+  <TintPanel v-if="chain === null" :title="t('ledgerNoChain')" />
+
+  <template v-else>
+    <AsyncBlock
+      :pending="status.pending.value"
+      :started="status.started.value"
+      :error="status.error.value"
+      @retry="status.run"
+    >
+      <template #unauthorized><AuthNeeded /></template>
+
+      <!-- Not configured is a STATE, and it names the setting that fixes it. -->
+      <TintPanel
+        v-if="status.data.value && !configured"
+        :title="t('ledgerNotConfigured')"
+        role="status"
+      >
+        {{ t('ledgerMissing', { keys: missing.join(', ') }) }}
+      </TintPanel>
+
+      <template v-if="configured && status.data.value?.outcome">
+        <VerdictBadge :outcome="status.data.value.outcome" />
+        <OutputPanel
+          :argv="status.data.value.outcome.argv"
+          :stdout="status.data.value.outcome.stdout"
+          :stderr="status.data.value.outcome.stderr"
+          :exit-code="status.data.value.outcome.exit_code"
+        />
+      </template>
+    </AsyncBlock>
+  </template>
 
   <div class="grid">
     <AppCard v-for="contract in LEDGER_CONTRACTS" :key="contract.nameKey">
       <div class="head">
         <h2>{{ t(contract.nameKey) }}</h2>
-        <StatusPill tone="neutral" :label="t('notConfigured')" :title="t('ledgerUnavailableBody')" />
+        <StatusPill
+          :tone="configured ? 'ok' : 'neutral'"
+          :label="t(configured ? 'ledgerQueried' : 'notConfigured')"
+          :title="t(configured ? 'ledgerQueriedWhy' : 'ledgerUnavailableBody')"
+        />
       </div>
       <p class="desc">{{ t(contract.descriptionKey) }}</p>
-      <p class="addr mono">{{ t('ledgerAddrNone') }}</p>
     </AppCard>
   </div>
-
-  <AppCard>
-    <h2 class="rpc-title">{{ t('rpcTitle') }}</h2>
-    <p class="rpc-none mono">{{ t('rpcNone') }}</p>
-    <p class="rpc-foot">{{ t('rpcFoot') }}</p>
-  </AppCard>
 </template>
 
 <style scoped>
@@ -66,30 +120,6 @@ h2 {
   font-size: var(--fs-sm);
   color: var(--color-ink-muted-48);
   margin-top: var(--space-4);
-  line-height: var(--lh-body);
-}
-
-.addr {
-  font-size: var(--fs-3xs);
-  color: var(--color-ink-muted-2);
-  margin-top: var(--space-4);
-}
-
-.rpc-title {
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-semibold);
-}
-
-.rpc-none {
-  font-size: var(--fs-xs);
-  color: var(--color-ink-muted-2);
-  margin-top: var(--space-6);
-}
-
-.rpc-foot {
-  font-size: var(--fs-xs);
-  color: var(--color-ink-muted-48);
-  margin-top: var(--space-7);
   line-height: var(--lh-body);
 }
 </style>

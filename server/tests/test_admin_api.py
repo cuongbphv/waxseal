@@ -107,7 +107,7 @@ class TestOperatorRoutes:
             json={
                 "username": "admin",
                 "display_name": "Admin",
-                "email": "cuongbphv@gmail.com",
+                "email": "admin@example.test",
                 "role": "admin",
             },
             headers=admin(client),

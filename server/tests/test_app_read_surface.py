@@ -369,6 +369,14 @@ class TestNoWriteSurfaceAnywhere:
         ("/v1/keys", "post"): "mints an API key (server records)",
         ("/v1/keys/{key_id}/revoke", "post"): "revokes an API key (server records)",
         ("/v1/operators/{username}", "patch"): "corrects an operator (server records)",
+        # Added with the Settings screen. Both write the server's OWN
+        # operational config and neither can reach a trail or a credential:
+        # `domain/settings.py` refuses `api_key`, `witness_api_key`,
+        # `database_url` and `data_dir` by name, so no value either route
+        # accepts is a secret. `reset` is a POST rather than a DELETE because
+        # this server has none — see the test below.
+        ("/v1/settings/{key}", "put"): "sets one operational setting (server records)",
+        ("/v1/settings/{key}/reset", "post"): "reverts one setting to its default",
     }
 
     def test_there_is_no_delete_anywhere(self, client: TestClient) -> None:

@@ -9,7 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from waxseal_server.__main__ import main
+import pytest
+
+from waxseal_server.__main__ import build, main
 
 
 class _Recorder:
@@ -58,3 +60,38 @@ class TestMain:
         target = tmp_path / "fresh" / "store"
         main([], env={"WAXSEAL_SERVER_DATA_DIR": str(target)}, run=_Recorder())
         assert target.is_dir()
+
+
+class TestTheAppFactory:
+    """`build()` — what `uvicorn --factory` calls for a reloading local run.
+
+    It reads the real process environment, so these tests monkeypatch it rather
+    than passing a mapping: the point of the factory is that uvicorn can call it
+    with no arguments at all.
+    """
+
+    def test_it_builds_an_app_from_the_process_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WAXSEAL_SERVER_DATA_DIR", str(tmp_path / "data"))
+        app = build()
+        assert app.state.settings.data_dir == tmp_path / "data"
+
+    def test_it_creates_the_data_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = tmp_path / "not-yet"
+        monkeypatch.setenv("WAXSEAL_SERVER_DATA_DIR", str(target))
+        build()
+        assert target.is_dir()
+
+    def test_the_reloading_path_and_the_container_path_agree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Both must build from the same environment, or a local run would be
+        # exercising a different app from the one deployed.
+        monkeypatch.setenv("WAXSEAL_SERVER_DATA_DIR", str(tmp_path / "data"))
+        built: list[object] = []
+        main([], env={"WAXSEAL_SERVER_DATA_DIR": str(tmp_path / "data")},
+             run=lambda app, **_: built.append(app))
+        assert built[0].state.settings.data_dir == build().state.settings.data_dir

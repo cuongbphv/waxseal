@@ -41,7 +41,7 @@ import PillButton from '@/components/ui/PillButton.vue'
 import StatusPill from '@/components/ui/StatusPill.vue'
 import TintPanel from '@/components/ui/TintPanel.vue'
 import PrincipalCard from '@/components/app/PrincipalCard.vue'
-import TokenField from '@/components/app/TokenField.vue'
+import AuthNeeded from '@/components/app/AuthNeeded.vue'
 
 const { t } = useI18n()
 const { operators, creating, createError, created, invite } = useOperators()
@@ -107,7 +107,7 @@ async function submit(): Promise<void> {
     :error="operators.error.value"
     @retry="operators.run"
   >
-    <template #unauthorized><TokenField /></template>
+    <template #unauthorized><AuthNeeded /></template>
 
     <AppCard flush scroll-x>
       <div class="table-head">
@@ -247,7 +247,7 @@ async function submit(): Promise<void> {
     </TintPanel>
   </AsyncBlock>
 
-  <TokenField />
+  <AuthNeeded />
 
   <p class="foot">{{ t('adminDocsWhere') }}</p>
 </template>

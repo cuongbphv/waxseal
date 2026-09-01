@@ -24,7 +24,7 @@ import PillButton from '@/components/ui/PillButton.vue'
 import StrokeIcon from '@/components/ui/StrokeIcon.vue'
 import TintPanel from '@/components/ui/TintPanel.vue'
 import VerdictBadge from '@/components/ui/VerdictBadge.vue'
-import TokenField from '@/components/app/TokenField.vue'
+import AuthNeeded from '@/components/app/AuthNeeded.vue'
 
 const { t } = useI18n()
 
@@ -121,7 +121,7 @@ function reasonOf(row: ImportRow): string {
     :error="rows.error.value"
     @retry="rows.run"
   >
-    <template #unauthorized><TokenField /></template>
+    <template #unauthorized><AuthNeeded /></template>
 
     <AppCard flush scroll-x>
       <div class="table-head">

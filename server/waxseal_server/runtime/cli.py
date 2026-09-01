@@ -50,6 +50,14 @@ READ_ONLY_COMMANDS: Final[frozenset[str]] = frozenset(
         "verify-handoff",
         "reconcile-tickets",
         "receipt",
+        # Reads nothing at all — `cadence` takes only operator-supplied numbers
+        # and opens no trail. It is here because "read-only" is the property this
+        # set is about, and a command with no input to read is the strongest
+        # case of it.
+        "cadence",
+        # Reads the chain's on-chain status. Read-only: `anchor` is what WRITES
+        # to a ledger, and it is deliberately absent from this set.
+        "ledger-status",
         # Planned but not in every build; `available()` decides at run time.
         "segments",
         "preflight",

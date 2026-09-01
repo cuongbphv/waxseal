@@ -15,6 +15,7 @@ import { useI18n } from '@/lib/i18n'
 import { NAV_PARENT, NAV_SECTIONS, type HintSource, type NavItem } from '@/lib/nav'
 import { meta } from '@/services/serverFacts'
 import { useNavCounts } from '@/composables/useNavCounts'
+import { closeDrawer, drawerOpen } from '@/composables/useNavDrawer'
 import StrokeIcon from '@/components/ui/StrokeIcon.vue'
 
 const route = useRoute()
@@ -45,13 +46,16 @@ function isActive(item: NavItem): boolean {
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" :class="{ 'sidebar--open': drawerOpen }">
     <div class="brand">
       <span class="mark" aria-hidden="true"><span class="mark-inner" /></span>
       <span class="brand-text">
         <span class="brand-name">waxseal</span>
         <span class="brand-version">{{ versionLine }}</span>
       </span>
+      <button type="button" class="drawer-close" :aria-label="t('navClose')" @click="closeDrawer">
+        <StrokeIcon name="close" />
+      </button>
     </div>
 
     <template v-for="section in NAV_SECTIONS" :key="section.titleKey">
@@ -95,6 +99,19 @@ function isActive(item: NavItem): boolean {
   align-items: center;
   gap: var(--space-5);
   padding: var(--space-10) var(--space-10) var(--space-7);
+}
+
+/* Reachable only while the sidebar is an overlay; above that breakpoint the
+ * sidebar is part of the layout and there is nothing to dismiss. */
+.drawer-close {
+  display: none;
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: var(--space-2);
+  border-radius: var(--radius-nav);
+  color: var(--color-ink-muted-48);
 }
 
 .mark {
@@ -191,5 +208,29 @@ function isActive(item: NavItem): boolean {
   font-size: var(--fs-3xs);
   color: var(--color-ink-muted-48);
   line-height: var(--lh-body);
+}
+
+/* Below this width a 238px column is two thirds of a phone screen, so the
+ * sidebar leaves the flow entirely and slides in over the content instead.
+ * `position: fixed` replaces the sticky behaviour rather than joining it —
+ * sticky inside a transformed overlay does not resolve against the viewport. */
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: var(--z-drawer);
+    height: 100%;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    border-right: var(--hairline) solid var(--color-hairline);
+  }
+
+  .sidebar--open {
+    transform: translateX(0);
+  }
+
+  .drawer-close {
+    display: block;
+  }
 }
 </style>

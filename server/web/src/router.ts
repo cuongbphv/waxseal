@@ -51,6 +51,30 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/PreflightView.vue'),
   },
   {
+    path: '/consistency',
+    name: 'consistency',
+    meta: { crumbKey: 'navCons' },
+    component: () => import('@/views/ConsistencyView.vue'),
+  },
+  {
+    path: '/handoff',
+    name: 'handoff',
+    meta: { crumbKey: 'navHandoff' },
+    component: () => import('@/views/HandoffView.vue'),
+  },
+  {
+    path: '/tickets',
+    name: 'tickets',
+    meta: { crumbKey: 'navTickets' },
+    component: () => import('@/views/TicketsView.vue'),
+  },
+  {
+    path: '/cadence',
+    name: 'cadence',
+    meta: { crumbKey: 'navCadence' },
+    component: () => import('@/views/CadenceView.vue'),
+  },
+  {
     path: '/ledger',
     name: 'ledger',
     meta: { crumbKey: 'navLedger' },
@@ -91,6 +115,12 @@ const routes: RouteRecordRaw[] = [
     name: 'integrations',
     meta: { crumbKey: 'navInt' },
     component: () => import('@/views/IntegrationsView.vue'),
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    meta: { crumbKey: 'navSettings' },
+    component: () => import('@/views/SettingsView.vue'),
   },
   {
     path: '/:pathMatch(.*)*',

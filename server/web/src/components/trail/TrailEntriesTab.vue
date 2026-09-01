@@ -19,7 +19,7 @@ import AppCard from '@/components/ui/AppCard.vue'
 import AsyncBlock from '@/components/ui/AsyncBlock.vue'
 import DataTable from '@/components/ui/DataTable.vue'
 import HashValue from '@/components/ui/HashValue.vue'
-import TokenField from '@/components/app/TokenField.vue'
+import AuthNeeded from '@/components/app/AuthNeeded.vue'
 
 const props = defineProps<{ chainId: string }>()
 
@@ -62,7 +62,7 @@ function isGenesis(entry: DisplayEntry): boolean {
     :error="window.error.value"
     @retry="window.run"
   >
-    <template #unauthorized><TokenField /></template>
+    <template #unauthorized><AuthNeeded /></template>
 
     <AppCard flush scroll-x>
       <DataTable

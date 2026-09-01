@@ -35,7 +35,7 @@ import DataTable from '@/components/ui/DataTable.vue'
 import StatCard from '@/components/ui/StatCard.vue'
 import StatusPill from '@/components/ui/StatusPill.vue'
 import VerdictBadge from '@/components/ui/VerdictBadge.vue'
-import TokenField from '@/components/app/TokenField.vue'
+import AuthNeeded from '@/components/app/AuthNeeded.vue'
 import ScopeStatement from '@/components/app/ScopeStatement.vue'
 
 const { t } = useI18n()
@@ -174,7 +174,7 @@ function anchorCell(row: ChainOverview) {
     :error="overviews.error.value"
     @retry="overviews.run"
   >
-    <template #unauthorized><TokenField /></template>
+    <template #unauthorized><AuthNeeded /></template>
 
     <AppCard flush scroll-x>
       <div class="table-head">

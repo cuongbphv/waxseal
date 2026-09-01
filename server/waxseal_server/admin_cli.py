@@ -31,12 +31,12 @@ EXIT_OK: Final = 0
 EXIT_USAGE: Final = 2
 EXIT_FAILED: Final = 1
 
-#: The two accounts a dogfood deployment needs: a human administrator and the
+#: The two accounts a fresh deployment needs: a human administrator and the
 #: machine account the Claude Code hook writes with. The writer deliberately
 #: cannot read the trail it appends to.
 DEFAULT_SEED: Final[tuple[tuple[str, Role, str], ...]] = (
     ("admin", Role.ADMIN, "Administrator"),
-    ("user-waxseal", Role.WRITER, "waxseal dogfood writer"),
+    ("user-waxseal", Role.WRITER, "Automation writer"),
 )
 
 

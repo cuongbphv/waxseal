@@ -101,6 +101,32 @@ def cli_read_body(services: Services, trail: str, command: str, *args: str) -> J
     return JSONResponse(body)
 
 
+#: Reads whose stdout is JSON the UI needs as fields, and the key each one is
+#: published under. `report` predates the mapping and keeps its own branch above.
+PARSED_READS: Final[dict[str, str]] = {"reconcile-tickets": "reconciliation"}
+
+
+def parsed_cli_body(
+    services: Services, trail: str, command: str, *args: str
+) -> JSONResponse:
+    """`cli_read_body` for a read whose stdout is JSON, parsed alongside it.
+
+    The raw stdout stays in the body next to the parsed form. An operator being
+    shown a conclusion is owed the output that produced it, and a UI that
+    rendered only the parsed fields would be asking to be trusted.
+    """
+    outcome = services.cli.run(command, read_target(command, trail), *args)
+    body = outcome_json(outcome)
+    key = PARSED_READS[command]
+    try:
+        body[key] = json.loads(body["stdout"])
+    except json.JSONDecodeError:
+        # None is "nothing was reported", never an empty object — which for a
+        # reconciliation would read as "measured, nothing missing" (rule 5).
+        body[key] = None
+    return JSONResponse(body)
+
+
 def report_args(command: str) -> tuple[str, ...]:
     return (JSON_REPORT_FLAG,) if command == "report" else ()
 

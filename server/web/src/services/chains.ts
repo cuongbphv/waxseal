@@ -15,7 +15,9 @@ import {
   type AuditReportJson,
   type ChainSummary,
   type DisplayEntry,
+  type CadenceInput,
   type Outcome,
+  type ReconcileOutcome,
   type ReportOutcome,
 } from '@/lib/api'
 import { ENTRY_PAGE_RENDER_LIMIT } from '@/lib/constants'
@@ -83,21 +85,27 @@ export async function loadEntryWindow(id: string): Promise<EntryWindow> {
   }
 }
 
-/** The three read-only commands the trail screen's buttons run. Named as a
- * union so a view cannot invoke a command the server does not offer, and so
- * adding one is an entry here rather than a new branch in a click handler. */
-export type TrailAction = 'verify' | 'report' | 'proof'
+/** The read-only commands the trail screen's buttons run. Named as a union so a
+ * view cannot invoke a command the server does not offer, and so adding one is
+ * an entry here rather than a new branch in a click handler. */
+export type TrailAction = 'verify' | 'report' | 'proof' | 'checkpoint' | 'tail'
 
 export interface TrailActionDescriptor {
   id: TrailAction
-  labelKey: 'runVerify' | 'runReport' | 'runProof'
-  /** Proof needs a seq, so it is unavailable on an empty chain. */
+  labelKey: 'runVerify' | 'runReport' | 'runProof' | 'runCheckpoint' | 'runTail'
+  /** Proof and checkpoint both need an entry to be about. */
   needsHead: boolean
 }
 
+/* Every read here takes no operator input, which is why it can be a button.
+ * The 0.1.5 reads that DO take input — consistency, verify-handoff,
+ * reconcile-tickets, cadence — have their own screens, because a value typed
+ * into a field is a measurement and belongs beside the answer it produced. */
 export const TRAIL_ACTIONS: readonly TrailActionDescriptor[] = [
   { id: 'verify', labelKey: 'runVerify', needsHead: false },
   { id: 'report', labelKey: 'runReport', needsHead: false },
+  { id: 'tail', labelKey: 'runTail', needsHead: false },
+  { id: 'checkpoint', labelKey: 'runCheckpoint', needsHead: true },
   { id: 'proof', labelKey: 'runProof', needsHead: true },
 ]
 
@@ -108,10 +116,40 @@ export async function runTrailAction(
 ): Promise<Outcome> {
   if (action === 'verify') return api.verify(id)
   if (action === 'report') return api.report(id)
+  if (action === 'tail') return api.tail(id)
+  if (action === 'checkpoint') return api.checkpoint(id)
   /* `needsHead` is enforced at the button, so reaching here without a seq is a
    * programming error rather than an operator one. */
   if (headSeq === null) throw new ApiError(0, 'empty', 'the chain has no entry to prove')
   return api.exportProof(id, headSeq)
+}
+
+/** The consistency proof between a checkpoint an operator holds and the chain
+ * as it stands now. Both inputs come from the operator: a UI that filled them
+ * from the same chain would be asking the chain to vouch for itself. */
+export async function runConsistency(
+  id: string,
+  oldSeq: string,
+  oldRoot: string,
+): Promise<Outcome> {
+  return api.consistency(id, oldSeq, oldRoot)
+}
+
+export async function runVerifyHandoff(id: string, origin: string): Promise<Outcome> {
+  return api.verifyHandoff(id, origin)
+}
+
+export async function runReconcileTickets(
+  id: string,
+  issuer: string,
+  leaseSize: string,
+  issued?: string,
+): Promise<ReconcileOutcome> {
+  return api.reconcileTickets(id, issuer, leaseSize, issued)
+}
+
+export async function runCadence(input: CadenceInput): Promise<Outcome> {
+  return api.cadence(input)
 }
 
 /** The segments command, landed by Workstream B in 0.1.5. The trail's Segments

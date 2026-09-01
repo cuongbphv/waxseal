@@ -208,6 +208,98 @@ export interface ReceiptsCrossCheck {
   exit_code: number
 }
 
+/** `reconcile-tickets --json`, parsed. The three-valued core is `measured`:
+ * `false` means the issuer's data was not available this run, and `missing`
+ * stays `null` rather than becoming `0`. A screen that renders "0 drops" for an
+ * unmeasured reconciliation has told the one lie this command exists to
+ * prevent. */
+export interface Reconciliation {
+  issuer: string
+  measured: boolean
+  verdict: Verdict
+  lease_size: number
+  /** `null` when nothing was measured. NOT a measured zero. */
+  missing: number[] | null
+  blind_spot_window: number | null
+  blind_spot_missing: number[] | null
+  blind_spot_bound: number
+  unreadable: number[]
+}
+
+export interface ReconcileOutcome extends Outcome {
+  /** `null` when the command printed no parsable report at all. */
+  reconciliation: Reconciliation | null
+}
+
+/** Everything `waxseal cadence` needs. Every field is required and none has a
+ * default here: a cadence computed from a number the UI chose would be advice
+ * nobody measured, shown with the confidence of advice somebody did. */
+export interface CadenceInput {
+  lam: string
+  c: string
+  w: string
+  rho: string
+  delta: string
+  t_max: string
+  /** Optional — the CLI's own default is 1. */
+  m?: string
+}
+
+/* ------------------------------------------------------------- settings */
+
+/** One row of the deployment half: what this process was started with.
+ *
+ * A secret row has `state` and NO `value` field — the server has no field to
+ * put a credential in, so this type has none either. That is deliberate: a
+ * "show me the config" screen is exactly the shape of thing that leaks one. */
+export interface DeploymentSetting {
+  key: string
+  /** The environment variable behind it, or null when it is derived. */
+  env: string | null
+  value?: string
+  /** Secrets only: whether it is configured. Never what it is. */
+  state?: 'set' | 'unset'
+  secret: boolean
+  editable: boolean
+  reason: string
+}
+
+export type SettingKind = 'count' | 'text' | 'url' | 'address'
+
+/** One row an operator may change. `value: null` means not configured — a
+ * state, never an empty string. `source` separates "somebody chose this" from
+ * "nobody has touched it", which stays true even when the two values match. */
+export interface StoredSetting {
+  key: string
+  kind: SettingKind
+  value: string | null
+  source: 'stored' | 'default'
+  default: string | null
+  secret: false
+  editable: true
+}
+
+export interface ServerSettings {
+  deployment: DeploymentSetting[]
+  stored: StoredSetting[]
+  /** `memory` forgets on restart. Reported so a setting that vanished has its
+   * reason on screen rather than in a support thread. */
+  backend: 'memory' | 'postgres'
+}
+
+/** `ledger-status`, whose arguments come from the settings store.
+ *
+ * `configured: false` is a STATE, not an error: with no liveness address there
+ * is no command to run, and `missing` names the setting that would fix it. A
+ * green tick borrowed from a chain nobody queried is the failure this shape
+ * exists to prevent, so `outcome` is null whenever nothing ran. */
+export interface LedgerStatus {
+  configured: boolean
+  reason: 'no_liveness_address' | 'bond_without_writer' | null
+  missing: string[]
+  outcome: Outcome | null
+}
+
 export interface ImportRecord {
   import_id: string
   filename: string
@@ -421,6 +513,35 @@ export const api = {
   segments: (id: string) => request<Outcome>(`/v1/chains/${enc(id)}/segments`),
   preflight: (id: string) => request<Outcome>(`/v1/chains/${enc(id)}/preflight`),
 
+  /* The 0.1.5 reads. `tail` omits `n` when the caller does not choose one, so
+   * the CLI's own default stays the only default. */
+  tail: (id: string, n?: number) =>
+    request<Outcome>(`/v1/chains/${enc(id)}/tail${n === undefined ? '' : `?n=${n}`}`),
+  checkpoint: (id: string) => request<Outcome>(`/v1/chains/${enc(id)}/checkpoint`),
+  consistency: (id: string, oldSeq: string, oldRoot: string) =>
+    request<Outcome>(
+      `/v1/chains/${enc(id)}/consistency?old_seq=${enc(oldSeq)}&old_root=${enc(oldRoot)}`,
+    ),
+  /* `origin` is a chain id on this server, never a path: the server resolves it
+   * so a request cannot name an arbitrary file as the origin history. */
+  verifyHandoff: (id: string, origin: string) =>
+    request<Outcome>(`/v1/chains/${enc(id)}/verify-handoff?origin=${enc(origin)}`),
+  reconcileTickets: (id: string, issuer: string, leaseSize: string, issued?: string) =>
+    request<ReconcileOutcome>(
+      `/v1/chains/${enc(id)}/reconcile-tickets?issuer=${enc(issuer)}` +
+        `&lease_size=${enc(leaseSize)}${issued ? `&issued=${enc(issued)}` : ''}`,
+    ),
+  /* The one read that opens no trail, so it needs no chain to be selected. */
+  cadence: (input: CadenceInput) =>
+    request<Outcome>(
+      `/v1/cadence?${new URLSearchParams(
+        Object.entries(input).filter(([, v]) => v !== undefined && v !== '') as [
+          string,
+          string,
+        ][],
+      ).toString()}`,
+    ),
+
   receiptsHead: (id: string) =>
     request<ReceiptHead>(`/v1/chains/${enc(id)}/receipts/head`),
   receipts: (id: string) =>
@@ -446,6 +567,23 @@ export const api = {
    * render the two apart. */
   revokeKey: (keyId: string) =>
     request<{ revoked: boolean }>(`/v1/keys/${enc(keyId)}/revoke`, { method: 'POST' }),
+
+  ledgerStatus: (id: string) =>
+    request<LedgerStatus>(`/v1/chains/${enc(id)}/ledger-status`),
+
+  settings: () => request<ServerSettings>('/v1/settings'),
+  setSetting: (key: string, value: string) =>
+    request<{ key: string; value: string; source: string }>(`/v1/settings/${enc(key)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value }),
+    }),
+  /* `reset` says what THIS call did: false means there was nothing stored, not
+   * that it failed. A POST because this server has no DELETE anywhere. */
+  resetSetting: (key: string) =>
+    request<{ key: string; reset: boolean }>(`/v1/settings/${enc(key)}/reset`, {
+      method: 'POST',
+    }),
 
   imports: () => request<{ imports: ImportRecord[] }>('/v1/imports'),
   importRecord: (id: string) => request<ImportRecord>(`/v1/imports/${enc(id)}`),

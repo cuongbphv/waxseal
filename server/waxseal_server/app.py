@@ -26,10 +26,12 @@ from waxseal_server.api import admin as admin_api
 from waxseal_server.api import chains as chains_api
 from waxseal_server.api import imports as imports_api
 from waxseal_server.api import public as public_api
+from waxseal_server.api import settings as settings_api
 from waxseal_server.api import witness as witness_api
 from waxseal_server.api.deps import Authorizer, Services, guard_for
 from waxseal_server.config import Settings
 from waxseal_server.ports.operators import OperatorStore
+from waxseal_server.ports.settings import SettingsStore
 from waxseal_server.runtime.cli import WaxsealCli
 from waxseal_server.runtime.postgres import connection_factory
 from waxseal_server.runtime.spa import UNBUILT_UI_PAGE, SpaStaticFiles
@@ -37,6 +39,8 @@ from waxseal_server.storage.chains import ChainStore
 from waxseal_server.storage.imports import ImportStore
 from waxseal_server.storage.operators_memory import InMemoryOperatorStore
 from waxseal_server.storage.operators_postgres import PostgresOperatorStore
+from waxseal_server.storage.settings_memory import InMemorySettingsStore
+from waxseal_server.storage.settings_postgres import PostgresSettingsStore
 from waxseal_server.storage.witness import WitnessStore
 
 API_VERSION = "0.1.5"
@@ -54,19 +58,39 @@ def build_operator_store(settings: Settings) -> OperatorStore:
     return PostgresOperatorStore(connection_factory(settings.database_url))
 
 
-def build_services(settings: Settings, operators: OperatorStore | None = None) -> Services:
+def build_settings_store(settings: Settings) -> SettingsStore:
+    """The same Postgres-or-memory decision the operator store makes.
+
+    Both are keyed off one environment variable so a deployment cannot end up
+    with durable operators and forgetful settings, or the reverse.
+    """
+    if settings.database_url is None:
+        return InMemorySettingsStore()
+    return PostgresSettingsStore(connection_factory(settings.database_url))
+
+
+def build_services(
+    settings: Settings,
+    operators: OperatorStore | None = None,
+    config: SettingsStore | None = None,
+) -> Services:
     return Services(
         settings=settings,
         chains=ChainStore(settings.chains_dir),
         imports=ImportStore(settings.imports_dir),
         witnesses=WitnessStore(settings.witness_dir),
         operators=operators if operators is not None else build_operator_store(settings),
+        config=config if config is not None else build_settings_store(settings),
         cli=WaxsealCli(),
     )
 
 
-def create_app(settings: Settings, operators: OperatorStore | None = None) -> FastAPI:
-    services = build_services(settings, operators)
+def create_app(
+    settings: Settings,
+    operators: OperatorStore | None = None,
+    config: SettingsStore | None = None,
+) -> FastAPI:
+    services = build_services(settings, operators, config)
     # The chain authority resolves a token to an operator and a scope set; the
     # witness authority is a single credential and never sees an operator key
     # (REMOTE.md section 8).
@@ -85,6 +109,7 @@ def create_app(settings: Settings, operators: OperatorStore | None = None) -> Fa
     app.include_router(chains_api.router(services, authz))
     app.include_router(imports_api.router(services, authz))
     app.include_router(admin_api.router(services, authz))
+    app.include_router(settings_api.router(services, authz))
     app.include_router(witness_api.router(services, witness_guard))
     app.include_router(public_api.router(services))
 

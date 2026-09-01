@@ -38,7 +38,7 @@ import PillButton from '@/components/ui/PillButton.vue'
 import StatusPill from '@/components/ui/StatusPill.vue'
 import TintPanel from '@/components/ui/TintPanel.vue'
 import PrincipalCard from '@/components/app/PrincipalCard.vue'
-import TokenField from '@/components/app/TokenField.vue'
+import AuthNeeded from '@/components/app/AuthNeeded.vue'
 
 const { t } = useI18n()
 
@@ -124,7 +124,7 @@ function ownerLabel(row: ApiKeyRecord): string {
     :error="keys.error.value"
     @retry="keys.run"
   >
-    <template #unauthorized><TokenField /></template>
+    <template #unauthorized><AuthNeeded /></template>
 
     <AppCard>
       <h2 class="title">{{ t('mintTitle') }}</h2>
@@ -267,7 +267,7 @@ function ownerLabel(row: ApiKeyRecord): string {
     <p class="desc">{{ t('adminDocsWhere') }}</p>
   </AppCard>
 
-  <TokenField />
+  <AuthNeeded />
 
   <p class="foot">{{ t('tokenSub') }}</p>
 </template>
