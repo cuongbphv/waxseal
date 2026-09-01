@@ -219,14 +219,12 @@ disallow_untyped_decorators = false
 # monkeypatch return values can legitimately be Any in ways a `: T = ...`
 # local can't always narrow), change the value here, not the comment.
 #
-# The one known exception, NOT covered by this override: tests/adapters/
-# test_evm_anvil.py has one attr-defined error (Checkpoint is importable
-# from waxseal.domain.checkpoint, not the waxseal.domain.bond re-export this
-# file reaches through — identical shape to the fix already applied in
-# test_evm.py) — left alone because another agent owned that file this round
-# (investigating an unrelated flake). `mypy tests/` will not read clean
-# until that one import line is fixed; this is a known, reported gap, not a
-# silently swallowed one.
+# tests/adapters/test_evm_anvil.py once carried one attr-defined error here
+# (Checkpoint imported from the waxseal.domain.bond re-export instead of
+# waxseal.domain.checkpoint — the same shape already fixed in test_evm.py),
+# left for another agent mid-sweep since it owned that file investigating an
+# unrelated flake. Fixed once that agent's own work landed; `mypy tests/`
+# reads clean with no exceptions.
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = true
