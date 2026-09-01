@@ -65,7 +65,17 @@ def _is_excluded(rel: tuple[str, ...]) -> bool:
 
 def candidate_files() -> list[Path]:
     """waxseal's own shipped English *.py and *.md surface — see the module
-    docstring for exactly which two classes of file are excluded and why."""
+    docstring for exactly which two classes of file are excluded and why.
+
+    "Top-level and `docs/` Markdown files" (the module docstring's own words)
+    is a claim about WHICH directories, not just which suffix: gating on
+    ``rel[0]`` below is what keeps this out of gitignored, untracked, purely
+    local scratch directories like ``.docs/`` (a real dot-prefixed directory
+    found live in this repo, 01/09/2026 — a suffix-only check does not
+    distinguish it from the tracked ``docs/`` this test means to cover, and
+    a personal research note quoting someone else's GitHub issue title is
+    not a waxseal claim needing a scope marker at all).
+    """
     files: list[Path] = []
     for path in REPO_ROOT.rglob("*"):
         if not path.is_file():
@@ -74,7 +84,12 @@ def candidate_files() -> list[Path]:
         if _is_excluded(rel):
             continue
         is_shipped_py = path.suffix == ".py" and rel[0] in ("src", "examples")
-        is_english_md = path.suffix == ".md" and not _TRANSLATION_SUFFIX.search(path.name)
+        is_top_level_or_docs = len(rel) == 1 or rel[0] == "docs"
+        is_english_md = (
+            path.suffix == ".md"
+            and is_top_level_or_docs
+            and not _TRANSLATION_SUFFIX.search(path.name)
+        )
         if is_shipped_py or is_english_md:
             files.append(path)
     return files
