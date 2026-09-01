@@ -250,6 +250,204 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   later this same release (Workstreams C and F, below). No hard dependency was added and
   rule 1 is untouched.
 
+- **Optional CMS/X.509 signature verification over RFC 3161 receipts, behind the `rfc3161`
+  extra** (0.1.5 plan, Workstream C). SPEC section 17 always stayed structural — PKI status,
+  message imprint, nonce, digest algorithm, no ASN.1 library in the trust path — and said
+  plainly that the CMS signature itself was **not** checked in-library, delegated instead to
+  `openssl ts -verify`. `adapters/rfc3161_verify.py` is a second, independent dimension for
+  operators who cannot shell out to openssl in a container that may not have it:
+  `cryptography` is imported inside `verify_token_signature` alone, so it can be legitimately
+  absent on a correct install, and its `ImportError` becomes a reported state rather than a
+  crash — the same shape `adapters/s3.py::_resolve_client` already uses for boto3.
+
+  This is the tenth instance of the Ternary Evidence Principle (CLAUDE.md), reusing
+  `domain.verdict.Verdict` rather than growing a parallel three-valued type beside it, and
+  the first instance where the third value has three separate causes that each need a
+  different fix: `signature_valid` (checked, and it holds — exit 0), `signature_invalid`
+  (CHECKED, and the answer is a definite no — the signature does not verify, the signed
+  attributes commit to a different TSTInfo, or the signer chains to nobody named — exit 1),
+  and `signature_unchecked` (the question was never actually put — the extra is not
+  installed, no CA bundle was named, or the token's CMS is a shape this build cannot parse —
+  exit 2). Collapsing `unchecked` into `valid` is beads v1.2.2's collapse in a new costume,
+  and every unchecked line names its own cause and its own remedy: install the extra, repoint
+  `--tsa-ca-file`, or fall back to `openssl ts -verify`.
+
+  `verify` and `report` both gain `--tsa-ca-file <bundle.pem>`. waxseal names no default
+  trust anchor for it, the same discipline `domain/cadence.py` already follows for its cost
+  parameters: not the system store, not certifi, not the certificates the token happens to
+  carry as roots. Without the flag, no exit code in SPEC section 17's table changes; the run
+  still prints one `signature_unchecked` line naming the flag, exactly as a pending
+  OpenTimestamps proof is stated without raising its exit code. Unreadable stays unchecked,
+  never invalid, carrying section 17's own asymmetry into the one module that actually can
+  say "false" — only a signature that verifiably fails, or a chain that verifiably does not
+  reach the named anchors, earns exit 1. Deliberately not checked, and said so on the `valid`
+  label itself (rule 6): certificate validity windows, revocation (no network is opened
+  here), and the `timeStamping` extended key usage. SPEC.md gains section 17.1 for this;
+  `pyproject.toml`'s `rfc3161` extra pins `cryptography>=40`, the floor checked against the
+  library's own changelog (`Certificate.verify_directly_issued_by()` landed in 40.0.0,
+  `load_pem_x509_certificates()` in 39.0.0).
+
+- **The on-chain ledger layer: `contracts/`, `ports/ledger.py`,
+  `domain/{bond,liveness,abi,registry}.py`, `adapters/evm.py`, and a matching CLI surface**
+  (0.1.5 plan, Workstream F — the largest single workstream this release). 0.1.4 closed with
+  three items explicitly not built: an Anchoring Liveness Contract, bonded checkpoints with
+  slashable fraud proofs, and an on-chain fingerprint registry, "designed and analysed... and
+  none of them is built." All three are now built.
+
+  **`contracts/`** is a separate Foundry project on the same footing as `server/`
+  (CLAUDE.md rule 1: the wheel's `dependencies` stays `[]`, and neither ships in the sdist —
+  `pyproject.toml`'s exclude list now names both). `FingerprintRegistry.sol`,
+  `AnchoringLiveness.sol` and `BondedCheckpoints.sol` are the three contracts the layer reads
+  and writes against, with `CheckpointCodec.sol` and `Rfc9162.sol` as shared
+  encoding/proof primitives underneath them. Every function and error selector
+  `domain/abi.py` hard-codes is cross-checked against `contracts/abi/selectors.json` — the
+  file `forge inspect` writes — by `tests/adapters/test_evm.py`, plus `cast sig` when
+  Foundry is on PATH, so a Solidity signature cannot drift from the Python constant
+  silently. `contracts/vectors/` holds a large independent cross-check suite (consistency,
+  inclusion, fork, non-extension, tree, heads and fingerprint vectors, plus an index), so the
+  contracts' own Merkle-proof logic is checked against the same construction the library's
+  domain code uses, not merely against each other.
+
+  **`ports/ledger.py`** keeps EVM behind a Protocol on purpose — nothing in
+  `LedgerReader`/`LedgerSink` mentions JSON-RPC, gas, blocks or Solidity, so a second chain is
+  another adapter rather than a second copy of the verifier. Its error contract is the
+  ternary this whole layer is built on: a method returns `None` only for "the contract
+  answered, and it holds nothing" (a measured absence); it raises `LedgerUnreachable` when it
+  could not ask (returning `None` there would render a down node as "the writer never
+  anchored" — a false alarm manufactured out of a network problem); and it raises
+  `LedgerDisagreement`, naming the pair, when two or more endpoints answered and did not
+  agree — not unreachability and not a verdict about the trail, but a third, eclipse-shaped
+  observation of its own.
+
+  **`adapters/evm.py`** reads over stdlib JSON-RPC only (`eth_call` over the same
+  `Transport` REMOTE.md's client already uses), so verification never needs an installed
+  web3 stack, and the `evm` extra in `pyproject.toml` is deliberately empty — there is no
+  client to fetch. A single RPC endpoint is a single point of *narrative* failure, not just
+  of availability, so the reader is handed at least two URLs and asks every one of them on
+  every read: they agree and the value is returned; they answer and differ and it is
+  `LedgerDisagreement`; fewer than two answer and it is `LedgerUnreachable`. Writes go
+  through an injected `Signer` the operator constructs — waxseal never imports `eth-account`
+  or shells to `cast wallet` itself. `AnchoringLiveness.isDelinquent`/`.lastSeen` revert with
+  `TrailNotRegistered` for a trail that never anchored rather than returning `false`/zero,
+  because a bool is two-valued and the honest answer is three-valued; this adapter reads
+  that specific revert as a measured absence (`None`) and leaves what it *means* to pure
+  domain code — `domain/liveness.py`'s `delinquency(None, deadline)` — rather than deciding
+  it at the RPC boundary. Any other revert degrades to `LedgerUnreachable`, labelled with the
+  four-byte selector, never silent.
+
+  **The CLI surface** never appends to the audit trail — the same rule `anchor` already
+  lives under. `waxseal ledger-status <trail> --rpc URL [--rpc URL…] --liveness ADDR
+  [--registry ADDR] [--bond ADDR --writer ADDR]` reuses `reconcile-tickets`'s exit convention
+  exactly: exit 0 = every configured dimension came back clean; exit 1 = a *positively
+  detected* finding — delinquent, slashed, unbonded — the same "detected, not tampered"
+  sense `reconcile-tickets` gives its own exit 1; exit 2 = unreachable, endpoints disagree,
+  or malformed input, never rendered as "0 findings" (rule 5); exit 3 = the named trail does
+  not exist. `verify`/`report` gain `--rpc/--liveness/--registry [--trail-id]`: the ledger
+  dimension is structurally incapable of exit 1 there — `LivenessVerdict.to_verify_verdict()`
+  and `RegistryFinding.to_verdict()` both range over `{OK, UNVERIFIABLE}` only — so
+  `ledger_delinquent`, `registry_disagreement` and `ledger_unreachable` all land on exit 2,
+  because a chain saying "not anchored on time" is not a chain saying "the trail was edited."
+  `waxseal registry publish --descriptor-of FP --registry ADDR --rpc URL […]
+  [--write-rpc URL]` and `waxseal bond deposit --bond ADDR --amount-wei WEI […]` /
+  `bond prove <proof.json> --bond ADDR […]` write to the ledger layer only, printing the
+  chain id, the contract and the action before sending. `anchor` additionally accepts
+  `--evm-rpc/--evm-liveness[/--evm-write-rpc/--evm-trail-id/--evm-consistency-proof-file]`,
+  publishing the same checkpoint to a fourth independently-recording anchor domain alongside
+  `--tsa-url`/`--ots-calendar`. `--declare-topology` gains an optional fifth `ledger=<bool>`
+  subfield, parsed the same way the other four already are. `WAXSEAL_EVM_SIGNER_CMD` is a
+  three-verb external-signer protocol (`address` / `sign-digest` / `sign-tx`) — never a
+  private key on argv or in a flag — on the same footing as `WAXSEAL_API_KEY` and
+  `WAXSEAL_WITNESS_API_KEY`: it never crosses the administrative-authority boundary either.
+
+  `docs/security/threat-model.md` section 5's attacker-capability ladder gains its table's
+  own new row for this: the finalized ledger checkpoint (0.1.5 Workstream F, section 7) is
+  the one exception to "an attacker who holds all local files and every witness can rewrite
+  the live tail," and it is scoped three ways at once — to the prefix that was already
+  finalized before the attacker arrived, never the live tail written after; to a writer that
+  equivocates rather than merely rewrites, because a fresh, internally-consistent lie signed
+  only once produces nothing for `BondedCheckpoints.proveEquivocation` to catch; and to
+  detection, never recovery. `waxseal preflight` (Workstream E, below) reports this as a
+  labelled prefix/tail split rather than folding it into a ladder rung, precisely so it
+  cannot be read as raising rung 5 or 6 on its own.
+
+- **Microsoft AGT audit sink** (`src/waxseal/integrations/agt.py`, 0.1.5 plan,
+  Workstream H). `WaxsealAuditSink` implements
+  `agentmesh.governance.audit_backends.AuditSink` — AGT's real, exported,
+  `@runtime_checkable` extension point — purely by shape: `write`, `write_batch`,
+  `verify_integrity`, `close`. No import of
+  `agent_governance_toolkit`/`agentmesh`/`agent_os` is performed or required anywhere in the
+  module, the same zero-dependency discipline every other integration in this package holds;
+  `AuditEntry` is read only via `getattr`, never `isinstance`-checked against an AGT type,
+  which is the other half of why no import is needed.
+
+  The wiring point was re-verified against the real PyPI wheels rather than the README
+  (`agent-governance-toolkit` 4.1.0 + `agent-governance-toolkit-core` 4.1.0, downloaded and
+  read directly; the finding was re-checked against core 5.0.0 too). The plan's framing —
+  that `govern()` accepts an audit-backend callback — turned out to be wrong:
+  `GovernanceConfig`/`GovernedCallable` construct their own internal `AuditLog` with no field
+  threading a custom sink through in either version read (`GovernanceConfig.audit_file` is
+  accepted but never read — a dead field). That is an upstream API gap, recorded rather than
+  routed around silently (rule 6): the real extension point sits one level down, at
+  `AuditLog(sink=...)`, used directly — standalone at an operator's own governance
+  checkpoints, or by reaching into `governed._audit` post-construction (undocumented, no
+  public setter).
+
+  Two data gaps in AGT's own schema are handled rather than hidden. `AuditEntry` has no
+  top-level "reason" field, so the sink reads it out of `data["reason"]`, matching where
+  `GovernedCallable` actually puts it. `AuditEntry` carries no model identity at all — no
+  `model`/`model_name`/`model_version` anywhere in the schema — so `WaxsealAuditSink.__init__`
+  accepts an optional `model: ModelRef | None`, supplied once at the sink rather than
+  invented per-entry; left `None`, every entry stays a plain
+  `application/vnd.waxseal.agt-event+json` record rather than a silent downgrade to a
+  `DecisionRecord` claim the AGT event never made. Unlike every other host this package's
+  integrations attach to, AGT's own `AuditLog.log()` does **not** swallow a sink exception,
+  so a raise here would abort whatever governed call triggered the audit; never-veto is held
+  one layer more defensively here for exactly that reason, with every failure path — open
+  failure, malformed entry, a failed append — degrading to a labelled, counted dropped write
+  instead of raising. `verify_integrity()` delegates to waxseal's own verifier rather than
+  re-implementing chain verification (rule 4), opening the trail read-only and relaying its
+  verdict.
+
+- **`waxseal preflight <trail>`** (0.1.5 plan, Workstream E) as its own command, distinct
+  from the "commands this build does not have" line the server has been reporting against it
+  since Workstream I shipped. It reads which rung of `docs/security/threat-model.md` section
+  5's six-row attacker-capability ladder the current configuration stops, in that table's own
+  language, and computes no verdict of its own: every fact it prints is re-presented from
+  what already measures it elsewhere (`adapters/anchors.py`'s records, `domain/pinning.py`'s
+  state, `domain/separation.py`'s τ), because a second verdict source is something an
+  operator would have to reconcile against `verify`.
+
+  Each rung is one of four states, never two: `PRESENT`, `ABSENT`, `NOT MEASURED`, or — for
+  the top two rungs, which have no answer to give in any configuration — `NO MECHANISM`.
+  `NOT MEASURED` is the state this command exists for: a preflight run contacts no witness,
+  opens no ledger connection, and holds no seal key, so "no witness confirmed" is a fact
+  about *this run*, never a fact about the deployment, and an `.anchors` sidecar this build
+  cannot parse is not zero sinks. `PRESENT` means the mechanism the table names is
+  *configured*, not that it currently checks out — checking is `verify`'s job, stated in the
+  output rather than left for a reader to assume the stronger claim. The ledger dimension
+  (Workstream F, above) joins the witness row at rung 3 rather than gaining a rung of its
+  own: it is one more record kept under a different administrative authority than the
+  trail's writer, exactly what "external anchor" already names in general terms, and
+  widening the six-row table itself is explicitly out of scope here (a separately-approved
+  SPEC append).
+
+  Two trailing lines, from J4 (`waxseal-p8s`), print the prefix/tail honesty split
+  DESIGN.md §11 and threat-model.md section 1 both name, deliberately *not* folded into a
+  ladder rung: an immutable-prefix line naming the latest checkpoint (or that none exists, or
+  that the sidecar could not be read) with its mechanism explicitly "NOT CONFIRMED this run
+  (finalized ledger / WORM / none)", and a tail line stating that everything after it is
+  tamper-evident only, never more — the live tail and write-time honesty are limits no
+  mechanism closes. Both read from the same locally-observed anchor state the ladder already
+  computed, and never open the network or storage connection a real ledger-finality or
+  WORM-lock check would need.
+
+  Read-only against the trail, its sidecars, and — with `--pin` — the pin state file, which
+  this is the one command that names and only *reads*; it neither writes nor advances it.
+  Exit 0 always, because this is a reading and not a verdict an operator would then have to
+  reconcile against `verify` — the single exception is exit 3, the named local trail does not
+  exist. No URL/remote target: a remote trail has no `.anchors`/`.attest` location at all, so
+  there is nothing here to read rather than something that failed.
+
 ### Changed
 
 - **`JSONLBackend.append()` no longer raises `JSONLCorruptionError`, and a durably
