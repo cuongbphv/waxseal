@@ -14,6 +14,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -24,15 +25,18 @@ from waxseal.integrations.hermes import PLUGIN_MANIFEST
 from waxseal.integrations.hermes_gateway import HOOK_MANIFEST
 
 
-def load_by_path(path: Path, name: str):
+def load_by_path(path: Path, name: str) -> types.ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 class TestHermesPlugin:
-    def test_writes_manifest_and_shim(self, tmp_path: Path, capsys) -> None:
+    def test_writes_manifest_and_shim(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         assert main(["install", "hermes", "--home", str(tmp_path)]) == 0
         plugin_dir = tmp_path / "plugins" / "waxseal-audit"
         assert (plugin_dir / "plugin.yaml").read_text() == PLUGIN_MANIFEST
@@ -49,7 +53,7 @@ class TestHermesPlugin:
         assert main(["install", "hermes", "--home", str(tmp_path)]) == 0
 
     def test_refuses_to_overwrite_a_differing_file_without_force(
-        self, tmp_path: Path, capsys
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # An operator's local edit must not be clobbered silently — install
         # reports and stops, exactly like verify reports and never repairs.
@@ -75,7 +79,9 @@ class TestHermesGateway:
 
 
 class TestClaudeCodeHook:
-    def test_writes_shim_and_prints_settings_snippet(self, tmp_path: Path, capsys) -> None:
+    def test_writes_shim_and_prints_settings_snippet(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         assert main(["install", "claude-code", "--home", str(tmp_path)]) == 0
         shim = tmp_path / "hooks" / "waxseal_hook.py"
         assert shim.exists()
@@ -107,7 +113,7 @@ class TestClaudeCodeHook:
 
 @pytest.mark.parametrize("target", ["codex", "cursor"])
 def test_stdin_hook_targets_write_shim_and_print_config(
-    target: str, tmp_path: Path, capsys
+    target: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert main(["install", target, "--home", str(tmp_path)]) == 0
     assert (tmp_path / "hooks" / "waxseal_hook.py").exists()
@@ -116,7 +122,7 @@ def test_stdin_hook_targets_write_shim_and_print_config(
 
 @pytest.mark.parametrize("target", ["langchain", "crewai", "openai-agents"])
 def test_library_targets_install_nothing_and_print_usage(
-    target: str, tmp_path: Path, capsys
+    target: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # These attach in the user's own code; there is no host directory to
     # write into, so install is documentation, not file placement.
@@ -125,7 +131,9 @@ def test_library_targets_install_nothing_and_print_usage(
     assert "waxseal.integrations." in capsys.readouterr().out
 
 
-def test_openclaw_installs_nothing_and_prints_the_schedule(tmp_path: Path, capsys) -> None:
+def test_openclaw_installs_nothing_and_prints_the_schedule(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     # The exporter runs on a timer, so there is no host file to place and
     # nothing on the agent's execution path to configure.
     assert main(["install", "openclaw", "--home", str(tmp_path)]) == 0
