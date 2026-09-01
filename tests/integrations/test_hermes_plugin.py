@@ -101,7 +101,11 @@ class TestRegistration:
     def test_registers_pre_and_post_tool_call(self, ctx: FakeCtx) -> None:
         assert set(ctx.hooks) == {"pre_tool_call", "post_tool_call"}
 
-    def test_manifest_declares_exactly_the_registered_hooks(self, plugin: types.ModuleType, ctx: FakeCtx) -> None:
+    def test_manifest_declares_exactly_the_registered_hooks(
+        self,
+        plugin: types.ModuleType,
+        ctx: FakeCtx,
+    ) -> None:
         # PLUGIN_MANIFEST is what `waxseal install hermes` writes as
         # plugin.yaml and what `hermes plugins list` shows operators; drift
         # between manifest and register() misleads an audit review.
@@ -112,7 +116,11 @@ class TestRegistration:
 
 
 class TestOneWriterPerTrail:
-    def test_repeated_calls_reuse_the_same_open_log(self, plugin: types.ModuleType, tmp_path: Path) -> None:
+    def test_repeated_calls_reuse_the_same_open_log(
+        self,
+        plugin: types.ModuleType,
+        tmp_path: Path,
+    ) -> None:
         # Rule 7: read-tail + append is one critical section. Handing each
         # hook call its own AuditLog would put two writers on one trail
         # inside a single process, and both could extend the same prev_hash.
@@ -196,7 +204,11 @@ class TestRedaction:
 
 
 class TestTruncation:
-    def test_huge_result_is_clipped_with_a_visible_marker(self, ctx: FakeCtx, tmp_path: Path) -> None:
+    def test_huge_result_is_clipped_with_a_visible_marker(
+        self,
+        ctx: FakeCtx,
+        tmp_path: Path,
+    ) -> None:
         # Tool results can be megabytes (file reads, terminal dumps); the
         # trail must stay append-cheap and the clipping must be visible,
         # never silent (fail-open must be labelled).
@@ -221,7 +233,11 @@ class TestNeverBlocksThePipeline:
         ctx.hooks["post_tool_call"](**post_tool_call_kwargs())  # must not raise
         assert "dropped" in capsys.readouterr().out
 
-    def test_unserializable_values_are_sanitized_not_fatal(self, ctx: FakeCtx, tmp_path: Path) -> None:
+    def test_unserializable_values_are_sanitized_not_fatal(
+        self,
+        ctx: FakeCtx,
+        tmp_path: Path,
+    ) -> None:
         ctx.hooks["post_tool_call"](
             **post_tool_call_kwargs(args={"weird": object()}, result=object())
         )

@@ -81,7 +81,11 @@ class TestVerify:
 
 
 class TestTailAndInspect:
-    def test_tail_prints_last_entries(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_tail_prints_last_entries(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 5)
         assert main(["tail", str(path), "-n", "2"]) == 0
@@ -297,7 +301,11 @@ def _consistent_forge_at(path: Path, position: int) -> None:
 
 
 class TestVerifyAnchors:
-    def test_ok_with_intact_anchors(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_ok_with_intact_anchors(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
         main(["anchor", str(path)])

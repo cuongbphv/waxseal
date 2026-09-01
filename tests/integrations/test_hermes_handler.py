@@ -35,7 +35,11 @@ def trail_path(tmp_path: Path) -> Path:
 
 
 class TestAppend:
-    def test_event_is_appended_to_the_trail(self, handler: types.ModuleType, tmp_path: Path) -> None:
+    def test_event_is_appended_to_the_trail(
+        self,
+        handler: types.ModuleType,
+        tmp_path: Path,
+    ) -> None:
         handler.handle("agent:start", {"session_id": "s1", "message": "hello"})
         log = AuditLog.open(trail_path(tmp_path))
         result = log.verify(measure_drops=False)
@@ -54,14 +58,22 @@ class TestAppend:
         assert payload["session_id"] == "s1"
         assert payload["response"] == "done"
 
-    def test_multiple_events_form_one_verified_chain(self, handler: types.ModuleType, tmp_path: Path) -> None:
+    def test_multiple_events_form_one_verified_chain(
+        self,
+        handler: types.ModuleType,
+        tmp_path: Path,
+    ) -> None:
         for event in ("session:start", "agent:start", "agent:step", "agent:end"):
             handler.handle(event, {"session_id": "s1"})
         assert AuditLog.open(trail_path(tmp_path)).verify(measure_drops=False).checked == 4
 
 
 class TestRedaction:
-    def test_secret_in_message_never_reaches_disk(self, handler: types.ModuleType, tmp_path: Path) -> None:
+    def test_secret_in_message_never_reaches_disk(
+        self,
+        handler: types.ModuleType,
+        tmp_path: Path,
+    ) -> None:
         # Issue #487's stated risk: "Tool call args may contain secrets".
         handler.handle(
             "agent:step",

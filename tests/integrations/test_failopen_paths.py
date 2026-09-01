@@ -59,8 +59,10 @@ class TestHermesHomeResolution:
         monkeypatch.delenv("HERMES_HOME", raising=False)
         pkg = types.ModuleType("hermes_cli")
         config = types.ModuleType("hermes_cli.config")
-        setattr(config, "get_hermes_home", lambda: str(tmp_path / "custom-home"))
-        setattr(pkg, "config", config)
+        setattr(  # noqa: B010
+            config, "get_hermes_home", lambda: str(tmp_path / "custom-home")
+        )
+        setattr(pkg, "config", config)  # noqa: B010
         monkeypatch.setitem(sys.modules, "hermes_cli", pkg)
         monkeypatch.setitem(sys.modules, "hermes_cli.config", config)
         assert hermes_module._hermes_home() == tmp_path / "custom-home"
@@ -95,7 +97,12 @@ class TestOpenFailureStillLeavesADropRecord:
     calls FileDropRecorder directly — every failure path still exits
     silently AND leaves a measurable drop record."""
 
-    def test_hermes_plugin(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_hermes_plugin(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         # Realistic setup: the audit directory already exists from an
         # earlier successful run — THIS open() call fails for some other
@@ -115,7 +122,12 @@ class TestOpenFailureStillLeavesADropRecord:
         assert len(drops.read_text().splitlines()) == 1
         sys.modules.pop("waxseal.integrations.hermes", None)
 
-    def test_hermes_gateway(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_hermes_gateway(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         (tmp_path / "audit").mkdir()
         sys.modules.pop("waxseal.integrations.hermes_gateway", None)

@@ -20,9 +20,9 @@ from __future__ import annotations
 import http.server
 import json
 import threading
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import pytest

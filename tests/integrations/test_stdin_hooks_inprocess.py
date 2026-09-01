@@ -13,6 +13,7 @@ import importlib
 import io
 import json
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -27,17 +28,26 @@ MODULES = [
 
 
 @pytest.fixture(params=MODULES)
-def hook(request):
-    return importlib.import_module(request.param)
+def hook(request: pytest.FixtureRequest) -> types.ModuleType:
+    module: types.ModuleType = importlib.import_module(request.param)
+    return module
 
 
-def run_main(monkeypatch, hook, stdin_text: str, trail: Path) -> int:
+def run_main(
+    monkeypatch: pytest.MonkeyPatch, hook: types.ModuleType, stdin_text: str, trail: Path
+) -> int:
     monkeypatch.setenv("WAXSEAL_TRAIL", str(trail))
     monkeypatch.setattr(sys, "stdin", io.StringIO(stdin_text))
-    return hook.main()
+    exit_code: int = hook.main()
+    return exit_code
 
 
-def test_event_is_appended_and_verifies(monkeypatch, hook, tmp_path: Path, capsys) -> None:
+def test_event_is_appended_and_verifies(
+    monkeypatch: pytest.MonkeyPatch,
+    hook: types.ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     trail = tmp_path / "trail.jsonl"
     event = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
              "tool_input": {"command": "ls"}}
@@ -49,7 +59,9 @@ def test_event_is_appended_and_verifies(monkeypatch, hook, tmp_path: Path, capsy
     assert result.checked == 1
 
 
-def test_secret_is_redacted_before_disk(monkeypatch, hook, tmp_path: Path) -> None:
+def test_secret_is_redacted_before_disk(
+    monkeypatch: pytest.MonkeyPatch, hook: types.ModuleType, tmp_path: Path
+) -> None:
     trail = tmp_path / "trail.jsonl"
     secret = "sk-abcdef1234567890abcdef"
     event = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
@@ -59,7 +71,10 @@ def test_secret_is_redacted_before_disk(monkeypatch, hook, tmp_path: Path) -> No
 
 
 def test_malformed_stdin_exits_zero_with_labelled_drop(
-    monkeypatch, hook, tmp_path: Path, capsys
+    monkeypatch: pytest.MonkeyPatch,
+    hook: types.ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     # Nonzero would veto the user's tool call or prompt on some hosts.
     assert run_main(monkeypatch, hook, "not json {", tmp_path / "trail.jsonl") == 0
@@ -68,7 +83,10 @@ def test_malformed_stdin_exits_zero_with_labelled_drop(
 
 
 def test_json_that_is_not_an_object_is_reported_unreadable_not_crashed(
-    monkeypatch, hook, tmp_path: Path, capsys
+    monkeypatch: pytest.MonkeyPatch,
+    hook: types.ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     # Valid JSON of the wrong shape: a list parses, and then every
     # event.get() in build_payload would raise. Unrecognized input is
@@ -85,7 +103,10 @@ def test_json_that_is_not_an_object_is_reported_unreadable_not_crashed(
 
 
 def test_unopenable_trail_exits_zero_with_labelled_drop(
-    monkeypatch, hook, tmp_path: Path, capsys
+    monkeypatch: pytest.MonkeyPatch,
+    hook: types.ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     blocker = tmp_path / "blocker"
     blocker.write_text("a file where the trail dir should be")
@@ -100,7 +121,10 @@ def test_unopenable_trail_exits_zero_with_labelled_drop(
 
 
 def test_open_failure_still_leaves_a_drop_record(
-    monkeypatch, hook, tmp_path: Path, capsys
+    monkeypatch: pytest.MonkeyPatch,
+    hook: types.ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     # Unlike the blocker-file case above, the trail's OWN directory is
     # writable here — only AuditLog.open() itself fails (e.g. a corrupt
@@ -163,10 +187,15 @@ class TestClaudeCodeRemoteTargetInProcess:
     """
 
     @pytest.fixture()
-    def claude(self):
-        return importlib.import_module("waxseal.integrations.claude_code")
+    def claude(self) -> types.ModuleType:
+        module: types.ModuleType = importlib.import_module(
+            "waxseal.integrations.claude_code"
+        )
+        return module
 
-    def test_an_http_trail_is_kept_as_a_string(self, monkeypatch, claude) -> None:
+    def test_an_http_trail_is_kept_as_a_string(
+        self, monkeypatch: pytest.MonkeyPatch, claude: types.ModuleType
+    ) -> None:
         # Path("http://host") collapses the // and drops the scheme, so the
         # target would silently become a local file named `http:`.
         monkeypatch.setenv("WAXSEAL_TRAIL", "http://127.0.0.1:9/")
@@ -174,19 +203,27 @@ class TestClaudeCodeRemoteTargetInProcess:
         assert isinstance(target, str)
         assert target == "http://127.0.0.1:9/"
 
-    def test_an_https_trail_is_kept_as_a_string(self, monkeypatch, claude) -> None:
+    def test_an_https_trail_is_kept_as_a_string(
+        self, monkeypatch: pytest.MonkeyPatch, claude: types.ModuleType
+    ) -> None:
         monkeypatch.setenv("WAXSEAL_TRAIL", "https://audit.example.test")
         assert isinstance(claude._trail_target(_ROUTING_EVENT), str)
 
-    def test_a_local_trail_is_still_a_path(self, monkeypatch, claude, tmp_path) -> None:
+    def test_a_local_trail_is_still_a_path(
+        self, monkeypatch: pytest.MonkeyPatch, claude: types.ModuleType, tmp_path: Path
+    ) -> None:
         monkeypatch.setenv("WAXSEAL_TRAIL", str(tmp_path / "trail.jsonl"))
         assert isinstance(claude._trail_target(_ROUTING_EVENT), Path)
 
-    def test_an_explicit_chain_id_wins(self, monkeypatch, claude) -> None:
+    def test_an_explicit_chain_id_wins(
+        self, monkeypatch: pytest.MonkeyPatch, claude: types.ModuleType
+    ) -> None:
         monkeypatch.setenv("WAXSEAL_CHAIN_ID", "waxseal")
         assert claude._chain_id({"cwd": "/somewhere/else"}) == "waxseal"
 
-    def test_the_project_directory_names_the_chain(self, monkeypatch, claude) -> None:
+    def test_the_project_directory_names_the_chain(
+        self, monkeypatch: pytest.MonkeyPatch, claude: types.ModuleType
+    ) -> None:
         monkeypatch.delenv("WAXSEAL_CHAIN_ID", raising=False)
         assert claude._chain_id({"cwd": "/Users/dev/Projects/waxseal"}) == "waxseal"
 
@@ -200,20 +237,24 @@ class TestClaudeCodeRemoteTargetInProcess:
         ],
     )
     def test_a_directory_name_is_folded_to_a_safe_chain_id(
-        self, monkeypatch, claude, cwd, expected
+        self, monkeypatch: pytest.MonkeyPatch, claude: types.ModuleType, cwd: str, expected: str
     ) -> None:
         monkeypatch.delenv("WAXSEAL_CHAIN_ID", raising=False)
         assert claude._chain_id({"cwd": cwd}) == expected
 
     @pytest.mark.parametrize("event", [{}, {"cwd": ""}, {"cwd": 7}])
     def test_an_absent_or_unusable_cwd_falls_back_to_default(
-        self, monkeypatch, claude, event
+        self, monkeypatch: pytest.MonkeyPatch, claude: types.ModuleType, event: dict[str, object]
     ) -> None:
         monkeypatch.delenv("WAXSEAL_CHAIN_ID", raising=False)
         assert claude._chain_id(event) == "default"
 
     def test_an_unreachable_server_exits_zero_and_records_no_sidecar(
-        self, monkeypatch, claude, tmp_path, capsys
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        claude: types.ModuleType,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         # The observer contract, and the reason record_drops is off for a URL:
         # a remote trail has no next-to for a sidecar, and asking for one raises
@@ -229,7 +270,11 @@ class TestClaudeCodeRemoteTargetInProcess:
         assert not list(tmp_path.iterdir())
 
     def test_a_remote_trail_that_cannot_be_opened_writes_no_sidecar(
-        self, monkeypatch, claude, tmp_path, capsys
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        claude: types.ModuleType,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         # The local path records the loss in a `.drops` sidecar NEXT TO the
         # trail. A URL has no next-to, so this branch must return without
@@ -239,7 +284,7 @@ class TestClaudeCodeRemoteTargetInProcess:
         # Forced, because `AuditLog.open` on a URL builds a backend without
         # connecting and so has no natural failure: the branch is defensive, and
         # a defensive branch nothing exercises is a branch nobody has run.
-        def refuse(*_args, **_kwargs):
+        def refuse(*_args: object, **_kwargs: object) -> object:
             raise RuntimeError("simulated: cannot construct the remote backend")
 
         monkeypatch.setenv("WAXSEAL_TRAIL", "http://127.0.0.1:1")

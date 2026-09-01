@@ -62,23 +62,23 @@ def _stub_host_frameworks(monkeypatch: pytest.MonkeyPatch) -> None:
     # the attr-defined error mypy exists to catch -- setattr is the same
     # runtime effect without pretending the fake module is statically typed.
     events = types.ModuleType("crewai.events")
-    setattr(events, "BaseEventListener", type("BaseEventListener", (), {}))
+    setattr(events, "BaseEventListener", type("BaseEventListener", (), {}))  # noqa: B010
     for name in _CREWAI_EVENT_NAMES:
         setattr(events, name, type(name, (), {}))
     crewai = types.ModuleType("crewai")
-    setattr(crewai, "events", events)
+    setattr(crewai, "events", events)  # noqa: B010
     monkeypatch.setitem(sys.modules, "crewai", crewai)
     monkeypatch.setitem(sys.modules, "crewai.events", events)
 
     callbacks = types.ModuleType("langchain_core.callbacks")
-    setattr(callbacks, "BaseCallbackHandler", type("BaseCallbackHandler", (), {}))
+    setattr(callbacks, "BaseCallbackHandler", type("BaseCallbackHandler", (), {}))  # noqa: B010
     langchain_core = types.ModuleType("langchain_core")
-    setattr(langchain_core, "callbacks", callbacks)
+    setattr(langchain_core, "callbacks", callbacks)  # noqa: B010
     monkeypatch.setitem(sys.modules, "langchain_core", langchain_core)
     monkeypatch.setitem(sys.modules, "langchain_core.callbacks", callbacks)
 
     agents = types.ModuleType("agents")
-    setattr(agents, "RunHooks", type("RunHooks", (), {}))
+    setattr(agents, "RunHooks", type("RunHooks", (), {}))  # noqa: B010
     monkeypatch.setitem(sys.modules, "agents", agents)
 
 
@@ -94,7 +94,10 @@ def integration(
 
 
 class TestScalarsKeepTheirIdentity:
-    def test_none_is_not_folded_to_zero_or_empty_string(self, integration: types.ModuleType) -> None:
+    def test_none_is_not_folded_to_zero_or_empty_string(
+        self,
+        integration: types.ModuleType,
+    ) -> None:
         # Rule 5: None ≠ 0. "the host sent no value" and "the host sent 0"
         # must stay two different things once they are on the chain.
         assert integration._sanitize(None) is None
@@ -121,7 +124,10 @@ class TestSequencesAreWalkedNotStringified:
         assert SECRET not in str(out)
         assert REDACTED in out[2]
 
-    def test_tuple_contents_are_walked_and_land_as_a_json_array(self, integration: types.ModuleType) -> None:
+    def test_tuple_contents_are_walked_and_land_as_a_json_array(
+        self,
+        integration: types.ModuleType,
+    ) -> None:
         # Without the sequence branch a tuple falls to the repr catch-all and
         # the whole argv becomes one opaque string in the payload.
         out = integration._sanitize(("bash", f"--token={SECRET}"))
@@ -129,7 +135,10 @@ class TestSequencesAreWalkedNotStringified:
         assert out[0] == "bash"
         assert SECRET not in out[1]
 
-    def test_nested_containers_are_walked_to_the_bottom(self, integration: types.ModuleType) -> None:
+    def test_nested_containers_are_walked_to_the_bottom(
+        self,
+        integration: types.ModuleType,
+    ) -> None:
         out = integration._sanitize(
             {"steps": [{"cmd": f"curl -H 'Authorization: Bearer {SECRET}'"}]}
         )
@@ -137,7 +146,10 @@ class TestSequencesAreWalkedNotStringified:
 
 
 class TestObjectsWithNoJsonForm:
-    def test_repr_fallback_is_redacted_before_it_can_land(self, integration: types.ModuleType) -> None:
+    def test_repr_fallback_is_redacted_before_it_can_land(
+        self,
+        integration: types.ModuleType,
+    ) -> None:
         out = integration._sanitize(_ClientWithKeyInRepr())
         assert SECRET not in out
         assert REDACTED in out

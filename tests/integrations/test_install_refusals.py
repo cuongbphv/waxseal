@@ -34,7 +34,11 @@ class TestHermesGatewayRefusal:
         assert "--force" in out
         assert "next startup" not in out
 
-    def test_force_completes_what_the_refusal_stopped(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_force_completes_what_the_refusal_stopped(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
         install("hermes-gateway", tmp_path, force=False)
         handler = tmp_path / "hooks" / "waxseal-audit" / "handler.py"
         handler.write_text("# locally patched\n")
