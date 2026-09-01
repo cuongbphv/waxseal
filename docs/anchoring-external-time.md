@@ -200,28 +200,30 @@ log.anchor()
 
 ### EVM contract event
 
-Store `sha256(frame)` in a contract's calldata or emit it as an event topic.
-The block number and transaction hash together are the receipt:
+waxseal now ships this natively (0.1.5, Workstream F) — see
+`src/waxseal/adapters/evm.py::EvmAnchorSink`. EVM is no longer "a chain
+waxseal does not know about"; use the real sink rather than hand-rolling one:
 
-```python
-class EvmAnchorSink:
-    name = "evm"
-
-    def __init__(self, w3, contract, account):
-        self._w3, self._contract, self._account = w3, contract, account
-
-    def anchor(self, checkpoint):
-        digest = hashlib.sha256(checkpoint_frame(checkpoint)).digest()
-        tx = self._contract.functions.anchor(digest).transact({"from": self._account})
-        receipt = self._w3.eth.wait_for_transaction_receipt(tx)   # raises on revert
-        return f"evm:{receipt.blockNumber}:{receipt.transactionHash.hex()}"
+```bash
+waxseal anchor trail.jsonl --evm-rpc https://rpc.example \
+    --evm-liveness 0xLIVENESS_CONTRACT_ADDRESS
 ```
 
-Notes specific to EVM: a transaction that reverts must raise, not return; a
-reorg can undo a confirmed anchor, so wait for the confirmation depth your
-threat model requires before treating the receipt as evidence; and the digest
-is public forever, which is fine — it is a hash of a hash, and the payloads
-never leave your storage.
+Store `sha256(frame)` in a contract's calldata or emit it as an event topic;
+the chain id, block number, and transaction hash together are the receipt.
+The transaction signer is never a flag or an env var holding a private key:
+it is an external process named by `WAXSEAL_EVM_SIGNER_CMD`, a three-verb
+protocol (`address` / `sign-digest` / `sign-tx`) — see CLAUDE.md's CLI
+contract.
+
+Notes specific to EVM, true whether waxseal's own sink handles this or the
+pattern is adapted to an EVM-compatible chain it does not cover: a
+transaction that reverts must raise, not return (the shipped sink does this);
+a reorg can undo a confirmed anchor, so wait for the confirmation depth your
+threat model requires before treating the receipt as evidence
+(`EvmLedgerSink`'s `confirm_tag` defaults to `finalized` for exactly this
+reason); and the digest is public forever, which is fine — it is a hash of a
+hash, and the payloads never leave your storage.
 
 ### Hyperledger Fabric
 
