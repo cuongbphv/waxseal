@@ -13,7 +13,12 @@ khác, và quyết định đó đã không được đưa ra.
 
 **Những gì đã được kiểm tra, và bằng cách nào.** Hai hành vi của mirror node công khai
 trên mainnet đã được kiểm chứng trực tiếp vào 2026-08-31 từ repo này bằng `curl`, không
-gửi credential nào cả:
+gửi credential nào cả. Khối dưới đây là một trích đoạn của phiên đó chứ không phải một
+transcript đầy đủ: các header phản hồi còn lại của lệnh thứ nhất và cả hai JSON body đều
+được lược bớt, và các dòng `#` là chú thích nêu tên những trường có mặt trong body thứ
+hai, không phải thứ `curl` in ra. Mọi dòng còn lại đều đúng là dòng mà lệnh ngay phía
+trên nó sinh ra như đã in — lệnh thứ hai không truyền `-D -`, nên nó không in dòng
+trạng thái nào cả.
 
 ```
 $ curl -D - https://mainnet-public.mirrornode.hedera.com/api/v1/network/nodes?limit=1
@@ -21,9 +26,8 @@ HTTP/2 200
 content-type: application/json;charset=UTF-8
 
 $ curl 'https://mainnet-public.mirrornode.hedera.com/api/v1/topics/0.0.3959298/messages?limit=2&order=desc'
-HTTP 200
-# mỗi message mang theo: consensus_timestamp, sequence_number,
-# running_hash, running_hash_version
+# mỗi message trong JSON body mang theo: consensus_timestamp,
+# sequence_number, running_hash, running_hash_version
 ```
 
 Hai dữ kiện suy ra từ hai lệnh đó và được nêu ở đây như đã kiểm chứng: một endpoint đọc

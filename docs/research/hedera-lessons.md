@@ -12,7 +12,12 @@ traffic is a different decision, and it was not taken.
 
 **What was checked, and how.** Two behaviours of the public mainnet mirror node
 were verified directly on 2026-08-31 from this repository with `curl`, sending
-no credential of any kind:
+no credential of any kind. The block below is an excerpt of that session rather
+than a full transcript: the first command's remaining response headers and both
+JSON bodies are elided, and the `#` lines are an annotation naming fields
+present in the second body, not output `curl` printed. Every other line is one
+the command above it produces as shown — the second invocation passes no
+`-D -`, so it prints no status line at all.
 
 ```
 $ curl -D - https://mainnet-public.mirrornode.hedera.com/api/v1/network/nodes?limit=1
@@ -20,9 +25,8 @@ HTTP/2 200
 content-type: application/json;charset=UTF-8
 
 $ curl 'https://mainnet-public.mirrornode.hedera.com/api/v1/topics/0.0.3959298/messages?limit=2&order=desc'
-HTTP 200
-# each message carries: consensus_timestamp, sequence_number,
-# running_hash, running_hash_version
+# each message in the JSON body carries: consensus_timestamp,
+# sequence_number, running_hash, running_hash_version
 ```
 
 Two facts follow from those two commands and are stated here as verified: an

@@ -136,6 +136,51 @@ pip install waxseal
 > [docs/research/landscape.vi.md](docs/research/landscape.vi.md) §3 phân biệt đầy đủ
 > hai bên.
 
+## Extras mở rộng năng lực
+
+<!-- Quyết định dịch thuật (waxseal-fg4.32, 01/09/2026): mục này DỊCH phần prose và TRỎ
+     về bảng tiếng Anh cho các specifier, thay vì nhân bản bảng ra ba tệp README. Lý do:
+     bảng là nội dung sống — `rfc3161` đã chuyển Planned -> shipped ở c57a7b7, `evm` sẽ
+     chuyển khi Workstream F3 land — nên một bảng dịch bị lỡ cập nhật sẽ in ra một chỉ
+     dẫn cài đặt SAI (tên gói / version specifier cũ), còn một con trỏ thì cùng lắm là
+     thêm một cú nhấp. Hệ quả cho người ship extra mới: chỉ phải sửa BẢNG ở README.md;
+     ba tệp README chỉ cần đụng tới khi DANH SÁCH TÊN extra đã ship thay đổi, vì tên
+     extra vẫn được nêu bằng prose ở đây. -->
+
+Zero-dependency mô tả phần lõi, không phải trần năng lực của waxseal. Lõi giữ
+`dependencies = []` như một bất biến chứ không phải một sở thích, và năng lực nào cần
+client của bên thứ ba thì đến qua một optional extra cộng với injection: bạn cài client,
+bạn khởi tạo nó, bạn truyền nó vào, và bản thân waxseal không bao giờ import nó.
+`S3Backend` và `PostgresBackend` ở [Storage backends](#storage-backends) chính là pattern
+đó, và extras tồn tại để `pip` lấy giúp bạn một client tương thích, chứ không phải vì
+waxseal cần một client nào.
+
+Đã ship hôm nay là ba extra: `pip install waxseal[s3]`, `pip install waxseal[postgres]`
+và `pip install waxseal[rfc3161]`.
+
+`rfc3161` là extra DUY NHẤT mà waxseal tự import, bên trong đúng một hàm
+(`adapters/rfc3161_verify.py`) — vì thế nó không có gì để bạn inject. Nó bật chiều kiểm
+chữ ký tùy chọn của `verify`/`report`, và chỉ khi bạn nêu tên một CA bundle bằng
+`--tsa-ca-file`: token có chữ ký CMS hoặc chuỗi chứng thư sai là exit 1, còn bất cứ thứ
+gì không kiểm được — kể cả vì thiếu extra — là exit 2 kèm nhãn nói rõ là thứ nào, không
+bao giờ là một exit 0 im lặng. Không có cờ đó thì không gì đổi: receipt vẫn được kiểm về
+mặt cấu trúc, đúng như trước. Xem [SPEC.md](SPEC.md) mục 17.1.
+
+(`dev` cũng tồn tại, để chạy test suite. Nó không phải một extra năng lực.)
+
+`evm` — lớp ledger on-chain — đã có tên trong contract 0.1.5 nhưng **CHƯA ship**: đừng
+viết code dựa vào nó. Nó không có trong `pyproject.toml`, nên yêu cầu nó sẽ không cài
+thêm gì cả. Repo này không mô tả một extra chưa ship là đã dùng được:
+written-but-unwired không phải shipped, và
+[docs/paper/conformance.vi.md](docs/paper/conformance.vi.md) giữ sổ đó theo từng dòng.
+
+Thêm một dependency CỨNG là câu hỏi khác, và câu trả lời là không. Extras là con đường
+được phép.
+
+Bảng chính thức — extra nào kéo về gói client nào, ở version specifier nào — nằm ở
+[README.md § Capability extras](README.md#capability-extras) bản tiếng Anh, và đó là
+nguồn duy nhất cho những chuỗi ấy.
+
 ## Sử dụng
 
 ```python

@@ -22,10 +22,11 @@ Ba nguồn hợp thành release này:
    (privacy + nhiễu pháp chứng), và `_integrity_scan` đọc cả tệp mỗi 1000 append →
    tích lũy O(n²/N).
 
-Khảo sát hiệu năng (Explore, 31/08/2026) định vị chính xác: `_tail()` ở `cli.py:2151`
+Khảo sát hiệu năng (Explore, 31/08/2026) định vị chính xác: `_tail()` trong `cli.py`
 nạp CẢ trail để in N dòng; `report`/`export-proof`/`consistency`/`checkpoint`/pin/witness
-đều materialize toàn bộ qua `entry_hashes()` hoặc `list(entries())`; `jsonl.py:103` mkdir
-thừa mỗi append; `verify_chain` thuần thì ĐÃ streaming đúng (không sửa).
+đều materialize toàn bộ qua `entry_hashes()` hoặc `list(entries())`;
+`JSONLBackend.append()` trong `jsonl.py` mkdir thừa mỗi append; `verify_chain` thuần
+thì ĐÃ streaming đúng (không sửa).
 
 Board beads trống — toàn bộ release này lên board mới.
 
@@ -51,21 +52,24 @@ thân đã là opt-in). Biến `WAXSEAL_TRAIL` có từ trước được giữ 
 
 ## Workstream A — Hiệu năng (không đổi hành vi, không đổi bytes)
 
-**A1. `_tail()` streaming** — `cli.py:2151`: thay `entries = list(log.entries())` +
-`[-n:]` bằng `collections.deque(maxlen=n)`. Test: byte-counting như
+**A1. `_tail()` streaming** — `_tail()` trong `cli.py`: thay
+`entries = list(log.entries())` + `[-n:]` bằng `collections.deque(maxlen=n)`. Test:
+byte-counting như
 `tests/adapters/test_jsonl.py` TestCostReceipt (mẫu có sẵn), assert tail 5 dòng trên
 trail 2000 entry không đọc quá X byte; falsifiability: bỏ deque → vi phạm.
 
-**A2. Bỏ mkdir thừa mỗi append** — `jsonl.py:103`: lock (`filelock.py:20`) đã mkdir
-parent; giữ một lần, bỏ lần hai. Test hiện có phải xanh nguyên.
+**A2. Bỏ mkdir thừa mỗi append** — `JSONLBackend.append()` trong `jsonl.py`: lock
+(`file_lock()` trong `filelock.py`) đã mkdir parent; giữ một lần, bỏ lần hai. Test
+hiện có phải xanh nguyên.
 
-**A3. `_integrity_scan` resumable theo offset** — `jsonl.py:133-153`: lưu offset đã
-scan sạch (trong bộ nhớ instance là đủ — scan là hàng phòng thủ mỗi-process, docstring
-đã nói rõ nó không phải verify), chỉ scan phần mới từ offset. Tích lũy O(n²/N) → O(n).
+**A3. `_integrity_scan` resumable theo offset** — `JSONLBackend._integrity_scan()`
+trong `jsonl.py`: lưu offset đã scan sạch (trong bộ nhớ instance là đủ — scan là hàng
+phòng thủ mỗi-process, docstring đã nói rõ nó không phải verify), chỉ scan phần mới
+từ offset. Tích lũy O(n²/N) → O(n).
 Giữ nguyên semantics `JSONLCorruptionError`. Test: byte-counting assert scan lần 2 không
 đọc lại phần đã scan; falsifiability receipt.
 
-**A4. Vá lớp materialize còn lại ở mức rẻ**: `log.entry_hashes()` (log.py:505) giữ
+**A4. Vá lớp materialize còn lại ở mức rẻ**: `log.entry_hashes()` (`log.py`) giữ
 nguyên chữ ký (list là inherent cho `batch_root`), nhưng `report`/`_export_proof` đang
 gọi CẢ `verify()` (streaming) lẫn `list(entries())` — gom một lượt đọc thay vì hai.
 Không đổi public API. (Các lệnh cần Merkle root thì list là bản chất — ghi rõ trong
@@ -79,7 +83,8 @@ TRÍCH, không sửa số đo gốc.
 ## Workstream B — Trail theo dự án + xoay vòng (sealed segments)
 
 **B1. Định tuyến theo dự án.** Khóa dự án = `cwd` từ hook event (đã có sẵn trong
-payload, claude_code.py:49-52; `session_id` bị loại — đổi mỗi phiên, sinh nghìn trail).
+payload, `_COMMON_FIELDS` trong `claude_code.py`; `session_id` bị loại — đổi mỗi
+phiên, sinh nghìn trail).
 Slug = `sanitize(basename(cwd))[:32] + "-" + sha256(cwd)[:12]` (chữ thường, [a-z0-9-],
 hash trên chuỗi cwd NGUYÊN VĂN — không resolve() symlink vì mỗi host resolve khác nhau
 sẽ tách một dự án thành hai slug). Va chạm 48-bit: chỉ gộp hai dự án vào một trail
@@ -87,8 +92,8 @@ sẽ tách một dự án thành hai slug). Va chạm 48-bit: chỉ gộp hai d�
 `~/.claude/waxseal/trails/<slug>/trail.00000.jsonl` (+ ordinal tăng, zero-padded —
 lexicographic = chronological; tên timestamp bị loại vì clock skew đảo thứ tự).
 Sidecar `.attest`/`.sealagg`/`.drops`/`.anchors` đã derive qua `with_name(name+suffix)`
-(attest.py:68, drops.py:35, anchors.py:136) → tự nằm cạnh segment của nó, **zero code
-change**.
+(`FileAttestor.__init__`, `FileDropRecorder.__init__`, `anchors._sidecar_path()`) →
+tự nằm cạnh segment của nó, **zero code change**.
 
 **Quyết định chủ repo (31/08/2026): mọi tính năng mới BẬT MẶC ĐỊNH, không cờ tắt,
 không biến môi trường mới.** Hệ quả cho định tuyến:
@@ -203,8 +208,9 @@ segment mới; (10) hook dùng hằng số 16 MiB và in nhãn `built-in default
 
 ## Workstream D — Vá install + đổi tên checkpoint prose
 
-**D1. `sys.executable` thay `python3` trần** — `_install.py:200` (`_config_snippet`) và
-`:89-93` (openclaw `python -m ...`). Zero blast radius test/doc (đã kiểm: không test nào
+**D1. `sys.executable` thay `python3` trần** — `_config_snippet()` và
+`_RUNNER_USAGE["openclaw"]` (openclaw `python -m ...`), cả hai trong
+`integrations/_install.py`. Zero blast radius test/doc (đã kiểm: không test nào
 assert chuỗi "python3"). Thêm test assert snippet chứa `sys.executable` thật. Shim giữ
 shebang `env python3` (fail-open đã đúng) nhưng config snippet trỏ interpreter đang chạy
 install — đúng interpreter có waxseal.
@@ -213,10 +219,10 @@ install — đúng interpreter có waxseal.
 `CHECKPOINT_FRAME_PREFIX_BARE` + alias cũ, `_V2` → `CHECKPOINT_FRAME_PREFIX_AGG_BOUND`
 + alias cũ (hoặc tên chủ repo chọn). Bytes `waxseal-checkpoint-v1\n`/`-v2\n` bất động
 (đã nằm trong receipt TSA ngoài). Sửa 3 tệp test import theo; KHÔNG đụng
-`tools/gen_checkpoint_vectors.py` (độc lập là chủ đích); SPEC.md:184 giữ nguyên (bytes
-không đổi nên spec vẫn đúng) — chỉ THÊM một câu ghi chú "v1/v2 là hình dạng khung song
-song theo nội dung, không phải phiên bản cũ–mới" vào SPEC (append, cần duyệt) hoặc chỉ
-vào docs thường nếu chủ repo không muốn đụng SPEC.
+`tools/gen_checkpoint_vectors.py` (độc lập là chủ đích); SPEC.md §9 (khung
+checkpoint) giữ nguyên (bytes không đổi nên spec vẫn đúng) — chỉ THÊM một câu ghi chú
+"v1/v2 là hình dạng khung song song theo nội dung, không phải phiên bản cũ–mới" vào
+SPEC (append, cần duyệt) hoặc chỉ vào docs thường nếu chủ repo không muốn đụng SPEC.
 
 **D3. Đồng nhất `WAXSEAL_TRAIL`**: hermes/hermes_gateway + 3 integration thư viện hiện
 không honor env override (4/9 honor). Thêm honor `WAXSEAL_TRAIL` (ctor param vẫn thắng
@@ -225,7 +231,7 @@ env ở 3 cái thư viện — tham số tường minh > môi trường). Test p
 ## Workstream E — `waxseal preflight` (production preflight)
 
 Lệnh CLI read-only mới: đọc trail + sidecars + pin + cấu hình thấy được, in ra **bậc
-thang năng lực kẻ tấn công** (bảng threat-model.md:215-222) mà cấu hình hiện tại chống
+thang năng lực kẻ tấn công** (bảng ở threat-model.md §5) mà cấu hình hiện tại chống
 được: có seal? có anchor ngoài? mấy sink, mấy domain? có witness? pin có tách đĩa
 (khai báo)? → "cấu hình này dừng kẻ tấn công ở bậc N, bậc N+1 cần X". Không phán quyết
 mới, chỉ trình bày lại τ + declared_topology + anchor records theo ngôn ngữ thang bậc.
@@ -424,7 +430,7 @@ không thêm dep (import `agent_governance_*` chỉ xảy ra khi người dùng 
 - Trail path: dùng chuẩn mới của B (routing theo dự án khi có cwd; ctor param thắng;
   honor `WAXSEAL_TRAIL` theo D3).
 - `waxseal install agt` vào `TARGETS` nhóm _LIBRARY_USAGE (chỉ in cách attach, không
-  ghi tệp — tiền lệ langchain, _install.py:70-83).
+  ghi tệp — tiền lệ langchain, `_LIBRARY_USAGE` trong `integrations/_install.py`).
 - Test: khuôn `tests/integrations/` sẵn có — event giả → entry đúng payload type,
   redact hoạt động, lỗi sink không lan (never-veto), drop có đếm; fake module AGT
   trong test (không thêm dep dev nặng) trừ khi upstream có gói test nhẹ.
@@ -447,8 +453,8 @@ nằm ngoài mọi cơ chế hash:
    không bằng lỗi thiết kế (threat-model §4 residual 3 cùng bản chất).
 
 Cái ĐẠT ĐƯỢC — và F đã mua được phần lớn — là **tamper-proof CÓ PHẠM VI**:
-(a) prefix đã neo lên ledger finalized (F): hai hàng cuối bảng
-threat-model.md:215-222 ("nothing this library can offer") đổi thành "ledger giữ
+(a) prefix đã neo lên ledger finalized (F): hai hàng cuối bảng thang năng lực kẻ
+tấn công ở threat-model.md §5 ("nothing this library can offer") đổi thành "ledger giữ
 bản ghi kẻ tấn công không sửa được, equivocation bị slash"; (b) segment đã seal
 nằm trên storage WORM: storage TỪ CHỐI ghi đè thay vì chỉ phát hiện. Plan trước J
 đưa waxseal lên (a) nhưng còn ba khoảng trống để claim (b) và để (a) không rỗng

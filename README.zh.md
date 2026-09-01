@@ -125,6 +125,46 @@ pip install waxseal
 > 你是为了签名和验证 agent 身份而来，那才是你要找的东西。
 > [docs/research/landscape.md](docs/research/landscape.md) §3 完整区分了两者。
 
+## 能力扩展（capability extras）
+
+<!-- 翻译决定（waxseal-fg4.32，2026-09-01）：本节翻译正文，而把具体的 specifier
+     指回英文表格，不把表格复制到三个 README 里。理由：那张表是活内容 ——
+     `rfc3161` 已在 c57a7b7 从 Planned 变为已发布，`evm` 会在 Workstream F3 落地时
+     跟着变 —— 一张漏更新的译版表格会印出错误的安装指令（过时的包名或版本
+     specifier），而一个指针最多只是多点一次。对新增 extra 的人的影响：只需改
+     README.md 里的表格；三个 README 只有在“已发布 extra 的名字清单”变化时才需要
+     动，因为这里仍用正文列出了 extra 的名字。 -->
+
+零依赖描述的是内核，而不是 waxseal 能力的上限。内核保持 `dependencies = []`，这是一条
+不变量而非偏好；凡是需要第三方客户端的能力，都通过“可选 extra + 注入”抵达：你安装客户
+端，你构造它，你把它传进来，waxseal 自己永远不 import 它。[存储后端](#存储后端)一节里的
+`S3Backend` 和 `PostgresBackend` 就是这个模式，extras 存在只是为了让 `pip` 替你取一个
+兼容的客户端，而不是因为 waxseal 需要它。
+
+今天已发布的是三个 extra：`pip install waxseal[s3]`、`pip install waxseal[postgres]`
+和 `pip install waxseal[rfc3161]`。
+
+`rfc3161` 是 waxseal 唯一自己 import 的 extra，而且只在一个函数里
+（`adapters/rfc3161_verify.py`）—— 所以它没有任何东西需要你注入。它开启的是
+`verify`/`report` 的可选签名维度，并且只有当你用 `--tsa-ca-file` 指名一份 CA bundle
+时才生效：CMS 签名或证书链校验失败的 token 是 exit 1，而任何根本无法校验的情况（包括
+extra 缺失）是 exit 2 并附上说明是哪一种的标签，绝不会是一个沉默的 exit 0。不带这个
+参数则一切照旧：receipt 仍按结构校验，和以前完全一样。参见 [SPEC.md](SPEC.md) 第
+17.1 节。
+
+（`dev` 也存在，用于运行测试套件。它不是一个能力 extra。）
+
+`evm`（链上 ledger 层）已在 0.1.5 contract 中被命名，但**尚未发布** —— 不要针对它写
+代码。它不在 `pyproject.toml` 里，所以请求它不会多装任何东西。本仓库不会把未发布的
+extra 描述成可用：written-but-unwired 不等于 shipped，
+[docs/paper/conformance.md](docs/paper/conformance.md) 逐行记着这本账。
+
+增加一个**硬**依赖是另一个问题，答案是不。extras 才是被许可的那条路。
+
+权威表格 —— 哪个 extra 取哪个客户端包、版本 specifier 是什么 —— 在英文的
+[README.md § Capability extras](README.md#capability-extras) 里，那里是这些字符串的
+唯一来源。
+
 ## 使用
 
 ```python
