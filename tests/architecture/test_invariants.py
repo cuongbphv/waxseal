@@ -221,15 +221,44 @@ class TestDocumentationLinks:
     """A README link to a file that never ships is a dead link for everyone
     but the author.
 
-    `docs/` is ignored wholesale with per-directory exceptions, so adding a
-    doc and linking it are two steps and the second one looks finished on the
-    author's disk. That is how `docs/security/threat-model.md` was linked from
-    three READMEs while still being gitignored.
+    `docs/` used to be gitignored wholesale with per-directory exceptions, so
+    adding a doc and linking it were two steps and the second one looked
+    finished on the author's disk. That is how `docs/security/threat-model.md`
+    was linked from three READMEs while still being gitignored. The blanket
+    `docs/` ignore was dropped in 0.1.3 (8598a99), so the original receipt —
+    delete the `!docs/security/` line — no longer reproduces; the current one
+    is below.
 
-    Falsifiability receipt: deleting the `!docs/security/` line from
-    `.gitignore` fails `test_no_linked_path_is_gitignored` with
-    `docs/security/threat-model{,.vi}.md` in the diff.
+    Until 0.1.5 this family globbed `REPO/*.md` only, so it could not have
+    caught its own motivating incident from the `docs/` side: the linked file
+    was a `docs/` path, and every `.vi.md` cross-reference lives there too.
+    The glob now reaches `docs/**` as well.
+
+    Falsifiability receipts (both run 01/09/2026, on the widened glob):
+    - `test_every_linked_path_exists`: appending `[x](nope/gone.md)` to
+      `docs/paper/outline.md` fails with
+      `docs/paper/outline.md -> nope/gone.md` in the diff.
+    - `test_no_linked_path_is_gitignored`: adding `docs/scratch/` to
+      `.gitignore`, writing an untracked `docs/scratch/note.md` and linking it
+      from `docs/paper/outline.md` fails with that path in the diff — the
+      original incident exactly, reproduced from a `docs/` file. Re-ignoring
+      `docs/security/` does NOT reproduce it, because those files are now
+      tracked; see `test_no_linked_path_is_gitignored`.
     """
+
+    # Skip rules for the doc set. Each is a property of the globs below rather
+    # than a filter list, because a filter list is how this test lost `docs/`
+    # in the first place.
+    #   - CHANGELOG.md: a pre-existing carve-out with its own open bead
+    #     (waxseal-fg4.23). Left exactly as it was; this test does not settle it.
+    #   - tools/pm/*.md: vendored PM tooling, already carved out of lint
+    #     (`[tool.ruff] extend-exclude = ["tools/pm"]`). Not authored here.
+    #   - node_modules/, server/waxseal_server/static/, .venv/: gitignored
+    #     dependency trees and build output. Nothing there is hand-written prose.
+    # Not yet covered, and deliberately not folded into this change:
+    # `integrations/*/README.md`, `examples/banking-poc/README*.md`,
+    # `server/**/*.md`. They are shipped prose with relative links and belong in
+    # this family; widening to them is a separate, reviewable step.
 
     def linked_repo_paths(self, doc: Path) -> list[str]:
         text = doc.read_text(encoding="utf-8")
@@ -239,15 +268,43 @@ class TestDocumentationLinks:
             if not target.startswith(("http://", "https://", "#", "mailto:"))
         ]
 
+    def resolve(self, doc: Path, target: str) -> Path:
+        # Markdown resolves a relative link against the file that contains it,
+        # not against the repository root. While every checked doc sat at the
+        # root the two were the same thing; under docs/plans/ they are not, and
+        # six root-style links in one plan were already 404 on GitHub when this
+        # glob widened. Path() also drops the trailing slash git would
+        # otherwise match against an empty ignore pattern.
+        #
+        # Anchors (`#L36`, `#section-name`) are stripped, not checked: targets
+        # include source files whose anchors are the renderer's line numbers,
+        # and heading slugs differ between GitHub and mkdocs, so a slug check
+        # would encode one renderer's rules as truth. Out of scope, on purpose.
+        return doc.parent / target.split("#")[0]
+
     def docs(self) -> list[Path]:
-        return sorted(p for p in REPO.glob("*.md") if p.name != "CHANGELOG.md")
+        return sorted(
+            [p for p in REPO.glob("*.md") if p.name != "CHANGELOG.md"]
+            + list(REPO.glob("docs/**/*.md"))
+        )
+
+    def test_the_doc_set_and_link_set_are_not_empty(self) -> None:
+        # A glob that matches nothing passes every assertion below it. That
+        # silent pass is the failure mode this bead exists to fix, so the
+        # coverage is asserted rather than assumed. Lower bounds, not exact
+        # counts: docs may be added freely, only a collapse is a bug.
+        docs = self.docs()
+        assert len(docs) >= 25, docs
+        assert [d for d in docs if d.parent != REPO] != []
+        links = [t for d in docs for t in self.linked_repo_paths(d)]
+        assert len(links) >= 150, len(links)
 
     def test_every_linked_path_exists(self) -> None:
         missing = [
-            f"{doc.name} -> {target}"
+            f"{doc.relative_to(REPO)} -> {target}"
             for doc in self.docs()
             for target in self.linked_repo_paths(doc)
-            if not (REPO / target.split("#")[0]).exists()
+            if not self.resolve(doc, target).exists()
         ]
         assert missing == []
 
@@ -258,20 +315,21 @@ class TestDocumentationLinks:
         git = shutil.which("git")
         if git is None:  # pragma: no cover - git is present in CI and dev
             return
-        # Trailing slash stripped and paths passed as argv, not stdin: git
-        # reports a directory queried as "dir/" against an empty pattern, and
-        # text-mode stdin on Windows turns each "\n" into "\r\n", which git
-        # then reads as part of the filename. Both make a clean tree look dirty.
+        # Paths passed as argv, not stdin: text-mode stdin on Windows turns
+        # each "\n" into "\r\n", which git then reads as part of the filename
+        # and reports as unignored. That makes a dirty tree look clean.
         targets = sorted(
             {
-                target.split("#")[0].rstrip("/")
+                str(self.resolve(doc, target))
                 for doc in self.docs()
                 for target in self.linked_repo_paths(doc)
             }
         )
         # check-ignore exits 0 when something matched, 1 when nothing is
         # ignored; anything else (128: not a repo) means we learned nothing
-        # and must not report that as a pass.
+        # and must not report that as a pass. It also honours the index, so a
+        # tracked file matching an ignore pattern is not reported — correct
+        # here: a tracked file ships, and shipping is the whole question.
         proc = subprocess.run(
             [git, "check-ignore", *targets], capture_output=True, text=True, cwd=REPO
         )

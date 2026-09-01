@@ -2,7 +2,7 @@
 
 ## Context
 
-waxseal ships integrations for 7 hosts ([integrations/](integrations/)) but not for
+waxseal ships integrations for 7 hosts ([integrations/](../../integrations/)) but not for
 **OpenClaw**, the self-hosted agent gateway that runs shell commands, edits files, drives
 browsers and schedules cron on the operator's own machine.
 
@@ -70,7 +70,7 @@ waxseal.sources.openclaw.ingest()   ── redact ──►  AuditLog.append(...
   match the ledger's own order.
 - **Resume point comes from the chain itself**, not a side-car cursor file: scan entries
   for the highest ingested `sequence`, the same technique
-  [`sources/files.py:36`](src/waxseal/sources/files.py#L36) uses for `current_matches_last`.
+  [`sources/files.py:36`](../../src/waxseal/sources/files.py#L36) uses for `current_matches_last`.
   One source of truth; a separate cursor file could disagree with the chain. Returns
   `None` when nothing was ever ingested — `None` is not `0` (rule 5).
 - **Idempotent**: only `sequence > last_ingested` is appended, so a re-run adds nothing.
@@ -82,7 +82,7 @@ waxseal.sources.openclaw.ingest()   ── redact ──►  AuditLog.append(...
 - **Bounded work**: `max_pages` caps a first run against a 100k-row ledger.
   Hitting the cap sets `truncated=True` and prints what was left — no silent caps (rule 6).
 - **Fail-open, labelled**: missing binary, gateway down, non-zero exit, unparseable JSON →
-  record a drop through [`FileDropRecorder`](src/waxseal/adapters/drops.py), print one
+  record a drop through [`FileDropRecorder`](../../src/waxseal/adapters/drops.py), print one
   `[waxseal-audit]` line, return a result object. Never raise into a cron job.
 - **Redact anyway**: the ledger claims metadata-only, but `RegexRedactor` runs before
   hashing regardless. Redact-before-hash is not conditional on trusting the source.
@@ -106,14 +106,14 @@ CLAUDE.md's CLI contract: "**The CLI never writes to the log.**" So there is no
   `IngestResult` carries `ingested`, `last_sequence`, `gaps`, `truncated`, `notice`.
   Docstring records the verified OpenClaw revision plus the `file:line` refs for cursor
   semantics and retention, as every other integration does
-  ([claude_code.py:9](src/waxseal/integrations/claude_code.py#L9)).
+  ([claude_code.py:9](../../src/waxseal/integrations/claude_code.py#L9)).
 - `src/waxseal/integrations/openclaw.py` — thin runner: resolve trail
   (`WAXSEAL_TRAIL`, else `OPENCLAW_HOME`, else `HOME`-before-`Path.home()` — the Windows
-  `ntpath`/`USERPROFILE` trap, [claude_code.py:59](src/waxseal/integrations/claude_code.py#L59))
+  `ntpath`/`USERPROFILE` trap, [claude_code.py:59](../../src/waxseal/integrations/claude_code.py#L59))
   → `<openclaw home>/audit/trail.jsonl`; call `ingest`; print the summary; `main()` returns
   0 on every path so a timer never flaps.
 - `integrations/openclaw/README.md` — shape of
-  [integrations/hermes/README.md](integrations/hermes/README.md): verified-against
+  [integrations/hermes/README.md](../../integrations/hermes/README.md): verified-against
   revision, the issue table above **with the maintainer-review caveat**, the two quoted doc
   lines that justify the design, install/cron instructions, and an explicit
   "what it proves / what it does not" (it proves nothing was altered **after ingest**; it
