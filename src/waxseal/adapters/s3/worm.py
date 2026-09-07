@@ -1,17 +1,4 @@
-"""S3 backend: object per entry, forks prevented by conditional writes.
-
-The client is INJECTED (any boto3-compatible object): waxseal keeps zero
-runtime dependencies (CLAUDE.md rule 1) and never imports boto3 at module
-scope. The one place boto3 is imported at all is inside
-``_resolve_client``, and its absence is a reported state, never a crash.
-
-Serialization point: `PUT entries/{seq}.json` with `IfNoneMatch="*"`, which S3
-conditional writes (GA since 2024) reject the second writer of the same seq
-with 412 PreconditionFailed, so a lost race is retried on a fresh tail
-instead of forking the chain (CLAUDE.md rule 7). `head.json` is only a
-tail-discovery hint; correctness never depends on it.
-
-Object Lock / WORM (Workstream J1)
+"""Object Lock / WORM (Workstream J1)
 ----------------------------------
 The lower half of this module puts a SEALED segment under S3 Object Lock
 retention, so that storage can REFUSE an overwrite instead of merely letting
@@ -118,128 +105,13 @@ bucket.
 
 from __future__ import annotations
 
-import base64
-import contextlib
 import enum
-import hashlib
-import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
 
-from waxseal.adapters._envelope import from_obj, to_obj
-from waxseal.domain.header import GENESIS_PREV_HASH, Entry
-
-_MAX_RACE_RETRIES = 32
-_SEQ_WIDTH = 20  # zero-padded so lexicographic key order == numeric seq order
-
-
-class S3Backend:
-    def __init__(self, client: Any, *, bucket: str, prefix: str) -> None:
-        self._client = client
-        self._bucket = bucket
-        self._prefix = prefix.rstrip("/")
-
-    # -- keys -----------------------------------------------------------------
-    def _entry_key(self, seq: int) -> str:
-        return f"{self._prefix}/entries/{seq:0{_SEQ_WIDTH}d}.json"
-
-    def _head_key(self) -> str:
-        return f"{self._prefix}/head.json"
-
-    # -- backend protocol -----------------------------------------------------
-    def append(self, build: Callable[[int, str], Entry]) -> Entry:
-        for _ in range(_MAX_RACE_RETRIES):
-            next_seq, prev_hash = self._tail()
-            entry = build(next_seq, prev_hash)
-            body = json.dumps(to_obj(entry, backend="S3"), sort_keys=True, separators=(",", ":"))
-            try:
-                self._client.put_object(
-                    Bucket=self._bucket,
-                    Key=self._entry_key(next_seq),
-                    Body=body.encode("utf-8"),
-                    IfNoneMatch="*",
-                )
-            except Exception as exc:
-                if _is_precondition_failed(exc):
-                    continue  # lost the race: re-read the tail and rebuild
-                raise
-            # Best-effort hint only: a stale head is corrected by probing.
-            with contextlib.suppress(Exception):
-                self._client.put_object(
-                    Bucket=self._bucket,
-                    Key=self._head_key(),
-                    Body=json.dumps(
-                        {"seq": entry.header.seq, "entry_hash": entry.entry_hash}
-                    ).encode("utf-8"),
-                )
-            return entry
-        raise RuntimeError(
-            f"append lost the conditional-write race {_MAX_RACE_RETRIES} times; "
-            "writer contention is pathological"
-        )
-
-    def entries(self) -> Iterator[Entry]:
-        prefix = f"{self._prefix}/entries/"
-        token: str | None = None
-        while True:
-            kwargs: dict[str, Any] = {"Bucket": self._bucket, "Prefix": prefix}
-            if token is not None:
-                kwargs["ContinuationToken"] = token
-            page = self._client.list_objects_v2(**kwargs)
-            for item in page.get("Contents", []):
-                body = self._client.get_object(Bucket=self._bucket, Key=item["Key"])
-                yield from_obj(json.loads(body["Body"].read()))
-            if not page.get("IsTruncated"):
-                return
-            token = page["NextContinuationToken"]
-
-    # -- tail discovery ---------------------------------------------------------
-    def _tail(self) -> tuple[int, str]:
-        candidate = -1
-        entry_hash = GENESIS_PREV_HASH
-        try:
-            head = json.loads(
-                self._client.get_object(Bucket=self._bucket, Key=self._head_key())[
-                    "Body"
-                ].read()
-            )
-            candidate, entry_hash = int(head["seq"]), str(head["entry_hash"])
-        except Exception:  # noqa: S110 - no head yet, or unreadable: probe from genesis
-            pass
-        # The head hint may lag behind winners of earlier races: probe forward.
-        seq = candidate
-        while True:
-            try:
-                body = self._client.get_object(Bucket=self._bucket, Key=self._entry_key(seq + 1))
-            except Exception as exc:
-                if _is_not_found(exc):
-                    return seq + 1, entry_hash
-                raise
-            obj = json.loads(body["Body"].read())
-            seq += 1
-            entry_hash = str(obj["entry_hash"])
-
-
-def _is_precondition_failed(exc: Exception) -> bool:
-    code = _error_code(exc)
-    return code in {"PreconditionFailed", "412"}
-
-
-def _is_not_found(exc: Exception) -> bool:
-    code = _error_code(exc)
-    return code in {"NoSuchKey", "404", "NotFound"}
-
-
-def _error_code(exc: Exception) -> str:
-    response = getattr(exc, "response", None)
-    if isinstance(response, dict):
-        return str(response.get("Error", {}).get("Code", ""))
-    return ""
-
-
-# -- Object Lock / WORM (J1) ---------------------------------------------------
+from waxseal.adapters.s3._errors import _describe, _error_code
 
 
 class WormSubject(enum.Enum):
@@ -435,51 +307,6 @@ class WormReport:
                 f"a {self.state.value} finding cannot carry {self.strength.value}: "
                 "only an in-force retention has a strength"
             )
-
-
-@dataclass(frozen=True, slots=True)
-class SegmentUpload:
-    """Result of archiving one sealed segment.
-
-    ``uploaded`` and ``worm.state`` are independent facts and must stay
-    separable: a PUT can succeed while the retention check cannot be made, so
-    collapsing the two would let a successful REQUEST masquerade as a verified
-    guarantee. Read by J3 (rotation archiving), which reads these fields and
-    needs none of this module's internals. `waxseal preflight` (J4) does NOT
-    read this dataclass — it names WORM as a mechanism without checking
-    bucket/object state itself (see `bucket_worm_state`'s docstring).
-    """
-
-    key: str
-    uploaded: bool
-    worm: WormReport
-
-
-def _resolve_client(client: Any | None) -> tuple[Any | None, str]:
-    """The injected client, or one built from the ``s3`` extra if available.
-
-    The ONLY boto3 import in waxseal, and it is inside a function: rule 1
-    keeps ``dependencies = []``, so the import can legitimately fail on a
-    correct installation. A missing extra is a deployment condition, not an
-    S3 outcome -- the question was never even asked -- so it becomes a
-    labelled UNKNOWN upstream rather than an ImportError escaping into a
-    caller's rotation flow.
-    """
-    if client is not None:
-        return client, "caller-injected client"
-    try:
-        import boto3
-    except ImportError as exc:
-        return None, (
-            "the 's3' extra is not installed (no boto3), so nothing was uploaded and "
-            f"no lock state could be asked for: {exc}"
-        )
-    return boto3.client("s3"), "client built from the installed 's3' extra (boto3)"
-
-
-def _describe(exc: Exception) -> str:
-    code = _error_code(exc)
-    return f"{type(exc).__name__} code={code!r}: {exc}"
 
 
 def _unretained_by_configuration(exc: Exception) -> bool:
@@ -694,67 +521,6 @@ def bucket_worm_state(client: Any, *, bucket: str) -> WormReport:
         detail=f"Object Lock is enabled on {bucket!r}; no default retention rule was "
         "readable, so per-object retention is the only mechanism in play",
     )
-
-
-def upload_sealed_segment(
-    client: Any | None,
-    *,
-    bucket: str,
-    key: str,
-    body: bytes,
-    retention: WormRetention | None = None,
-    now_fn: Callable[[], datetime] = _utcnow,
-) -> SegmentUpload:
-    """Upload one SEALED segment, optionally under operator-declared retention.
-
-    Opt-in: with ``retention=None`` this is a plain archive PUT and the WORM
-    state is still REPORTED rather than assumed, because a bucket default
-    retention could lock the object without this call asking for it.
-
-    The retention state is always established by ASKING afterwards, never
-    inferred from the PUT having succeeded. A successful request only proves
-    S3 accepted the parameters; a caller that printed "locked" on that basis
-    would be trusting the writer at write time, which is the very thing this
-    library exists not to do.
-
-    A failed PUT propagates. There is then no stored object version whose
-    WORM state could be reported at all, and manufacturing one would be worse
-    than the exception. A missing ``s3`` extra does NOT propagate: nothing was
-    attempted, so it is reported as UNKNOWN with a label (rule 6). J3's
-    rotation flow is the layer that decides an archive failure never blocks a
-    rotation; that policy is not this function's to assume.
-    """
-    resolved, origin = _resolve_client(client)
-    if resolved is None:
-        return SegmentUpload(
-            key=key,
-            uploaded=False,
-            worm=WormReport(
-                subject=WormSubject.OBJECT_VERSION,
-                state=WormState.UNKNOWN,
-                strength=WormStrength.UNESTABLISHED,
-                detail=origin,
-            ),
-        )
-
-    kwargs: dict[str, Any] = {"Bucket": bucket, "Key": key, "Body": body}
-    if retention is not None:
-        kwargs["ObjectLockMode"] = retention.mode
-        kwargs["ObjectLockRetainUntilDate"] = retention.retain_until
-        # put_object documents Content-MD5 (or a checksum algorithm header) as
-        # REQUIRED when a retention period is set. Transport integrity only --
-        # the chain's own hash is SHA-256 over the entry header (SPEC.md).
-        kwargs["ContentMD5"] = base64.b64encode(
-            hashlib.md5(body, usedforsecurity=False).digest()
-        ).decode("ascii")
-    resolved.put_object(**kwargs)
-
-    return SegmentUpload(
-        key=key,
-        uploaded=True,
-        worm=object_worm_state(resolved, bucket=bucket, key=key, now_fn=now_fn),
-    )
-
 
 # The ONE sentence in this module that promises storage-level refusal, named so
 # that a test can sweep the whole label surface and assert exactly one finding
