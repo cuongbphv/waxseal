@@ -13,7 +13,7 @@ own, because a suite whose completeness depends on a skippable integration
 test is a suite that silently loses coverage the day Foundry is absent.
 
 FALSIFIABILITY RECEIPTS. Each ternary predicate has a test that goes RED when
-the third value's branch is deleted from adapters/evm.py. MEASURED 01/09/2026
+the third value's branch is deleted from adapters/evm/reader.py. MEASURED 01/09/2026
 on this worktree, one deletion at a time, against this file alone (baseline:
 99 tests, 0 failed):
 

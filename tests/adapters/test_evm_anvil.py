@@ -24,7 +24,7 @@ required to refuse to pick a winner.
 
 If Foundry is absent every test here SKIPS WITH A LABEL naming what is
 missing. It never silently passes, and it is never the coverage: the
-fake-transport suite covers adapters/evm.py on its own.
+fake-transport suite covers adapters/evm/ on its own.
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ pytestmark = _foundry.skip_without_foundry(
     reason=(
         "SKIPPED WITH LABEL: Foundry (anvil/forge/cast 1.8.x) was found neither on PATH "
         "nor in foundryup's install directory (tests/_foundry.py looked in both), so the "
-        "on-chain end-to-end evidence for adapters/evm.py was NOT collected on this run. "
+        "on-chain end-to-end evidence for adapters/evm/ was NOT collected on this run. "
         "Install with `foundryup`. The fake-transport suite in tests/adapters/test_evm.py "
         "still ran and still covers the adapter."
     ),
