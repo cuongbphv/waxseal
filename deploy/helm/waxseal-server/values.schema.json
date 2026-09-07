@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "waxseal-server values",
+  "description": "The chain trust domain. replicaCount is pinned to 1: a trail is a JSONL file guarded by a file lock, so exactly one writer may exist (CLAUDE.md rule 7). Horizontal autoscaling is forbidden for this workload and there is no HPA in this chart.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["replicaCount", "image", "secrets", "persistence", "service", "ingress", "seed", "anchor"],
+  "properties": {
+    "replicaCount": {
+      "description": "LOCKED AT 1. Two writers on one volume can both extend the same prev_hash, which forks the chain.",
+      "const": 1
+    },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "tag", "pullPolicy"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": {
+          "description": "Never `latest`: an audit component whose version you cannot name from the manifest is one whose behaviour you cannot reproduce.",
+          "type": "string",
+          "minLength": 1,
+          "not": { "const": "latest" }
+        },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "imagePullSecrets": { "type": "array", "items": { "type": "object" } },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "type": "object" },
+        "automountServiceAccountToken": { "type": "boolean" }
+      }
+    },
+    "podAnnotations": { "type": "object" },
+    "podLabels": { "type": "object" },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Credentials by reference. The two API keys must differ (REMOTE.md section 8); the chart refuses to render when both are supplied inline and equal, and cannot check an existingSecret because Helm does not read cluster Secrets at render time.",
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "apiKey": { "type": "string" },
+        "witnessApiKey": { "type": "string" },
+        "databaseUrl": { "type": "string" },
+        "declaresDatabaseUrl": {
+          "description": "A DECLARATION about an existingSecret, never an inference. Unset is not the same claim as false-because-checked: the chart cannot look.",
+          "type": "boolean"
+        }
+      }
+    },
+    "extraEnv": {
+      "type": "array",
+      "items": { "type": "object", "required": ["name"] }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "accessMode", "size", "mountPath", "claimName"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "accessMode": {
+          "description": "ReadWriteOnce. ReadWriteMany would let a second pod anywhere in the cluster open the trail for writing, and a file lock does not survive every network filesystem.",
+          "enum": ["ReadWriteOnce", "ReadWriteOncePod"]
+        },
+        "size": { "type": "string", "minLength": 1 },
+        "storageClass": { "type": "string" },
+        "mountPath": {
+          "description": "Absolute; becomes WAXSEAL_SERVER_DATA_DIR.",
+          "type": "string",
+          "pattern": "^/"
+        },
+        "claimName": { "type": "string", "minLength": 1 }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "port"],
+      "properties": {
+        "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "annotations": { "type": "object" }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "annotations": { "type": "object" },
+        "host": { "type": "string" },
+        "path": { "type": "string" },
+        "pathType": { "enum": ["Prefix", "Exact", "ImplementationSpecific"] },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "secretName": { "type": "string" }
+          }
+        }
+      }
+    },
+    "resources": { "type": "object" },
+    "podSecurityContext": {
+      "type": "object",
+      "properties": {
+        "runAsNonRoot": { "const": true },
+        "runAsUser": { "type": "integer", "minimum": 1 },
+        "fsGroup": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "containerSecurityContext": {
+      "type": "object",
+      "properties": {
+        "allowPrivilegeEscalation": { "const": false },
+        "readOnlyRootFilesystem": { "type": "boolean" }
+      }
+    },
+    "probes": { "type": "object" },
+    "nodeSelector": { "type": "object" },
+    "tolerations": { "type": "array" },
+    "affinity": { "type": "object" },
+    "priorityClassName": { "type": "string" },
+    "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+    "seed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "email": { "type": "string" },
+        "backoffLimit": { "type": "integer", "minimum": 0 },
+        "resources": { "type": "object" }
+      }
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string", "minLength": 1, "not": { "const": "latest" } },
+            "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        },
+        "schedule": { "type": "string", "minLength": 1 },
+        "trailPath": {
+          "description": "Absolute, and never a leading `~`: nothing expands a tilde between a manifest and the process (integrations/_trail.py refuses such a value out loud).",
+          "type": "string",
+          "pattern": "^/"
+        },
+        "tsaUrl": { "type": "string" },
+        "otsCalendar": { "type": "string" },
+        "witnessUrls": { "type": "array", "items": { "type": "string" } },
+        "existingSecret": { "type": "string" },
+        "concurrencyPolicy": { "enum": ["Forbid", "Replace", "Allow"] },
+        "successfulJobsHistoryLimit": { "type": "integer", "minimum": 0 },
+        "failedJobsHistoryLimit": { "type": "integer", "minimum": 0 },
+        "backoffLimit": { "type": "integer", "minimum": 0 },
+        "resources": { "type": "object" }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "allowIngressFrom": { "type": "array", "items": { "type": "object" } }
+      }
+    }
+  }
+}

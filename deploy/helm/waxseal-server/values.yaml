@@ -1,0 +1,271 @@
+# waxseal-server — default values.
+#
+# READ THIS FIRST. The security argument of a waxseal deployment is that four
+# administrative authorities are genuinely different people
+# (docs/architecture/deployment.md section 1). This chart installs exactly ONE
+# of them: the chain. It has no verifier CronJob and no witness, and adding
+# either here would put it under this release's namespace, this release's RBAC
+# and this release's upgraders — which is the shared authority the topology
+# exists to remove. The verifier is deploy/helm/waxseal-verifier, installed
+# somewhere else.
+
+# ---------------------------------------------------------------------------
+# Replicas — LOCKED AT 1. Not a tuning knob.
+# ---------------------------------------------------------------------------
+# A trail is a JSONL file guarded by a file lock, so exactly one writer may
+# exist (CLAUDE.md rule 7: read-tail + append is one critical section). Two
+# writers on one volume can both extend the same prev_hash, which forks the
+# chain — a prior production system shipped that bug through a web-server
+# threadpool.
+#
+# The workload is a StatefulSet, not a Deployment, for the same reason: a
+# Deployment's default rolling update SURGES a second pod before terminating
+# the first, so a rollout would briefly put two writers on one PVC. A
+# StatefulSet terminates before it creates.
+#
+# HORIZONTAL AUTOSCALING IS FORBIDDEN for this workload. There is no HPA in
+# this chart and there must not be one: an HPA on a single-writer log is a
+# scheduled chain fork. values.schema.json pins this value to 1 so a values
+# file cannot raise it quietly.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/cuongbphv/waxseal-server
+  # Never `latest`. An audit component whose version you cannot name from the
+  # manifest is one whose fingerprint behaviour you cannot reproduce.
+  tag: "0.1.5"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # The server calls no Kubernetes API. It needs no token mounted.
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+# ---------------------------------------------------------------------------
+# Credentials. By reference, not by value.
+# ---------------------------------------------------------------------------
+# Preferred: create the Secret outside this chart (sealed-secrets, external
+# secrets operator, `kubectl create secret generic`) and name it here. Keys
+# read from it, all optional:
+#
+#   WAXSEAL_API_KEY                 bootstrap bearer token, admin scopes
+#   WAXSEAL_WITNESS_API_KEY         the witness endpoint's token — a DIFFERENT
+#                                   credential, always (REMOTE.md section 8)
+#   WAXSEAL_SERVER_DATABASE_URL     PostgreSQL for operators and API keys
+#
+# The two API keys MUST DIFFER. server/scripts/start-docker.sh refuses to start
+# when they are equal, and this chart refuses to RENDER when both are supplied
+# inline and equal — a Helm install must not be the way around that check. What
+# the chart CANNOT check is an existingSecret: Helm does not read cluster
+# Secrets at render time, so if you use existingSecret the equality check is
+# yours to perform. A witness holding the chain's write credential could append
+# forged entries to the very chain it exists to cross-check.
+secrets:
+  existingSecret: ""
+  # Inline values. Development only: they land in the release manifest, which
+  # is stored in the cluster and visible to anyone who can read Helm releases.
+  apiKey: ""
+  witnessApiKey: ""
+  databaseUrl: ""
+  # ONLY meaningful together with existingSecret, and only as a DECLARATION:
+  # set it true if that Secret carries WAXSEAL_SERVER_DATABASE_URL. The chart
+  # cannot look, so this is what NOTES.txt and the seed hook go on. Leaving it
+  # false with a Secret that does have the key costs you the seed hook and an
+  # inaccurate NOTES line; setting it true with a Secret that does not costs
+  # you a seed Job that seeds a store discarded when its pod exits. Neither is
+  # inferred from silence.
+  declaresDatabaseUrl: false
+
+# Extra environment for the server container. Not for credentials.
+extraEnv: []
+#  - name: WAXSEAL_SERVER_PAGE_SIZE
+#    value: "500"
+
+# ---------------------------------------------------------------------------
+# Storage — the trail lives here, as FILES.
+# ---------------------------------------------------------------------------
+# The trails are not in PostgreSQL and must not be: the product's promise is
+# that a third party verifies a trail with the stock `waxseal verify` on their
+# own machine (server/docs/deployment.md, "Why the trails are not in
+# PostgreSQL"). Back this volume up and you have files the CLI reads with no
+# server and no database running.
+persistence:
+  enabled: true
+  # ReadWriteOnce, deliberately. RWX would let a second pod anywhere in the
+  # cluster open the trail for writing, and the file lock does not survive
+  # every network filesystem.
+  accessMode: ReadWriteOnce
+  size: 20Gi
+  storageClass: ""
+  # Must match WAXSEAL_SERVER_DATA_DIR.
+  mountPath: /var/lib/waxseal
+  # The volumeClaimTemplate's name. The PVC Kubernetes creates is
+  # "<this>-<statefulset name>-0"; the anchor CronJob below references it.
+  claimName: data
+
+service:
+  type: ClusterIP
+  port: 8000
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Ingress — off by default, TLS terminates at the proxy.
+# ---------------------------------------------------------------------------
+# This project does not ship a PKI story and will not invent one
+# (server/docs/deployment.md, "TLS"). The container speaks plain HTTP on 8000;
+# terminate TLS in front of it.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: waxseal.example.invalid
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: false
+    secretName: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 192Mi
+  limits:
+    cpu: "1"
+    memory: 768Mi
+
+# uid/gid 10001 match `useradd --system --uid 10001 waxseal` in server/Dockerfile.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  # So the ReadWriteOnce volume is group-writable by the server's uid.
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  # The only paths written are the data volume and /tmp, which gets an
+  # emptyDir. If your image needs a writable HOME, set TMPDIR/HOME through
+  # extraEnv rather than turning this off.
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+probes:
+  # /health is the route server/Dockerfile's HEALTHCHECK already uses.
+  liveness:
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 3
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+terminationGracePeriodSeconds: 30
+
+# ---------------------------------------------------------------------------
+# Seeding — what actually secures a deployment.
+# ---------------------------------------------------------------------------
+# A server with no WAXSEAL_API_KEY and no minted key is OPEN, says so at
+# GET /v1/meta and in the portal. There is no "turn auth on" switch to forget.
+# `waxseal-server-admin seed` is idempotent, so it is safe on every upgrade.
+#
+# The hook Job renders ONLY when a database is configured (secrets.databaseUrl,
+# or existingSecret with declaresDatabaseUrl: true). Without one the server's
+# operator store is in memory, and a seed Job runs in its OWN pod: it would
+# write operators into that pod's memory and throw them away on exit. A hook
+# that reports success while having seeded nothing reachable is worse than no
+# hook, so it is not rendered and NOTES.txt says why.
+seed:
+  enabled: true
+  # Optional: the admin account's email.
+  email: ""
+  backoffLimit: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ---------------------------------------------------------------------------
+# Anchor CronJob — the anchor CLIENT, co-scheduled on purpose.
+# ---------------------------------------------------------------------------
+# Off by default. When you turn it on, it runs the waxseal CLI image against
+# the SAME volume as the server, on the same node (ReadWriteOnce permits many
+# pods on one node), because the `.anchors` sidecar is written beside the trail.
+#
+# Co-locating the anchor CLIENT next to the chain is the intended topology:
+# deployment.md section 1 draws exactly that arrow (chain server -.-> anchor
+# domain). What must live under a DIFFERENT authority is the anchor SINK — the
+# RFC 3161 TSA, the OpenTimestamps calendar, the witness. A root the writer can
+# rewrite proves nothing, which is why this chart has no witness template and
+# must never grow one: a witness installed by this release answers to the same
+# authority as the chain and witnesses nothing.
+anchor:
+  enabled: false
+  image:
+    repository: ghcr.io/cuongbphv/waxseal
+    tag: "0.1.5"
+    pullPolicy: IfNotPresent
+  schedule: "23 * * * *"
+  # ABSOLUTE path inside the container, under persistence.mountPath. Never a
+  # leading "~": nothing expands a tilde between a manifest and the process,
+  # and integrations/_trail.py refuses such a value out loud for that reason.
+  trailPath: /var/lib/waxseal/chains/default/trail.jsonl
+  # The anchor sinks. Configure at least one, under an authority that is not
+  # this one. All optional; the CLI accepts any combination.
+  tsaUrl: ""
+  otsCalendar: ""
+  # Repeatable: one --witness per URL.
+  witnessUrls: []
+  # Secret carrying WAXSEAL_WITNESS_API_KEY for the witness deposits. May be
+  # the same Secret as secrets.existingSecret; the key read is
+  # WAXSEAL_WITNESS_API_KEY and never WAXSEAL_API_KEY.
+  existingSecret: ""
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  backoffLimit: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ---------------------------------------------------------------------------
+# NetworkPolicy — off by default.
+# ---------------------------------------------------------------------------
+# Ingress only. Egress is deliberately unrestricted: the server needs
+# PostgreSQL, and the anchor client needs whatever TSA/calendar/witness you
+# pointed it at. A policy that quietly broke anchoring would remove a detection
+# rather than add one.
+networkPolicy:
+  enabled: false
+  # NetworkPolicyPeer entries. Empty means "no ingress from anywhere", which is
+  # a working policy and probably not what you want.
+  allowIngressFrom: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: ingress-nginx

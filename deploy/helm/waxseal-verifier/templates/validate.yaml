@@ -1,0 +1,27 @@
+{{- /*
+Render-time refusals. Emits no manifest.
+*/ -}}
+
+{{- if not .Values.trailUrl }}
+{{- fail "waxseal-verifier: trailUrl is required. Set it to the chain server's base URL, e.g. --set trailUrl=http://waxseal-server.waxseal-chain.svc.cluster.local:8000 . There is no default, because a verifier pointed at a URL somebody else chose is a verifier nobody aimed." }}
+{{- end }}
+
+{{- if not (or (hasPrefix "http://" .Values.trailUrl) (hasPrefix "https://" .Values.trailUrl)) }}
+{{- fail "waxseal-verifier: trailUrl must begin with http:// or https://. This chart reads the server's HTTP surface; a filesystem path here would need the writer's volume, which is the separation of authority this chart exists to keep." }}
+{{- end }}
+
+{{- if eq .Values.image.tag "latest" }}
+{{- fail "waxseal-verifier: image.tag must not be `latest`. A verifier whose version you cannot name cannot be reconciled with the exit code it produced — and `unverifiable` is a statement about which build read the trail." }}
+{{- end }}
+
+{{- if not (hasPrefix "/" .Values.verify.pin.mountPath) }}
+{{- fail "waxseal-verifier: verify.pin.mountPath must be an ABSOLUTE path." }}
+{{- end }}
+
+{{- if and .Values.verify.enabled .Values.verify.expectAnchorBinding (not .Values.verify.pin.enabled) }}
+{{- fail "waxseal-verifier: verify.expectAnchorBinding requires verify.pin.enabled. The declaration is stored IN the pin state (SPEC.md section 13.1); with no pin file there is nowhere to record it and nothing to compare against on the next run." }}
+{{- end }}
+
+{{- if and .Values.verify.enabled .Values.verify.maxAnchorAgeSeconds (not .Values.verify.pin.enabled) }}
+{{- fail "waxseal-verifier: verify.maxAnchorAgeSeconds requires verify.pin.enabled (same reason as expectAnchorBinding: the declaration lives in the pin state)." }}
+{{- end }}

@@ -1,0 +1,122 @@
+# Scheduled verification for one trail — the VERIFIER authority, for operators
+# who do not run Kubernetes.
+#
+# The instance parameter is the trail path, ABSOLUTE and systemd-escaped:
+#
+#   systemctl enable --now \
+#     "waxseal-verify@$(systemd-escape /var/lib/waxseal/chains/default/trail.jsonl).timer"
+#
+# ABSOLUTE, and never a leading `~`. `integrations/_trail.py`'s resolve_trail()
+# refuses a value that begins with a tilde and its docstring names unit files
+# as the reason: no shell runs between a systemd unit and this process, so the
+# tilde survives verbatim and the path names a directory literally called `~`.
+# The same is true of every path in this file.
+#
+# WHY DynamicUser AND StateDirectory TOGETHER. The pin file is the point.
+# `adapters/pinstore.py` says it in the code: a pin is not a sidecar of the
+# trail — every other file written beside a trail describes the log and belongs
+# to whoever owns it, but "a pin describes what THIS verifier already
+# confirmed, and its entire value is that it lives somewhere the trail's writer
+# cannot reach". StateDirectory puts it under
+# /var/lib/private/waxseal-verifier, owned by this unit's transient user, which
+# the chain's service user is not. A pin the writer can edit is a pin the
+# writer can roll back, and then it catches nothing.
+#
+# The trail itself is in ReadOnlyPaths. `verify` is read-only against the trail
+# by contract; this makes it read-only by permission too, so a bug cannot
+# become a write.
+
+[Unit]
+Description=waxseal verify %I
+Documentation=https://github.com/cuongbphv/waxseal
+Documentation=file:/usr/share/doc/waxseal/deployment.md
+# Ordering only. A verifier that refused to run because the network was down
+# would turn a transient outage into a gap in the verification record.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# A transient, unprivileged user per run. It owns the StateDirectory below and
+# nothing else on this host.
+DynamicUser=yes
+# /var/lib/waxseal-verifier (a symlink into /var/lib/private/...). The pin
+# lives HERE, not beside the trail.
+StateDirectory=waxseal-verifier
+StateDirectoryMode=0700
+
+# Leading dash: a missing file is not a failure. An operator who has not
+# configured a credential yet gets a run against a public read point, not a
+# unit that will not start.
+EnvironmentFile=-/etc/waxseal/verify.env
+
+# ProtectSystem=strict below already mounts the whole file hierarchy
+# read-only, so this line adds no permission — it is here as a DECLARATION of
+# what this unit touches, and it fails loudly at start-up if %I does not exist
+# rather than producing a bare exit 3 an hour later. %I is the unescaped
+# instance name, i.e. the trail path.
+ReadOnlyPaths=%I
+
+# READING the trail is the one thing this unit needs and the one thing
+# DynamicUser makes awkward: a transient user is in no group, so a trail at
+# mode 0600 owned by the chain's service user is unreadable. Give the trail a
+# group both sides share and add it here — a READ grant only:
+#
+#   SupplementaryGroups=waxseal-audit
+#
+# Do NOT solve it by running this unit as the chain's user. Then the verifier
+# could write the trail and the pin, and the separation the pin exists for is
+# gone.
+
+ExecStart=/usr/local/bin/waxseal verify %I --anchors --pin ${STATE_DIRECTORY}/pin $WAXSEAL_VERIFY_EXTRA_ARGS
+
+# EXIT CODES ARE THE INTERFACE (docs/architecture/deployment.md section 4):
+#   0  intact
+#   1  broken — a SECURITY INCIDENT. Preserve, do not repair.
+#   2  intact, but rows this build cannot verify by name — version skew, for
+#      release management, NOT the SOC.
+#   3  the trail path does not exist — nothing was read, nothing was created.
+#
+# SuccessExitStatus does NOT list 1 or 2. Collapsing them into "success" is the
+# two-values-from-three collapse this project exists to prevent, and `systemctl
+# status` / `journalctl` is where an operator sees the difference. Read the
+# code, not just the colour:
+#
+#   systemctl show -p ExecMainStatus "waxseal-verify@$(systemd-escape /path/to/trail.jsonl).service"
+#
+# NEVER wire automatic remediation to exit 1. waxseal reports; it does not
+# repair (CLAUDE.md rule 4). Which row is the tamper is a decision only an
+# operator can make, and a repair destroys the evidence.
+SuccessExitStatus=0
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+# AF_INET/AF_INET6 for --witness and a URL target; AF_UNIX for the journal.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# A verification pass is one sequential read of the trail. It must not be able
+# to starve the writer it is checking.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=30min

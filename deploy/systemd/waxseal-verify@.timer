@@ -1,0 +1,24 @@
+# Hourly verification for one trail.
+#
+#   systemctl enable --now \
+#     "waxseal-verify@$(systemd-escape /var/lib/waxseal/chains/default/trail.jsonl).timer"
+#   systemctl list-timers 'waxseal-*'
+
+[Unit]
+Description=Hourly waxseal verify for %I
+Documentation=https://github.com/cuongbphv/waxseal
+
+[Timer]
+OnCalendar=hourly
+# Spread the load when several trails are verified on one host, so ten timers
+# do not all read ten trails at the top of the hour.
+RandomizedDelaySec=5min
+# Run a missed pass after a reboot rather than skipping the hour. A gap in the
+# verification record is not the same as a clean hour, and only one of the two
+# is true.
+Persistent=yes
+AccuracySec=1min
+Unit=waxseal-verify@%i.service
+
+[Install]
+WantedBy=timers.target

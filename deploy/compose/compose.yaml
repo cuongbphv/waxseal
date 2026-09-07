@@ -1,0 +1,98 @@
+# The server stack, plus one on-demand verify.
+#
+#   docker compose -f deploy/compose/compose.yaml up -d
+#   docker compose -f deploy/compose/compose.yaml --profile verify run --rm verify
+#
+# `include:` rather than a copy. server/docker-compose.yml stays exactly where
+# it is and is not modified: two compose files describing the same PostgreSQL,
+# the same volumes and the same credential rules would drift, and the copy that
+# drifted would be the one somebody deployed. The comments in that file — why
+# the trails are not in PostgreSQL, why the two API keys must differ, why port
+# 8000 binds to 127.0.0.1 only — are load-bearing and belong in one place.
+#
+# WHAT THIS FILE ADDS AND WHAT IT DELIBERATELY DOES NOT.
+# It adds a one-shot verifier you run by hand. It does NOT add a scheduled
+# verifier, a witness, or an anchor sink, and that is not laziness:
+#
+#   * a witness in this compose project answers to whoever runs
+#     `docker compose down`, which is whoever writes the trail. A witness
+#     hosted beside the chain it witnesses proves nothing
+#     (adapters/witness.py says exactly that in its own docstring);
+#   * a pin file on a volume in this project is a pin the writer can reach,
+#     and a pin's entire value is that it cannot (adapters/pinstore.py);
+#   * scheduled verification under a different authority is what
+#     deploy/helm/waxseal-verifier and deploy/systemd/waxseal-verify@.timer are
+#     for. Compose is one machine and one `docker` group — there is no second
+#     authority here to give it to, and pretending otherwise would be worse
+#     than the honest gap.
+#
+# So: this is a development and single-host shape. Read
+# docs/architecture/deployment.md section 1 before treating it as a topology.
+
+include:
+  # Relative to THIS file's directory. The included file's own build contexts
+  # and volume names resolve against its own directory, which is why it is
+  # included rather than inlined.
+  - path: ../../server/docker-compose.yml
+
+services:
+  # ------------------------------------------------------------------------
+  # verify — one-shot, on demand, never a daemon.
+  # ------------------------------------------------------------------------
+  # Behind a profile, so `docker compose up` does not start it: `up` would run
+  # it once at start-up, against a server with no chains, and print exit 3 as
+  # the first thing an operator sees. `run` is the verb for a command that
+  # answers a question and exits.
+  verify:
+    profiles: ["verify"]
+    image: ${WAXSEAL_CLI_IMAGE:-ghcr.io/cuongbphv/waxseal:0.1.5}
+    # No `latest`: a verdict you cannot attribute to a build is a verdict you
+    # cannot reproduce, and "unverifiable" is a statement about which build
+    # read the trail.
+    depends_on:
+      server:
+        condition: service_healthy
+    # Read-only, and it means it. `verify` is read-only against the trail by
+    # contract; this makes it read-only by mount too, so no bug in any
+    # container of this project can turn a verification pass into a write.
+    volumes:
+      # `waxseal-data` is declared by the INCLUDED file, not here. Declaring it
+      # again in this file would be a second definition of the same name and
+      # the trail would depend on which file compose read last.
+      - waxseal-data:/var/lib/waxseal:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    user: "10001:10001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      # ABSOLUTE, and never a leading `~` — resolve_trail() takes the value
+      # verbatim and refuses a tilde, naming compose files as one of the
+      # reasons (integrations/_trail.py).
+      WAXSEAL_TRAIL_PATH: ${WAXSEAL_TRAIL_PATH:-/var/lib/waxseal/chains/default/trail.jsonl}
+    # Overrides the image's ENTRYPOINT ["waxseal"] so the exit code can be
+    # captured, labelled and re-raised. `set -e` is deliberately absent: it
+    # would kill the shell on a non-zero exit before the echo ran, and the echo
+    # is the point — exit 1 and exit 2 must stay DISTINGUISHABLE in the log.
+    #
+    # NO --pin HERE. The pin would live on a volume in this project, which the
+    # writer can reach, and a pin the writer can roll back catches nothing.
+    # An unpinned verify is a labelled smaller claim, not a broken one.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -u
+        waxseal verify "$${WAXSEAL_TRAIL_PATH}" --anchors
+        rc=$$?
+        echo "waxseal_command=verify waxseal_exit=$$rc"
+        case "$$rc" in
+          0) echo "waxseal_verdict=ok" ;;
+          1) echo "waxseal_verdict=broken SECURITY_INCIDENT preserve_do_not_repair" ;;
+          2) echo "waxseal_verdict=unverifiable version_skew route_to_release_management" ;;
+          3) echo "waxseal_verdict=absent nothing_was_read configuration_error" ;;
+          *) echo "waxseal_verdict=unexpected_exit_code" ;;
+        esac
+        exit $$rc

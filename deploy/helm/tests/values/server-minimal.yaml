@@ -1,0 +1,11 @@
+# Minimal server: chart defaults, nothing overridden.
+#
+# What this shape actually is: no database, so operators and API keys live in
+# memory; no WAXSEAL_API_KEY, so write auth is OPEN and the server says so at
+# GET /v1/meta; no seed hook, because a seed Job with no database would write
+# operators into its own pod's memory and discard them on exit; no anchor
+# client, so nothing bounds a consistent rewrite by someone with write access.
+#
+# It is here as a snapshot fixture and as the honest floor of what `helm
+# install` alone gives you. It is not a deployment.
+{}

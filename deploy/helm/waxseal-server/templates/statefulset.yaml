@@ -1,0 +1,142 @@
+{{- /*
+A StatefulSet WITH replicas: 1, and the kind is the point.
+
+A trail is a JSONL file guarded by a file lock: read-tail + append is one
+critical section and exactly one writer may exist (CLAUDE.md rule 7). Two
+writers on one volume can both extend the same prev_hash, which forks the
+chain — a prior production system shipped that bug through a web-server
+threadpool, and the concurrency test in this repository exists because of it.
+
+A Deployment's default rolling update sets maxSurge: 25% (which rounds UP to 1
+pod), so it CREATES the new pod before terminating the old one. For a moment
+there would be two processes holding the same PVC open for writing. A
+StatefulSet with OrderedReady management terminates the existing pod and waits
+for it to go before creating its replacement — which is why this workload is a
+StatefulSet rather than a Deployment with a replica count of one.
+
+There is no HorizontalPodAutoscaler in this chart and there must not be one:
+autoscaling a single-writer log is a scheduled chain fork. templates/validate.yaml
+and values.schema.json both refuse any replicaCount but 1.
+*/ -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "waxseal-server.fullname" . }}
+  labels:
+    {{- include "waxseal-server.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # No headless Service: a single writer has no peers to address by ordinal, so
+  # per-pod DNS would be surface with nothing behind it. The ClusterIP Service
+  # is named here because the field is required.
+  serviceName: {{ include "waxseal-server.fullname" . }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "waxseal-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "waxseal-server.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "waxseal-server.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: WAXSEAL_SERVER_DATA_DIR
+              value: {{ .Values.persistence.mountPath | quote }}
+            {{- include "waxseal-server.credentialEnv" . | nindent 12 }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: {{ .Values.persistence.claimName }}
+              mountPath: {{ .Values.persistence.mountPath }}
+            # readOnlyRootFilesystem: true, so anything that needs a scratch
+            # file needs somewhere to put it.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if not .Values.persistence.enabled }}
+        # NO PERSISTENCE. The trail lives in an emptyDir and is DELETED with
+        # the pod. Development only — this is not a deployment that keeps
+        # evidence.
+        - name: {{ .Values.persistence.claimName }}
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: {{ .Values.persistence.claimName }}
+        labels:
+          {{- include "waxseal-server.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          - {{ .Values.persistence.accessMode }}
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size | quote }}
+  {{- end }}
