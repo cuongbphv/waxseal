@@ -69,7 +69,7 @@ tháng 8/2026, và [DESIGN.md](DESIGN.md) có nền tảng học thuật cho t�
 | Rollback version chỉ giảm khả năng verify một cách có kiểm soát, không gây lỗi (unverifiable ≠ tampered, exit 2 ≠ exit 1) | ✅ | ❌ version lạ = lỗi | ❌ |
 | Độ đầy đủ được báo cáo riêng: `dropped_writes`, `None` ≠ `0` | ✅ | ❌ chain-ok bị hiểu là all-ok | ❌ |
 | Chống fork khi append song song, cơ chế ghi rõ **theo từng backend**, lock có falsifiability test | ✅ | tùy, thường giả định single-writer | ❌ |
-| SPEC byte-level (dự kiến freeze ở v1) + golden vectors → port sang Go/Rust/TS | ✅ | ❌ format = code chạy sao thì vậy | ❌ |
+| SPEC byte-level (dự kiến freeze ở v1) + golden vectors -> port sang Go/Rust/TS | ✅ | ❌ format = code chạy sao thì vậy | ❌ |
 | Zero runtime dependency (client S3/Postgres được inject, không bao giờ import) | ✅ | thường kéo cả stack crypto/serialization | ✅ |
 | Redact-before-hash (secret không bao giờ chạm disk, hash cam kết trên bytes đã redact) | ✅ | thỉnh thoảng | ❌ |
 | Anchoring ra ngoài có sẵn: TSA RFC 3161, OpenTimestamps, witness, hoặc sink tự viết (`anchor_every=N`) | ✅ | ❌ | ❌ |
@@ -87,7 +87,7 @@ Mỗi lần append đi theo đường này:
 
 ```mermaid
 flowchart LR
-    A["agent của bạn<br/>append(payload)"] --> R["Redactor<br/>secrets → ***REDACTED***"]
+    A["agent của bạn<br/>append(payload)"] --> R["Redactor<br/>secrets -> ***REDACTED***"]
     R --> C["canonical bytes<br/>payload_hash = sha256"]
     C --> H["EntryHeader dựng dưới<br/>lock của backend<br/>(seq, prev_hash từ tail)"]
     H --> EH["entry_hash =<br/>sha256(framed header)"]
@@ -111,14 +111,14 @@ giả mạo:
 ```mermaid
 flowchart TD
     V["waxseal verify"] --> Q1{"seq liên tục?"}
-    Q1 -- "không" --> X1["GÃY: seq_gap → exit 1"]
+    Q1 -- "không" --> X1["GÃY: seq_gap -> exit 1"]
     Q1 -- "có" --> Q2{"prev_hash khớp?"}
-    Q2 -- "không" --> X2["GÃY: prev_hash_mismatch → exit 1"]
+    Q2 -- "không" --> X2["GÃY: prev_hash_mismatch -> exit 1"]
     Q2 -- "có" --> Q3{"fingerprint có trong registry?"}
-    Q3 -- "không" --> U["unverifiable by name → exit 2<br/>KHÔNG phải tampering (an toàn khi rollback)"]
+    Q3 -- "không" --> U["unverifiable by name -> exit 2<br/>KHÔNG phải tampering (an toàn khi rollback)"]
     Q3 -- "có" --> Q4{"entry_hash & payload_hash khớp?"}
-    Q4 -- "không" --> X3["GÃY → exit 1"]
-    Q4 -- "có" --> OK["ok → exit 0"]
+    Q4 -- "không" --> X3["GÃY -> exit 1"]
+    Q4 -- "có" --> OK["ok -> exit 0"]
 ```
 
 ## Cài đặt
@@ -130,12 +130,33 @@ pip install waxseal
 Đã phát hành trên [PyPI](https://pypi.org/project/waxseal/). Cài từ source:
 `pip install git+https://github.com/cuongbphv/waxseal`
 
+Bốn cách khác, cho những nơi một verifier thực sự phải chạy:
+
+```bash
+uv tool install waxseal            # hoặc: pipx install waxseal
+curl -fsSL https://raw.githubusercontent.com/cuongbphv/waxseal/main/deploy/install.sh | sh
+docker run --rm -v "$PWD:/data:ro" ghcr.io/cuongbphv/waxseal verify /data/trail.jsonl
+python3 waxseal-0.1.5.pyz verify trail.jsonl
+```
+
+Script cài đặt đối chiếu SHA-256 của artifact với `SHA256SUMS` của bản phát
+hành trước khi di chuyển hay thực thi bất cứ thứ gì, và nói rõ ra khi nó không
+kiểm được chữ ký. Dòng cuối là zipapp một file đính kèm mỗi bản phát hành: vì
+danh sách dependency lúc chạy là rỗng, một file cộng với `python3` đã là một
+verifier hoàn chỉnh - đúng thứ mà một cuộc soát xét trên máy ngắt mạng cần.
+
+Cho cluster hoặc cho một host, `deploy/` chứa image runtime, hai Helm chart
+thuộc hai thẩm quyền quản trị khác nhau, các unit systemd và một overlay
+compose. Đọc [deploy/README.md](deploy/README.md) trước - nó nói rõ thành phần
+nào thuộc trust domain nào, và hai thành phần nào tuyệt đối không được dùng
+chung một thẩm quyền.
+
 ## Extras mở rộng năng lực
 
 <!-- Quyết định dịch thuật (waxseal-fg4.32, 01/09/2026): mục này DỊCH phần prose và TRỎ
      về bảng tiếng Anh cho các specifier, thay vì nhân bản bảng ra ba tệp README. Lý do:
-     bảng là nội dung sống — `rfc3161` đã chuyển Planned -> shipped ở c57a7b7, `evm` cũng
-     đã chuyển Planned -> shipped (Workstream F3) — nên một bảng dịch bị lỡ cập nhật sẽ in
+     bảng là nội dung sống - `rfc3161` đã chuyển Planned -> shipped ở c57a7b7, `evm` cũng
+     đã chuyển Planned -> shipped (Workstream F3) - nên một bảng dịch bị lỡ cập nhật sẽ in
      ra một chỉ dẫn cài đặt SAI (tên gói / version specifier cũ), còn một con trỏ thì cùng
      lắm là thêm một cú nhấp. Hệ quả cho người ship extra mới: chỉ phải sửa BẢNG ở README.md;
      ba tệp README chỉ cần đụng tới khi DANH SÁCH TÊN extra đã ship thay đổi, vì tên
@@ -153,27 +174,27 @@ waxseal cần một client nào.
 `pip install waxseal[rfc3161]` và `pip install waxseal[evm]`.
 
 `rfc3161` là extra DUY NHẤT mà waxseal tự import, bên trong đúng một hàm
-(`adapters/rfc3161_verify.py`) — vì thế nó không có gì để bạn inject. Nó bật chiều kiểm
+(`adapters/rfc3161_verify.py`) - vì thế nó không có gì để bạn inject. Nó bật chiều kiểm
 chữ ký tùy chọn của `verify`/`report`, và chỉ khi bạn nêu tên một CA bundle bằng
 `--tsa-ca-file`: token có chữ ký CMS hoặc chuỗi chứng thư sai là exit 1, còn bất cứ thứ
-gì không kiểm được — kể cả vì thiếu extra — là exit 2 kèm nhãn nói rõ là thứ nào, không
+gì không kiểm được - kể cả vì thiếu extra - là exit 2 kèm nhãn nói rõ là thứ nào, không
 bao giờ là một exit 0 im lặng. Không có cờ đó thì không gì đổi: receipt vẫn được kiểm về
 mặt cấu trúc, đúng như trước. Xem [SPEC.md](SPEC.md) mục 17.1.
 
-`evm` — lớp ledger on-chain — đã ship, và cái rỗng của nó là thiết kế chứ không
+`evm` - lớp ledger on-chain - đã ship, và cái rỗng của nó là thiết kế chứ không
 phải một tính năng làm dở: `ports/ledger.py`, `domain/bond.py`,
 `domain/liveness.py`, `domain/abi.py`, `domain/registry.py`, `adapters/evm.py`
 đọc contract qua đúng cái `Transport` JSON-RPC thuần stdlib mà `RemoteBackend`
 đã dùng (`eth_call`, không có client nào để kéo về) và ghi qua một `Signer` do
-operator tự dựng rồi inject — nên không có gì cho `pip` cài cả. `evm = []` rỗng
+operator tự dựng rồi inject - nên không có gì cho `pip` cài cả. `evm = []` rỗng
 trong `pyproject.toml` KHÔNG có nghĩa "chưa ship": extra tồn tại chỉ để
 `pip install waxseal[evm]` là một lệnh hợp lệ và để năng lực này có tên trong
 metadata, chứ không bao giờ trở thành con đường để một thư viện crypto lọt vào
-lõi. Bản thân lớp này trung lập với chain ở sau port — EVM là adapter đầu tiên,
+lõi. Bản thân lớp này trung lập với chain ở sau port - EVM là adapter đầu tiên,
 không phải là thiết kế. Bề mặt CLI: `waxseal ledger-status`, `waxseal registry
 publish`, `waxseal bond deposit`/`bond prove`, và `verify`/`report
 --rpc/--liveness/--registry`, `anchor --evm-liveness` (xem danh sách CLI ở mục
-[Sử dụng](#sử-dụng) bên dưới) — đã kiểm end-to-end với hai chain anvil chạy thật
+[Sử dụng](#sử-dụng) bên dưới) - đã kiểm end-to-end với hai chain anvil chạy thật
 cùng contract Foundry thật (`contracts/src/AnchoringLiveness.sol`,
 `BondedCheckpoints.sol`, `FingerprintRegistry.sol`; commit
 `26b074c`/`c21e0e6`/`20f2762`/`26e3e91`).
@@ -186,7 +207,7 @@ ghi ở đó thay vì bị làm mờ đi.
 Thêm một dependency CỨNG là câu hỏi khác, và câu trả lời là không. Extras là con đường
 được phép.
 
-Bảng chính thức — extra nào kéo về gói client nào, ở version specifier nào — nằm ở
+Bảng chính thức - extra nào kéo về gói client nào, ở version specifier nào - nằm ở
 [README.md § Capability extras](README.md#capability-extras) bản tiếng Anh, và đó là
 nguồn duy nhất cho những chuỗi ấy.
 
@@ -225,7 +246,7 @@ waxseal verify trail.jsonl   # exit 0 nguyên vẹn / 1 gãy / 2 có row unverif
 waxseal tail trail.jsonl -n 20
 waxseal inspect trail.jsonl
 waxseal head trail.jsonl       # in head của chain (seq + entry_hash) để anchor ra ngoài
-waxseal checkpoint trail.jsonl # in {seq, entry_hash, root} — root là batch root, không chỉ tip
+waxseal checkpoint trail.jsonl # in {seq, entry_hash, root} - root là batch root, không chỉ tip
 waxseal anchor trail.jsonl     # append 1 checkpoint vào sidecar .anchors cục bộ
 waxseal verify --anchors trail.jsonl  # kiểm cả lịch sử trail so với .anchors
 waxseal preflight trail.jsonl  # cấu hình này chặn được nấc năng lực nào của attacker; luôn exit 0 (exit 3: không có trail)
@@ -255,7 +276,7 @@ writer song song không bao giờ fork được chain.
 | Remote (HTTP) | `waxseal.adapters.remote` | compare-and-swap phía server trên `(seq, prev_hash)`, client retry khi 409 | không (dùng `urllib` stdlib) |
 
 ```python
-# S3 — client được inject; bản thân waxseal vẫn zero-dependency
+# S3 - client được inject; bản thân waxseal vẫn zero-dependency
 import boto3
 from waxseal import AuditLog
 from waxseal.adapters.s3 import S3Backend
@@ -263,7 +284,7 @@ from waxseal.adapters.s3 import S3Backend
 backend = S3Backend(boto3.client("s3"), bucket="my-audit", prefix="agent-1")
 log = AuditLog(backend)
 
-# PostgreSQL — cùng pattern với connection factory
+# PostgreSQL - cùng pattern với connection factory
 import psycopg
 from waxseal.adapters.postgres import PostgresBackend
 
@@ -341,8 +362,15 @@ record_decision(log, DecisionRecord(
     outcome="approve",
     rationale="dưới ngưỡng, đối tác đã có lịch sử",
     human_oversight=HumanOversight(mode="automated"),  # None = chưa ghi nhận, KHÁC automated
+    risk_tier="high",           # phân loại của CHÍNH nhà cung cấp; None = chưa khai báo
+    classification_ref="RC-2026-014/v2",   # con trỏ tới hồ sơ, không bao giờ là nội dung hồ sơ
 ))
 ```
+
+`risk_tier` được ghi nguyên văn và không bao giờ được diễn giải: `"high"` và `"cao"`
+là hai lời khai khác nhau, vì gộp chúng lại là diễn giải hộ một việc phân loại
+thuộc quyền nhà cung cấp. `None` nghĩa là chưa khai mức nào, và báo cáo đếm
+trường hợp đó riêng khỏi mọi mức, không bao giờ hiện thành mức thấp nhất.
 
 Đọc lại các quyết định bằng `iter_decisions`, hàm này duyệt trail theo đúng thứ tự chuỗi và
 yield `(entry, record)`. Một dòng mà bytes không còn parse được thành quyết định vẫn được
@@ -354,9 +382,9 @@ from waxseal.sources.decisions import iter_decisions
 
 for entry, record in iter_decisions(log, decision_type="transaction_approval"):
     if record is None:
-        print(f"seq {entry.header.seq}: không parse được — chạy `waxseal verify`")
+        print(f"seq {entry.header.seq}: không parse được - chạy `waxseal verify`")
     else:
-        print(f"seq {entry.header.seq}: {record.decision_id} → {record.outcome}")
+        print(f"seq {entry.header.seq}: {record.decision_id} -> {record.outcome}")
 ```
 
 Kiểm toán viên đọc một báo cáo, và kiểm tra được một quyết định mà không cần được trao cả
@@ -367,6 +395,48 @@ waxseal report decisions.jsonl              # Markdown; --json cho SIEM/GRC
 waxseal export-proof decisions.jsonl 3 > proof.json
 waxseal verify-proof proof.json             # offline; không cần trail
 ```
+
+### Sự cố và can thiệp của con người
+
+Hai họ bằng chứng nữa, cho hai điều mà một cơ quan quản lý hỏi tới sau một nhật
+ký quyết định: điều gì đã xảy ra khi hệ thống sai, và ai đã can thiệp.
+
+```python
+from waxseal import IncidentRecord, InterventionRecord
+from waxseal.sources.incidents import record_incident
+from waxseal.sources.interventions import record_intervention
+
+record_incident(log, IncidentRecord(
+    incident_id="INC-2026-0007",
+    system_id="screening-agent",
+    detected_at="2026-09-01T07:10:00+00:00",
+    confirmed_at="2026-09-01T08:00:00+00:00",   # mốc mà một đồng hồ báo cáo bắt đầu chạy từ đó
+    severity="serious",
+    summary="điểm đánh giá lệch sau khi đổi nguồn dữ liệu",  # được redact trước khi hash
+    report_ref=None,          # không có ghi nhận nộp Ở ĐÂY - chưa bao giờ nghĩa là "chưa nộp"
+))
+
+record_intervention(log, InterventionRecord(
+    intervention_id="IV-41",
+    system_id="screening-agent",
+    actor_ref="risk-queue-7",     # giả danh, giống reviewer_ref
+    action="halt",
+    decision_ref="DEC-1001",      # None = không phải hành vi trên một quyết định đã ghi
+))
+```
+
+```bash
+waxseal incidents decisions.jsonl --report-window-h 72 --as-of 2026-09-05T08:00:00+00:00
+```
+
+Lệnh đó đọc, nó không phán xử. Exit code của nó là 0, 2 và 3 - không bao giờ 1 -
+vì mọi mốc thời gian liên quan đều là lời khai của bên ghi, và cửa sổ là con số
+người vận hành gõ vào. Một phép đọc `no_report_recorded_past_window` là một
+phát biểu về trail này, không phải một kết luận rằng đã trễ hạn: waxseal không
+có kênh nào tới cơ quan có thẩm quyền và không thấy được báo cáo đã nộp hay
+chưa. Khi việc nộp thực sự xảy ra, hãy append một hàng mới cùng `incident_id`
+mang theo mã biên nhận; không gì bị sửa, hàng mới nhất thắng như một bản ghi
+nguyên khối, và số hàng vẫn hiện ra để lịch sử trình bày lại đọc được.
 
 Một proof bundle là một entry cộng đường Merkle của nó, nên trả lời câu hỏi về một chủ thể
 không làm lộ mọi quyết định khác trong trail. Báo cáo in kiểm tra **không được chạy** thành
@@ -399,7 +469,7 @@ from waxseal.adapters.anchors import FileAnchorSink
 log = AuditLog.open("trail.jsonl",
                     anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
 # cứ mỗi 100 lần append, best-effort publish 1 checkpoint ngoài write path;
-# anchor lỗi không bao giờ chặn ghi — chỉ tính vào anchor_failures
+# anchor lỗi không bao giờ chặn ghi - chỉ tính vào anchor_failures
 ```
 
 `waxseal verify --anchors` replay lại từng checkpoint đã ghi so với trail hiện
@@ -429,7 +499,7 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
   ủy quyền cho `openssl ts -verify`, công thức nằm trong docs. Receipt mà nó không đọc
   được là *unverifiable* (exit 2); chỉ receipt chứng thực cho bytes khác mới là *gãy*
   (exit 1). Nếu đã cài extra `rfc3161` và bạn nêu tên một CA bundle
-  (`--tsa-ca-file`), chiều chữ ký cũng được kiểm — và token không kiểm được là exit 2
+  (`--tsa-ca-file`), chiều chữ ký cũng được kiểm - và token không kiểm được là exit 2
   kèm nhãn nói rõ, không bao giờ là một lần lọt im lặng.
 - **OpenTimestamps** lưu một proof Bitcoin ở trạng thái *pending*, mờ đục và có chủ ý. Hoàn
   tất nó về sau bằng `ots upgrade` / `ots verify`.
@@ -470,7 +540,7 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 - **`--witness`** là kênh bên ngoài mà pin không thể thay thế. Pin bắt được server viết lại
   lịch sử cho chính bạn; chỉ witness nằm ở một miền tin cậy *khác* mới bắt được server đưa
   hai lịch sử khác nhau cho hai client. Witness không kết nối được sẽ in
-  `unreachable — NOT checked` và trả exit code 2 (không thể xác minh): một
+  `unreachable - NOT checked` và trả exit code 2 (không thể xác minh): một
   phép kiểm chưa chạy không phải là đạt, cũng không phải là bằng chứng bị sửa.
 
 - [docs/anchoring-external-time.vi.md](docs/anchoring-external-time.vi.md) có công thức ủy
@@ -489,7 +559,7 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 Hash chain không khóa thì ai có quyền ghi cũng tính lại được. Tầng attestation đóng
 lỗ hổng đó, và làm được vậy mà không thêm một dependency nào.
 
-**Forward-secure seal (HMAC thuần stdlib, construction Bellare–Yee / Schneier–Kelsey):**
+**Forward-secure seal (HMAC thuần stdlib, construction Bellare-Yee / Schneier-Kelsey):**
 key seal tiến hóa một chiều theo từng entry (`A_{j+1} = SHA-256(A_j)`) và key cũ bị bỏ,
 nên kẻ chiếm máy tại epoch *t* không thể giả mạo hay re-seal bất kỳ thứ gì viết trước *t*.
 Rewrite cả đoạn đuôi một cách "nhất quán" giờ sẽ FAIL verify thay vì lọt:
@@ -501,7 +571,7 @@ sequenceDiagram
     participant S as .attest sidecar
     W->>K: đọc A_j
     W->>S: seal_j = HMAC-SHA256(A_j, entry_hash_j)
-    W->>K: A_j+1 = SHA-256(A_j) — A_j biến mất
+    W->>K: A_j+1 = SHA-256(A_j) - A_j biến mất
     Note over K,S: chiếm máy tại epoch t ⇒ seal < t không thể giả mạo
 ```
 
@@ -629,7 +699,7 @@ Trail của waxseal là bản ghi bạn có thể giữ, chia sẻ và verify.
 ## Server tự vận hành
 
 `server/` là một chain server, witness và điểm đọc công khai tự vận hành, kèm
-một portal web Vue 3 chỉ đọc — một ứng dụng riêng trên stack FastAPI + uvicorn
+một portal web Vue 3 chỉ đọc - một ứng dụng riêng trên stack FastAPI + uvicorn
 của nó, không nằm trong wheel `waxseal` (luật 1 của CLAUDE.md ràng buộc
 dependency của thư viện, không ràng buộc thư mục này; không có gì ở đây được
 đóng gói vào wheel). Đường ghi của nó dùng `waxseal` như một thư viện; mọi route
@@ -637,18 +707,18 @@ dependency của thư viện, không ràng buộc thư mục này; không có g�
 là nơi duy nhất ra kết luận và không route nào sửa, xóa, đảo thứ tự hay "vá" một
 entry. Ba credential nằm tách nhau: API key của chain, key của witness, và một
 điểm đọc công khai không cần credential, cũng không có route ghi nào. Operator,
-role và API key nằm trong PostgreSQL — còn bản thân trail vẫn là các file JSONL
+role và API key nằm trong PostgreSQL - còn bản thân trail vẫn là các file JSONL
 thuần mà bên thứ ba verify được bằng đúng lệnh `waxseal verify` tiêu chuẩn, chứ
 không phải thứ chỉ server này mới đọc nổi.
 
-![portal server waxseal — dashboard](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/vi/01-dashboard.png)
+![portal server waxseal - dashboard](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/vi/01-dashboard.png)
 
 | | |
 |---|---|
 | ![output của verify, nguyên văn từ CLI](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/vi/03-trail-output.png) | ![trạng thái ledger on-chain](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/vi/12-ledger.png) |
-| **Trail** — mỗi kết luận đi kèm đúng `argv` đã sinh ra nó, nên operator tái lập lại được. | **Ledger** — đọc liveness, registry và bond; `unreachable` là một giá trị riêng, không bao giờ in thành "0 phát hiện". |
+| **Trail** - mỗi kết luận đi kèm đúng `argv` đã sinh ra nó, nên operator tái lập lại được. | **Ledger** - đọc liveness, registry và bond; `unreachable` là một giá trị riêng, không bao giờ in thành "0 phát hiện". |
 | ![nhịp anchor](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/vi/11-cadence.png) | ![consistency proof](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/vi/08-consistency.png) |
-| **Cadence** — nhịp anchor tối ưu chi phí, tính từ số đo của chính operator. Không mở trail nào. | **Consistency** — chứng minh RFC 9162 rằng head sau mở rộng từ head trước, không cần replay cả log. |
+| **Cadence** - nhịp anchor tối ưu chi phí, tính từ số đo của chính operator. Không mở trail nào. | **Consistency** - chứng minh RFC 9162 rằng head sau mở rộng từ head trước, không cần replay cả log. |
 
 <sub>Portal chỉ đọc. Mọi kết luận trên các màn hình này là exit code của một lượt `python -m waxseal.cli`, in ra nguyên văn. Bộ ảnh đầy đủ, cả desktop lẫn điện thoại, ở [`server/docs/screenshots/vi/`](server/docs/screenshots/vi/) và [`server/docs/screenshots/en/`](server/docs/screenshots/en/); sinh lại bằng `server/scripts/screenshots.sh`.</sub>
 

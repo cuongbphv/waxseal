@@ -18,7 +18,7 @@ Ba bề mặt trong một process, cố ý giữ tách biệt:
 | Read point công khai | `/public/v1/...` | không cần | Bên thứ ba xác minh mà không được cấp gì. |
 
 Read point công khai **không phải** "cùng dữ liệu, tắt xác thực". Nó là một bề
-mặt riêng, trên đó không có route ghi nào cả — quyền chỉ-đọc ở đây là kiến trúc,
+mặt riêng, trên đó không có route ghi nào cả - quyền chỉ-đọc ở đây là kiến trúc,
 không phải một bit phân quyền. Hình dạng này lấy từ mẫu mirror-node (kế hoạch
 0.1.5, Workstream G4), và có test khẳng định không route `/public` nào nhận
 phương thức khác `GET`.
@@ -110,7 +110,7 @@ docker compose -f server/docker-compose.yml exec server \
 | `user-waxseal` | writer | Một cái máy. Thứ mà agent hook dùng để append. |
 
 `key-mint` cố ý **không** idempotent: mint lần thứ hai là một credential thứ
-hai. Plaintext của mỗi khóa được in đúng một lần và không bao giờ nữa — store
+hai. Plaintext của mỗi khóa được in đúng một lần và không bao giờ nữa - store
 chỉ giữ SHA-256, nên server này không thể cho bạn xem lại một khóa và cũng
 không thể làm lộ toàn bộ khóa một lúc.
 
@@ -153,7 +153,7 @@ trong process listing (REMOTE.md mục 5).
 
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
-| `WAXSEAL_SERVER_DATA_DIR` | `/var/lib/waxseal` | Chain, bản ghi witness, import — là **file**. |
+| `WAXSEAL_SERVER_DATA_DIR` | `/var/lib/waxseal` | Chain, bản ghi witness, import - là **file**. |
 | `WAXSEAL_SERVER_DATABASE_URL` | chưa đặt | PostgreSQL cho operator, API key và settings. Chưa đặt nghĩa là store trong bộ nhớ, mất khi restart. |
 | `WAXSEAL_API_KEY` | chưa đặt | Bearer token bootstrap, scope admin. |
 | `WAXSEAL_WITNESS_API_KEY` | chưa đặt | Bearer token cho witness. Không bao giờ là khóa chain hay khóa operator. |
@@ -164,9 +164,9 @@ Biến môi trường là thứ **process** được khởi động cùng. Mọi
 được đọc một lần lúc start và chỉ-đọc lúc runtime: đổi
 `WAXSEAL_SERVER_DATA_DIR` nghĩa là phải restart cái process đang giữ những file
 đó, còn đổi credential từ chính console mà nó xác thực là cách một console tự
-khóa mình ra ngoài — hoặc âm thầm nới quyền của chính nó.
+khóa mình ra ngoài - hoặc âm thầm nới quyền của chính nó.
 
-Bên cạnh đó server giữ một **settings store** nhỏ — các giá trị vận hành mà
+Bên cạnh đó server giữ một **settings store** nhỏ - các giá trị vận hành mà
 operator đổi được không cần redeploy. `GET /v1/settings` trả về cả hai nửa và
 màn Cài đặt hiển thị chúng cạnh nhau, để câu "server này đang cấu hình thế nào"
 có một câu trả lời ở một chỗ.
@@ -193,12 +193,12 @@ màn hình.
 Bốn giá trị bị từ chối **theo tên**, không phải chỉ vắng mặt, và lời từ chối
 mang theo lý do để sau này không ai thêm vào như một sơ suất:
 
-- `api_key` và `witness_api_key` — là credential. Operator store chỉ giữ SHA-256
+- `api_key` và `witness_api_key` - là credential. Operator store chỉ giữ SHA-256
   của khóa chính vì mục đích không cho database làm lộ một credential đang sống,
   và khóa witness thuộc về một *authority quản trị khác*: một bảng settings dùng
   chung sẽ đặt cả hai dưới cùng một chỗ sửa.
-- `database_url` — không thể nằm trong chính database mà nó trỏ tới.
-- `data_dir` — đang bị process chạy giữ mở.
+- `database_url` - không thể nằm trong chính database mà nó trỏ tới.
+- `data_dir` - đang bị process chạy giữ mở.
 
 `GET /v1/settings` báo ba secret dưới dạng `state: "set" | "unset"` và **không
 có field nào để giá trị có thể nằm vào**. Đó là thứ ngăn một trang "cho tôi xem
@@ -211,7 +211,7 @@ cấu hình" trở thành cách đọc credential ra khỏi một triển khai. 
 vậy: một endpoint không thể bất đồng với chính nó, nên "đối chiếu" với nó thì
 không phải là đối chiếu. Một operator dựa vào một tiếng nói duy nhất thì mù đúng
 với cái eclipse mà việc đối chiếu tồn tại để phát hiện. Hãy cấu hình hai nhà
-cung cấp độc lập, hoặc để trống — dưới hai endpoint thì `ledger-status` trả
+cung cấp độc lập, hoặc để trống - dưới hai endpoint thì `ledger-status` trả
 `unverifiable` và nói rõ vì sao, thay vì báo một trạng thái nó không xác nhận
 được.
 
@@ -222,13 +222,27 @@ volume, và đó là một đường ranh có chủ ý, không phải một cu�
 
 - lời hứa của sản phẩm là một bên thứ ba xác minh được trail bằng `waxseal
   verify` nguyên bản trên máy của họ. Đưa trail vào database này thì server này
-  thành thứ duy nhất đọc được nó — đúng cái tập trung niềm tin mà read point
+  thành thứ duy nhất đọc được nó - đúng cái tập trung niềm tin mà read point
   công khai tồn tại để xóa bỏ;
 - thư viện waxseal và CLI của nó không biết gì về PostgreSQL, và thêm driver vào
   chúng sẽ phá quy tắc zero-dependency mà toàn bộ thiết kế dựa lên
   (CLAUDE.md rule 1);
 - backup data volume cho bạn những file mà `waxseal verify` đọc trực tiếp, không
   cần server và không cần database nào đang chạy.
+
+## Kubernetes
+
+`deploy/helm/waxseal-server/` cài server này thành một StatefulSet ở một
+replica, kèm hook seed, một anchor client đặt cùng chỗ tuỳ chọn, và một
+`values.schema.json` ghim số replica. Sở dĩ là một replica vì trail là file
+JSONL nằm sau một file lock nên chỉ nhận đúng một writer, còn rolling update
+của Deployment sẽ tạo thêm một pod thứ hai trên cùng volume trước khi tắt pod
+cũ.
+
+Verifier là **một chart riêng** dành cho một namespace hoặc một cluster riêng:
+`deploy/helm/waxseal-verifier/`. Một verifier mà chính người ghi trail cũng
+nâng cấp được là một writer tự kiểm chứng chính mình. Không chart nào kèm một
+witness, cũng vì lý do đó. Xem [`deploy/README.vi.md`](../../deploy/README.vi.md).
 
 ## Bề mặt đọc
 
@@ -252,7 +266,7 @@ qua HTTP; bốn cái ghi thì không, và không thể tiếp cận kể cả b�
 | `GET /v1/cadence?lam=&c=&w=&rho=&delta=&t_max=&M=` | `cadence` | `verify:run` |
 
 `anchor`, `install`, `registry` và `bond` là lệnh ghi. Chúng không có trong tập
-lệnh chỉ-đọc của server, nên không request HTTP nào chạm tới được — CLAUDE.md
+lệnh chỉ-đọc của server, nên không request HTTP nào chạm tới được - CLAUDE.md
 rule 4 ("verify reports, never repairs") thể hiện thành một bảng URL chứ không
 phải một lời hứa.
 
@@ -263,7 +277,7 @@ Ba điều trong bảng đó không hiển nhiên:
   scope. Một writer key không được đọc lại chính cái trail nó đang nối.
 - **Mọi query parameter đều trở thành một phần tử của `argv`**, đây là chỗ duy
   nhất server này biến input của người gọi thành tham số subprocess. Mỗi cái
-  được kiểm tra *trước khi* subprocess tồn tại — một validator từ chối sau đó
+  được kiểm tra *trước khi* subprocess tồn tại - một validator từ chối sau đó
   thì đã chạy mất cái lệnh nó định ngăn. Dùng regex neo hai đầu, không dùng
   `float()`, vì `float()` nhận cả `inf`, `nan` và dấu đứng đầu.
 - **`verify-handoff --origin` nhận một chain id, không bao giờ nhận đường dẫn.**
@@ -274,7 +288,7 @@ Ba điều trong bảng đó không hiển nhiên:
 
 Đây là lệnh đọc duy nhất không có chain trong đó: mọi input là một số đo do
 operator cung cấp, nên một server không giữ chain nào vẫn trả lời được. Không
-field nào được điền sẵn và không tham số nào có mặc định — một nhịp anchor tính
+field nào được điền sẵn và không tham số nào có mặc định - một nhịp anchor tính
 từ con số do server này tự chọn sẽ là lời khuyên không ai đo, in ra với đúng sự
 tự tin của lời khuyên có người đo. Nó trả về một **dải** đề xuất, không bao giờ
 một điểm đơn.
@@ -288,7 +302,7 @@ này vào một host do họ chọn. Ba kết quả, không cái nào là trạn
 | Trạng thái | Ý nghĩa |
 |---|---|
 | `configured: false`, `reason: no_liveness_address` | Không có gì để chạy. `missing` nêu tên setting cần đặt. Không phải lỗi. |
-| `configured: false`, `reason: bond_without_writer` | Có địa chỉ bond mà không có writer. Được nêu tên chứ không gửi cho argparse, vì argparse sẽ trả về usage error — một bug của server đội lốt không-verdict. |
+| `configured: false`, `reason: bond_without_writer` | Có địa chỉ bond mà không có writer. Được nêu tên chứ không gửi cho argparse, vì argparse sẽ trả về usage error - một bug của server đội lốt không-verdict. |
 | `configured: true` | Lệnh đã chạy. Verdict của nó được mang qua nguyên văn, kể cả `unverifiable` mà nó trả về khi có dưới hai RPC endpoint. |
 
 ## Lệnh đọc chạy qua CLI
@@ -302,15 +316,15 @@ Hai hệ quả đáng biết:
 
 - Lệnh mà bản build waxseal này không có sẽ báo `"status": "unavailable"` với
   verdict là null. Chúng không bao giờ được chạy, vì argparse cũng exit 2 và
-  điều đó sẽ đến trông y hệt "unverifiable" — một verdict không ai tính. Từ
+  điều đó sẽ đến trông y hệt "unverifiable" - một verdict không ai tính. Từ
   0.1.5 wheel đã có mọi lệnh đọc mà server này cung cấp, nên đường đi này chỉ
-  gặp khi một wheel cũ nằm sau một server mới — đúng trường hợp nó tồn tại vì.
+  gặp khi một wheel cũ nằm sau một server mới - đúng trường hợp nó tồn tại vì.
 - Exit 3 ("không đọc được gì") được báo là `"absent"`, không bao giờ là một
   break. Báo tamper cho một file không tồn tại là một báo động sai.
 - `segments` được đưa **thư mục** chứa trail, không phải file trail: nó đi qua
   một nhóm segment và các binding rotation giữa các file (SPEC.md mục 20). Một
-  chain chưa rotate vì thế báo `"absent"` kèm "no sealed segments" trên stderr —
-  không có gì được kiểm — thay vì một `ok` sẽ khẳng định đã tìm thấy mọi segment
+  chain chưa rotate vì thế báo `"absent"` kèm "no sealed segments" trên stderr -
+  không có gì được kiểm - thay vì một `ok` sẽ khẳng định đã tìm thấy mọi segment
   của một trail vốn không có segment nào.
 
 ## Portal
@@ -323,9 +337,9 @@ thành drawer phủ lên khi dưới 900px.
 | | |
 |---|---|
 | ![Nhịp anchor](screenshots/vi/11-cadence.png) | ![Cài đặt](screenshots/vi/19-settings.png) |
-| **Nhịp anchor** — khoảng anchor tối ưu chi phí, tính từ số đo của chính operator. Không mở trail nào. | **Cài đặt** — credential, biến môi trường, và các tham số. Secret chỉ báo `đã đặt`/`chưa đặt`, không gì khác. |
+| **Nhịp anchor** - khoảng anchor tối ưu chi phí, tính từ số đo của chính operator. Không mở trail nào. | **Cài đặt** - credential, biến môi trường, và các tham số. Secret chỉ báo `đã đặt`/`chưa đặt`, không gì khác. |
 | ![Vé](screenshots/vi/10-tickets.png) | ![Output của trail](screenshots/vi/03-trail-output.png) |
-| **Vé** — thiếu một vé là một mất mát *đã phát hiện*; không có dữ liệu phát hành là *chưa đo*. Không bao giờ hiện thành "0 mất mát". | **Trail** — mọi verdict mang theo `argv` đã tạo ra nó, để operator tái hiện được. |
+| **Vé** - thiếu một vé là một mất mát *đã phát hiện*; không có dữ liệu phát hành là *chưa đo*. Không bao giờ hiện thành "0 mất mát". | **Trail** - mọi verdict mang theo `argv` đã tạo ra nó, để operator tái hiện được. |
 
 Bộ đầy đủ: [`docs/screenshots/vi/`](screenshots/vi/) và
 [`docs/screenshots/en/`](screenshots/en/), cả desktop lẫn phone, tạo lại bằng
@@ -338,7 +352,7 @@ khóa vào và mười hai chỗ để bỏ quên nó.
 ### Screenshot được sinh ra, không phải chọn tay
 
 `screenshots.sh` tự dựng server riêng với dữ liệu demo riêng trên một cổng tạm
-rồi chụp cái đó — không bao giờ chụp một triển khai thật. Hai lớp bảo vệ chạy
+rồi chụp cái đó - không bao giờ chụp một triển khai thật. Hai lớp bảo vệ chạy
 trước mỗi lần bấm máy, vì cả hai lỗi này đều vô hình khi review một khi khung
 hình đã thành PNG:
 
@@ -352,11 +366,11 @@ của lập trình viên vào ảnh xuất bản.
 
 Dữ liệu demo được ghi qua **thư viện** waxseal, nên nó không thể là hình dạng mà
 client thật không tạo ra. Nó không mang tên tổ chức, tên người, địa chỉ hay
-credential nào — chỉ có định danh giữ chỗ (`agent-a`, `reviewer-1`).
+credential nào - chỉ có định danh giữ chỗ (`agent-a`, `reviewer-1`).
 
 ## TLS
 
-HTTP thuần. TLS kết thúc ở một reverse proxy đặt phía trước — file này không tự
+HTTP thuần. TLS kết thúc ở một reverse proxy đặt phía trước - file này không tự
 phát minh ra một PKI. Xem bản tiếng Anh, mục *TLS*, để biết cấu hình cụ thể.
 
 ## Server được tin cho việc gì, và không được tin cho việc gì
@@ -367,7 +381,7 @@ Anh: [*What the server is trusted for, and what it is not*](deployment.md#what-t
 
 **Một witness được host cạnh chain mà nó làm chứng thì không chứng minh được
 gì.** Nếu cùng một người vận hành cả hai, một lần rewrite phối hợp sẽ đi qua cả
-hai. Witness chỉ có giá trị khi nó thuộc một authority quản trị khác — và đó là
+hai. Witness chỉ có giá trị khi nó thuộc một authority quản trị khác - và đó là
 lý do khóa của nó là một biến môi trường khác, không bao giờ dùng chung với khóa
 ghi của chain.
 
@@ -390,5 +404,5 @@ là đã ship.** Ba mục đáng nhắc:
   `GET /v1/chains/{id}/ledger-status` chạy lệnh thật. Cái **không** đổi là
   trường hợp chưa cấu hình: nó vẫn là một trạng thái có nhãn, nêu tên setting
   cần đặt, chứ không bao giờ là một status không ai đọc. Lưu ý một lần đối chiếu
-  hoạt động cần **hai** nhà cung cấp RPC độc lập — đó là quyết định mua sắm hơn
+  hoạt động cần **hai** nhà cung cấp RPC độc lập - đó là quyết định mua sắm hơn
   là quyết định cấu hình.

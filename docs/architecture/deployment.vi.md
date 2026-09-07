@@ -1,4 +1,4 @@
-# Kiến trúc tham chiếu — nhật ký quyết định AI kiểm chứng được trong tổ chức được quản lý
+# Kiến trúc tham chiếu - nhật ký quyết định AI kiểm chứng được trong tổ chức được quản lý
 
 *[English](deployment.md)*
 
@@ -20,26 +20,26 @@ không phủ những gì đối với từng khung.
 
 ```mermaid
 flowchart TB
-    subgraph AT["Miền tin cậy ứng dụng — hệ thống AI"]
+    subgraph AT["Miền tin cậy ứng dụng - hệ thống AI"]
         AG["AI agent / dịch vụ quyết định<br/>(N replica)"]
         RD["Redactor<br/>chạy TRƯỚC mọi phép băm"]
         AG --> RD
     end
 
-    subgraph CT["Miền tin cậy chuỗi — quyền quản trị riêng"]
+    subgraph CT["Miền tin cậy chuỗi - quyền quản trị riêng"]
         CS["chain server<br/>(hợp đồng wire REMOTE.md)"]
         DB[("kho chỉ-ghi-thêm<br/>Postgres · SQLite · S3")]
         CS --> DB
     end
 
-    subgraph XT["Miền tin cậy neo — quyền quản trị thứ ba"]
+    subgraph XT["Miền tin cậy neo - quyền quản trị thứ ba"]
         TS["RFC 3161 TSA<br/>· OpenTimestamps<br/>· git remote<br/>· log của đối tác"]
     end
 
-    subgraph VT["Miền tin cậy verifier — tuyến 2 / kiểm toán nội bộ"]
+    subgraph VT["Miền tin cậy verifier - tuyến 2 / kiểm toán nội bộ"]
         KE["ký quỹ khoá: A₀<br/>không bao giờ nằm trên máy ghi"]
         VF["job verifier<br/>waxseal verify --anchors<br/>verify_attestations"]
-        RP["waxseal report<br/>→ SIEM / GRC"]
+        RP["waxseal report<br/>-> SIEM / GRC"]
         KE --> VF
         VF --> RP
     end
@@ -71,19 +71,19 @@ kẻ viết lại được trail cũng viết lại được chính các root l�
 
 ```
 quyết định của agent
-  → Redactor                      che bí mật, TRƯỚC mọi phép băm
-  → JSON chuẩn tắc                khoá đã sắp xếp, không khoảng trắng, một chủ sở hữu
-  → payload_hash = sha256(bytes)
-  → EntryHeader dựng trong critical section của backend
+  -> Redactor                      che bí mật, TRƯỚC mọi phép băm
+  -> JSON chuẩn tắc                khoá đã sắp xếp, không khoảng trắng, một chủ sở hữu
+  -> payload_hash = sha256(bytes)
+  -> EntryHeader dựng trong critical section của backend
       (seq và prev_hash đọc từ tail trong cùng một lock)
-  → entry_hash = sha256(header đã đóng khung)
-  → sidecar attestation           niêm phong HMAC forward-secure; epoch khoá tiến lên
-  → mỗi N entry: checkpoint Merkle công bố sang miền neo
+  -> entry_hash = sha256(header đã đóng khung)
+  -> sidecar attestation           niêm phong HMAC forward-secure; epoch khoá tiến lên
+  -> mỗi N entry: checkpoint Merkle công bố sang miền neo
 ```
 
 Hai quy tắc trong `CLAUDE.md` chi phối đường ghi này và không phải là lựa chọn triển khai:
 
-- **Redact trước khi hash.** Một lần redaction sót là không thể cứu vãn theo thiết kế —
+- **Redact trước khi hash.** Một lần redaction sót là không thể cứu vãn theo thiết kế -
   cleartext chính là thứ lẽ ra đã bị băm và lưu lại. Redactor chạy trước vì lý do đó, không
   phải vì nó tuỳ chọn.
 - **Đọc-tail + append là một critical section.** Hai writer đồng thời không bao giờ được
@@ -118,12 +118,12 @@ triển khai:
 
 | Nhiệm vụ | Ai | Vì sao không phải bên ghi |
 |---|---|---|
-| Append quyết định | service account của ứng dụng | — |
+| Append quyết định | service account của ứng dụng | - |
 | Giữ A₀ (ký quỹ khoá niêm phong) | verifier / tuyến 2 | niêm phong forward-secure chỉ phát hiện việc viết lại phần đuôi nếu kẻ tấn công không lấy được epoch khoá trước đó |
-| Công bố checkpoint | chain server → miền neo | một root mà bên ghi sửa được thì không chứng minh điều gì |
+| Công bố checkpoint | chain server -> miền neo | một root mà bên ghi sửa được thì không chứng minh điều gì |
 | Chạy kiểm chứng | verifier, theo lịch | bên ghi tự kiểm chứng chính mình là tự báo cáo về mình |
-| Đọc báo cáo | tuyến 2, kiểm toán nội bộ, cơ quan quản lý khi được yêu cầu | — |
-| Xoay vòng / ngừng vận hành | quản lý thay đổi, kiểm soát kép | — |
+| Đọc báo cáo | tuyến 2, kiểm toán nội bộ, cơ quan quản lý khi được yêu cầu | - |
+| Xoay vòng / ngừng vận hành | quản lý thay đổi, kiểm soát kép | - |
 
 **Xử lý A₀.** Khoá niêm phong ban đầu được sinh một lần cho mỗi chuỗi, giao cho verifier,
 và không bao giờ được ghi lên máy ghi log. PoC ghi `sealkey.escrow` cạnh trail thuần tuý vì
@@ -144,15 +144,15 @@ bảng entries, không hơn; với S3, dùng object lock kèm thời hạn lưu 
 | Verify attestation | hằng ngày | `verify_attestations(initial_key=A₀)` | `ok=False` |
 | Báo cáo kiểm toán | hằng ngày, có lưu trữ | `waxseal report <trail> --json` | có bất kỳ kiểm tra nào không ok |
 | Consistency proof so với root gần nhất | mỗi checkpoint | `waxseal consistency <trail> --old-seq N --old-root HEX` (RFC 9162 §2.1.4) | exit 1 |
-| Tiết lộ chọn lọc | khi có yêu cầu | `waxseal export-proof` → `verify-proof` | — |
+| Tiết lộ chọn lọc | khi có yêu cầu | `waxseal export-proof` -> `verify-proof` | - |
 
 ### Exit code chính là giao diện
 
 | Exit | Ý nghĩa | Phản ứng vận hành |
 |---:|---|---|
 | 0 | nguyên vẹn | không cần gì |
-| 1 | đứt gãy — in ra chỗ đứt đầu tiên kèm seq và lý do | **sự cố an ninh**: bảo toàn hiện trạng, không sửa |
-| 2 | nguyên vẹn, nhưng có dòng bản build này không verify được theo tên | **không** phải sự cố — đây là tín hiệu lệch phiên bản |
+| 1 | đứt gãy - in ra chỗ đứt đầu tiên kèm seq và lý do | **sự cố an ninh**: bảo toàn hiện trạng, không sửa |
+| 2 | nguyên vẹn, nhưng có dòng bản build này không verify được theo tên | **không** phải sự cố - đây là tín hiệu lệch phiên bản |
 | 3 | đường dẫn trail không tồn tại | lỗi cấu hình: chưa đọc gì, chưa tạo gì |
 
 Exit 2 tồn tại vì hai sự cố nêu trong `CLAUDE.md`. Một lần rollback để lại các dòng do
@@ -161,7 +161,7 @@ schema mới hơn ghi thì không được đánh thức ai như một cảnh b�
 exit 2 tới bộ phận quản lý phát hành, không phải tới SOC.
 
 **Không bao giờ nối một cơ chế tự động khắc phục vào exit 1.** waxseal báo cáo; nó không
-sửa chữa. Không đường code nào được viết lại, sắp xếp lại hay "sửa" các entry — và runbook
+sửa chữa. Không đường code nào được viết lại, sắp xếp lại hay "sửa" các entry - và runbook
 cũng vậy. Dòng nào là dòng bị can thiệp là quyết định chỉ người vận hành mới được đưa ra,
 và một hành động "sửa" sẽ phá huỷ đúng thứ bằng chứng mà toà án hoặc cơ quan quản lý cần.
 
@@ -170,7 +170,7 @@ và một hành động "sửa" sẽ phá huỷ đúng thứ bằng chứng mà 
 `waxseal report --json` là điểm tích hợp. Hãy chuyển đi báo cáo này, không phải trail. Nó
 mang phán quyết về chuỗi, thước đo tính đầy đủ kèm nguồn của nó, kiểm kê theo payload type
 và schema fingerprint, số lượng quyết định theo loại và theo chế độ giám sát, và trạng thái
-từng kiểm tra sidecar. Những trường **không được kiểm tra** sẽ báo là không được kiểm tra —
+từng kiểm tra sidecar. Những trường **không được kiểm tra** sẽ báo là không được kiểm tra -
 một luật cảnh báo tuyệt đối không được coi kiểm tra bị thiếu là kiểm tra đã đạt.
 
 ---
@@ -185,12 +185,12 @@ Hãy nói rõ những điều này với người review trước khi họ tự 
 - **Một chain server từ xa là *trusted writer*, không phải Byzantine-fault-tolerant.** Một
   chain server bất lương có thể phục vụ một bản viết lại giả mạo nhất quán mà riêng phép
   kiểm chuỗi không bắt được. Một pinned head bắt được việc viết lại đoạn lịch sử verifier
-  này đã xác nhận, và một witness bắt được split-view — nhưng chỉ khi file pin và host
+  này đã xác nhận, và một witness bắt được split-view - nhưng chỉ khi file pin và host
   witness chịu một quyền quản trị khác với chain server. Đó cũng chính là lý do anchor
   sink phải trỏ tới một dịch vụ khác chain server.
 - **Toàn vẹn chuỗi không phải tính đầy đủ của trail.** Một quyết định chưa từng được ghi
   thì không để lại khoảng trống `seq` nào và không làm đứt liên kết nào. `dropped_writes`
-  đo tính đầy đủ một cách tách bạch, và `None` nghĩa là *chưa đo* — không bao giờ là 0. Bản
+  đo tính đầy đủ một cách tách bạch, và `None` nghĩa là *chưa đo* - không bao giờ là 0. Bản
   thân sidecar `.drops` có thể bị xoá, và một ổ đĩa hỏng tới mức không ghi nổi bản ghi rớt
   thì cũng không làm chứng được cho chính sự cố của nó. Hãy coi con số đó là một cận dưới
   đã đo.
@@ -220,7 +220,7 @@ tháng rất nhiều; thời hạn ràng buộc là thời hạn dài nhất tro
 này.
 
 Về mặt cơ chế: **waxseal không cưỡng chế thời hạn lưu trữ.** Nó chỉ-ghi-thêm, nên tự nó sẽ
-không xoá — điều này thoả mãn nghĩa vụ lưu trữ tối thiểu một cách tự nhiên, và cũng vì thế
+không xoá - điều này thoả mãn nghĩa vụ lưu trữ tối thiểu một cách tự nhiên, và cũng vì thế
 mà làm phức tạp nghĩa vụ lưu trữ tối đa hoặc nghĩa vụ xoá. Hãy lập kế hoạch xoay vòng chuỗi
 (mỗi kỳ một chuỗi mới, với head đóng kỳ được neo và tham chiếu chéo làm bối cảnh genesis
 của chuỗi mới) thay vì xoá bên trong một chuỗi.
@@ -229,13 +229,13 @@ của chuỗi mới) thay vì xoá bên trong một chuỗi.
 có thể khôi phục từ replica; mất sidecar `.attest` nghĩa là không verify được niêm phong
 cho khoảng đã phủ, và mất bản ghi neo nghĩa là mất lớp phòng vệ "root đã công bố" cho
 khoảng đó. Hãy backup sidecar cùng với trail, và giữ bản sao các root ở miền neo độc lập
-với backup của miền chuỗi — một hệ thống backup duy nhất chứa cả hai sẽ tái tạo lại đúng
+với backup của miền chuỗi - một hệ thống backup duy nhất chứa cả hai sẽ tái tạo lại đúng
 cái quyền quản trị chung mà topology này sinh ra để tránh.
 
 **Dung lượng.** Tăng trưởng tuyến tính theo số quyết định; header có kích thước cố định và
 payload là kết quả serialize bản ghi quyết định (bản ghi trong PoC khoảng ~580 byte chuẩn
 tắc). Kiểm chứng là một lượt duyệt qua chuỗi, nên chi phí verify toàn bộ trail tăng tuyến
-tính theo độ dài trail — với các chuỗi sống lâu, hãy verify tăng dần từ checkpoint đã neo
+tính theo độ dài trail - với các chuỗi sống lâu, hãy verify tăng dần từ checkpoint đã neo
 gần nhất bằng consistency proof, thay vì verify lại từ genesis ở mỗi lần chạy.
 
 ---
@@ -246,13 +246,19 @@ gần nhất bằng consistency proof, thay vì verify lại từ genesis ở m�
    có gì phụ thuộc vào trail; mục tiêu là tìm ra các lỗ hổng redaction và sự biến động hình
    dạng payload khi một lần sót vẫn còn rẻ.
 2. **Verified.** Dựng miền verifier, ký quỹ A₀, chạy kiểm chứng theo lịch, và nối exit code
-   tới đúng nơi nhận (1 → SOC, 2 → quản lý phát hành).
+   tới đúng nơi nhận (1 -> SOC, 2 -> quản lý phát hành).
 3. **Anchored.** Bổ sung miền neo dưới một quyền quản trị khác. Chỉ từ thời điểm này kịch
    bản 5 và 6 mới trở nên phát hiện được.
 4. **Disclosed.** Diễn tập `export-proof` / `verify-proof` end-to-end cùng bộ phận kiểm
    toán trước khi cơ quan quản lý hỏi tới. Lần đầu thực hiện một tiết lộ chọn lọc không nên
    diễn ra khi đang chạy deadline.
 
+Về việc *cài gì và cài ở đâu*, thay vì bật theo thứ tự nào, xem
+[deploy-options.vi.md](deploy-options.vi.md) và
+[`deploy/README.vi.md`](../../deploy/README.vi.md): file thứ nhất giúp chọn giữa
+các phương án đóng gói và nêu rõ lớp lưu lượng duy nhất đi ra khỏi nơi triển
+khai, file thứ hai ánh xạ từng file dưới `deploy/` tới thẩm quyền nên sở hữu nó.
+
 Mỗi bước đều tự nó có ích, và mỗi bước thêm một khả năng phát hiện mà bước trước không có.
-Làm ngược thứ tự — neo trước khi redactor đáng tin — sẽ ghi nội dung chưa redact vào một
+Làm ngược thứ tự - neo trước khi redactor đáng tin - sẽ ghi nội dung chưa redact vào một
 chuỗi chỉ-ghi-thêm nằm ở miền mà bạn không dọn dẹp được.

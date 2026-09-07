@@ -111,7 +111,7 @@ v53"*。唯一能绕过它的办法，是一个把安全检查彻底关掉的环
 | 版本回滚优雅降级（不可验证 ≠ 被篡改，退出码 2 ≠ 1） | ✅ | ❌ 未知版本 = 报错 | ❌ |
 | 完备性单独上报：`dropped_writes`，`None` ≠ `0` | ✅ | ❌ 链完好被当作一切完好 | ❌ |
 | 并发追加防分叉，**每个后端**的机制都有文档，锁经过可证伪性测试 | ✅ | 不一定，通常假设单写入者 | ❌ |
-| 字节级 SPEC（计划在 v1 冻结）+ 黄金测试向量 → 可移植到 Go/Rust/TS | ✅ | ❌ 格式 = 代码怎么跑就怎么算 | ❌ |
+| 字节级 SPEC（计划在 v1 冻结）+ 黄金测试向量 -> 可移植到 Go/Rust/TS | ✅ | ❌ 格式 = 代码怎么跑就怎么算 | ❌ |
 | 零运行时依赖（S3/Postgres 客户端由调用方注入，永不 import） | ✅ | 常常拖入整套加密/序列化栈 | ✅ |
 | 先脱敏后哈希（密钥永不落盘，哈希承诺的是脱敏后的字节） | ✅ | 偶尔 | ❌ |
 | 内置外部锚定：RFC 3161 TSA、OpenTimestamps、witness，或自写 sink（`anchor_every=N`） | ✅ | ❌ | ❌ |
@@ -128,7 +128,7 @@ v53"*。唯一能绕过它的办法，是一个把安全检查彻底关掉的环
 
 ```mermaid
 flowchart LR
-    A["你的 Agent<br/>append(payload)"] --> R["Redactor<br/>密钥 → ***REDACTED***"]
+    A["你的 Agent<br/>append(payload)"] --> R["Redactor<br/>密钥 -> ***REDACTED***"]
     R --> C["规范化字节<br/>payload_hash = sha256"]
     C --> H["在后端锁内构建 EntryHeader<br/>(seq、prev_hash 取自链尾)"]
     H --> EH["entry_hash =<br/>sha256(framed header)"]
@@ -151,14 +151,14 @@ flowchart LR
 ```mermaid
 flowchart TD
     V["waxseal verify"] --> Q1{"seq 连续？"}
-    Q1 -- "否" --> X1["断链: seq_gap → exit 1"]
+    Q1 -- "否" --> X1["断链: seq_gap -> exit 1"]
     Q1 -- "是" --> Q2{"prev_hash 衔接？"}
-    Q2 -- "否" --> X2["断链: prev_hash_mismatch → exit 1"]
+    Q2 -- "否" --> X2["断链: prev_hash_mismatch -> exit 1"]
     Q2 -- "是" --> Q3{"指纹已知？"}
-    Q3 -- "否" --> U["按名不可验证 → exit 2<br/>不是篡改（回滚安全）"]
+    Q3 -- "否" --> U["按名不可验证 -> exit 2<br/>不是篡改（回滚安全）"]
     Q3 -- "是" --> Q4{"entry_hash 与 payload_hash 匹配？"}
-    Q4 -- "否" --> X3["断链 → exit 1"]
-    Q4 -- "是" --> OK["完好 → exit 0"]
+    Q4 -- "否" --> X3["断链 -> exit 1"]
+    Q4 -- "是" --> OK["完好 -> exit 0"]
 ```
 
 ## 安装
@@ -169,6 +169,25 @@ pip install waxseal
 
 已发布于 [PyPI](https://pypi.org/project/waxseal/)。从源码安装：
 `pip install git+https://github.com/cuongbphv/waxseal`
+
+另外四种方式，对应验证器真正需要运行的场景：
+
+```bash
+uv tool install waxseal            # 或：pipx install waxseal
+curl -fsSL https://raw.githubusercontent.com/cuongbphv/waxseal/main/deploy/install.sh | sh
+docker run --rm -v "$PWD:/data:ro" ghcr.io/cuongbphv/waxseal verify /data/trail.jsonl
+python3 waxseal-0.1.5.pyz verify trail.jsonl
+```
+
+安装脚本会先用发布附带的 `SHA256SUMS` 校验产物的 SHA-256，校验通过之前不移动、
+不执行任何文件；无法校验签名时会明确说出来。最后一行是每个发布附带的单文件
+zipapp：由于运行时依赖列表为空，一个文件加一个 `python3` 就是一个完整的验证
+器，这正是离网审阅所需要的。
+
+面向集群或单机部署，`deploy/` 提供运行时镜像、分属两个管理权限域的两个 Helm
+chart、systemd 单元和一个 compose overlay。请先读
+[deploy/README.md](deploy/README.md)：它说明每个部件属于哪个信任域，以及哪两
+个部件绝不能共用同一个权限域。
 
 ## 能力扩展（capability extras）
 
@@ -367,8 +386,14 @@ record_decision(log, DecisionRecord(
     outcome="approve",
     rationale="低于阈值，且为已有往来的交易对手",
     human_oversight=HumanOversight(mode="automated"),  # None = 未记录，不等于 automated
+    risk_tier="high",           # 提供者自己的风险分级；None = 未申报
+    classification_ref="RC-2026-014/v2",   # 指向分级档案的指针，绝不是档案内容
 ))
 ```
+
+`risk_tier` 按原样记录，绝不做解释：`"high"` 与 `"cao"` 是两条不同的申报，
+把它们合并等于替提供者重述一个本该由其自行作出的分级。`None` 表示未申报任何
+分级，报告会把这种情形与每一个分级分开计数，绝不呈现为最低的那一级。
 
 用 `iter_decisions` 读回决策——它按链序遍历 trail，逐条 yield `(entry, record)`。
 字节已无法解析为决策的行仍会被 yield（`record=None`），而不是被悄悄跳过；
@@ -381,7 +406,7 @@ for entry, record in iter_decisions(log, decision_type="transaction_approval"):
     if record is None:
         print(f"seq {entry.header.seq}: 无法解析 —— 请运行 `waxseal verify`")
     else:
-        print(f"seq {entry.header.seq}: {record.decision_id} → {record.outcome}")
+        print(f"seq {entry.header.seq}: {record.decision_id} -> {record.outcome}")
 ```
 
 审计方读一份报告，并且不需要拿到整个日志就能核验其中某一条决策：
@@ -391,6 +416,46 @@ waxseal report decisions.jsonl              # Markdown；--json 供 SIEM/GRC 使
 waxseal export-proof decisions.jsonl 3 > proof.json
 waxseal verify-proof proof.json             # 离线核验；不需要 trail
 ```
+
+### 事故与人工干预
+
+再增加两个证据族，对应监管者在决策日志之后会追问的两件事：系统出错时发生了
+什么，以及是谁介入的。
+
+```python
+from waxseal import IncidentRecord, InterventionRecord
+from waxseal.sources.incidents import record_incident
+from waxseal.sources.interventions import record_intervention
+
+record_incident(log, IncidentRecord(
+    incident_id="INC-2026-0007",
+    system_id="screening-agent",
+    detected_at="2026-09-01T07:10:00+00:00",
+    confirmed_at="2026-09-01T08:00:00+00:00",   # 报告时限从这一刻开始起算
+    severity="serious",
+    summary="更换数据源后评分发生漂移",  # 先脱敏，再参与哈希
+    report_ref=None,          # 此处没有提交记录 —— 绝不等于「未上报」
+))
+
+record_intervention(log, InterventionRecord(
+    intervention_id="IV-41",
+    system_id="screening-agent",
+    actor_ref="risk-queue-7",     # 化名，与 reviewer_ref 一致
+    action="halt",
+    decision_ref="DEC-1001",      # None = 并非针对某一条已记录决策的动作
+))
+```
+
+```bash
+waxseal incidents decisions.jsonl --report-window-h 72 --as-of 2026-09-05T08:00:00+00:00
+```
+
+这条命令只读取，不作判定。它的退出码是 0、2 和 3 —— 永远不会是 1 —— 因为其中
+涉及的每一个时间戳都是写入方自己声明的，而时间窗是运维人员输入的一个数字。
+读数 `no_report_recorded_past_window` 是关于这条 trail 的陈述，而不是「已错过
+时限」的结论：waxseal 没有通往任何主管机关的通道，无法看到报告是否已经提交。
+提交真的发生时，请用同一个 `incident_id` 追加一条新行并带上受理凭据；不修改
+任何内容，最新一行作为整条记录生效，行数保持可见，从而使重述历史仍可读。
 
 一个 proof bundle 就是一条 entry 加上它的 Merkle 路径，因此回答关于某一个主体的问题，
 不会泄露 trail 中其他所有决策。报告会把**没有执行**的检查打印为 *not checked*，
