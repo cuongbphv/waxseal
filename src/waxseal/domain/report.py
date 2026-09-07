@@ -35,6 +35,8 @@ from typing import Any, Final
 
 from waxseal.domain.decision import DECISION_PAYLOAD_TYPE, from_payload
 from waxseal.domain.header import Entry
+from waxseal.domain.incident import INCIDENT_PAYLOAD_TYPE, scan_incidents
+from waxseal.domain.intervention import INTERVENTION_PAYLOAD_TYPE, scan_interventions
 from waxseal.domain.separation import (
     SeparationTopology,
     counted_authorities,
@@ -70,6 +72,30 @@ SCOPE_LINE = (
     "scope: attests chain integrity of RECORDED entries only — not that an "
     "obligation was met, not that payload content is truthful, not that "
     "unrecorded events did not occur"
+)
+
+_RISK_TIER_NOTE = (
+    "tiers are the provider's own declaration (Law on AI No. 134/2025/QH15 "
+    "Điều 10(1)), counted verbatim and never normalised; "
+    "'risk_tier_unrecorded' is not a tier and is never the lowest one"
+)
+
+# The sentence that keeps a count of records from being read as a count of
+# events. A trail records what someone wrote on it; an incident nobody wrote
+# down leaves no row, exactly as a dropped write leaves no seq gap.
+_INCIDENT_NOTE = (
+    "null means this family was never scanned; 0 means it was scanned and "
+    "this trail records none, which is not evidence that none occurred; "
+    "'no_report_recorded' counts incidents whose latest row records no "
+    "submission reference — a fact about this trail, not about the authority's "
+    "channel, which this process cannot see"
+)
+
+_INTERVENTION_NOTE = (
+    "null means this family was never scanned; 0 means it was scanned and "
+    "this trail records none, which is not evidence that no intervention "
+    "happened. A supervision mechanism that was switched off writes nothing, "
+    "so no log witnesses its own absence"
 )
 
 
@@ -181,6 +207,25 @@ class AuditReport:
     # operates what (conformance.md gap G1).
     separation_degree: int | None = None
     counted_authorities: tuple[tuple[str, int], ...] | None = None
+    # E3. The provider's own risk classification, counted verbatim, and the
+    # count of records that declared none — apart from every tier for the
+    # same reason `oversight_unrecorded` is apart from every mode: an
+    # institution may legitimately name a tier "unrecorded", and "nobody
+    # declared a tier for this decision" must never read as one.
+    by_risk_tier: tuple[tuple[str, int], ...] = ()
+    risk_tier_unrecorded: int = 0
+    # `None` means the family was never scanned, which a report read back from
+    # an older JSON is, and which is NOT the measured zero a scanned-and-empty
+    # trail reports. `build_report` always scans, so it never produces `None`;
+    # the renderer still has to render it honestly, because the type admits it
+    # and a caller constructing the report directly can hold it (rule 5).
+    incidents_total: int | None = None
+    incidents_no_report_recorded: int | None = None
+    by_incident_severity: tuple[tuple[str, int], ...] = ()
+    incidents_malformed: tuple[int, ...] = ()
+    interventions_total: int | None = None
+    by_intervention_action: tuple[tuple[str, int], ...] = ()
+    interventions_malformed: tuple[int, ...] = ()
 
     def to_json(self) -> str:
         return json.dumps(
@@ -215,8 +260,24 @@ class AuditReport:
                     "by_decision_type": dict(self.by_decision_type),
                     "by_oversight_mode": dict(self.by_oversight_mode),
                     "oversight_unrecorded": self.oversight_unrecorded,
+                    "by_risk_tier": dict(self.by_risk_tier),
+                    "risk_tier_unrecorded": self.risk_tier_unrecorded,
+                    "risk_tier_note": _RISK_TIER_NOTE,
                     "unparseable_seqs": list(self.decisions_malformed),
                     "unparseable_note": _UNPARSEABLE_NOTE,
+                },
+                "incidents": {
+                    "total": self.incidents_total,
+                    "no_report_recorded": self.incidents_no_report_recorded,
+                    "by_severity": dict(self.by_incident_severity),
+                    "unparseable_seqs": list(self.incidents_malformed),
+                    "note": _INCIDENT_NOTE,
+                },
+                "interventions": {
+                    "total": self.interventions_total,
+                    "by_action": dict(self.by_intervention_action),
+                    "unparseable_seqs": list(self.interventions_malformed),
+                    "note": _INTERVENTION_NOTE,
                 },
                 "anchors": _summary_obj(self.anchors),
                 "attestations": _summary_obj(self.attestations),
@@ -290,11 +351,31 @@ class AuditReport:
                     "This is not the same claim as automated processing — it "
                     "means the record is silent on whether a person was involved."
                 )
+            lines += _count_table("Declared risk tier", self.by_risk_tier)
+            if self.risk_tier_unrecorded:
+                lines.append(
+                    f"- Risk tier **not declared**: {self.risk_tier_unrecorded} "
+                    "decision(s). The tier is the provider's own classification "
+                    "under the Law on AI Điều 10(1); a record silent on it is "
+                    "not a low-risk record."
+                )
             if self.decisions_malformed:
                 seqs = ", ".join(str(s) for s in self.decisions_malformed)
                 lines.append(
                     f"- Unparseable decision payloads at seq {seqs} — {_UNPARSEABLE_NOTE}."
                 )
+
+        lines += _incident_lines(
+            self.incidents_total,
+            self.incidents_no_report_recorded,
+            self.by_incident_severity,
+            self.incidents_malformed,
+        )
+        lines += _intervention_lines(
+            self.interventions_total,
+            self.by_intervention_action,
+            self.interventions_malformed,
+        )
 
         lines += ["", "## Sidecar checks", ""]
         lines.append(f"- Anchors: {_summary_text(self.anchors)}")
@@ -341,10 +422,14 @@ def build_report(
     by_fingerprint: Counter[str] = Counter()
     by_decision_type: Counter[str] = Counter()
     by_oversight: Counter[str] = Counter()
+    by_risk_tier: Counter[str] = Counter()
     malformed: list[int] = []
     oversight_unrecorded = 0
+    risk_tier_unrecorded = 0
     decisions_total = 0
     total = 0
+    incident_rows: list[Entry] = []
+    intervention_rows: list[Entry] = []
     first_ts: str | None = None
     last_ts: str | None = None
 
@@ -356,6 +441,12 @@ def build_report(
         if first_ts is None:
             first_ts = header.ts
         last_ts = header.ts
+        if header.payload_type == INCIDENT_PAYLOAD_TYPE:
+            incident_rows.append(entry)
+            continue
+        if header.payload_type == INTERVENTION_PAYLOAD_TYPE:
+            intervention_rows.append(entry)
+            continue
         if header.payload_type != DECISION_PAYLOAD_TYPE:
             continue
         record = _parse_decision(entry)
@@ -368,6 +459,26 @@ def build_report(
             oversight_unrecorded += 1
         else:
             by_oversight[record.human_oversight.mode] += 1
+        if record.risk_tier is None:
+            risk_tier_unrecorded += 1
+        else:
+            by_risk_tier[record.risk_tier] += 1
+
+    # `entries` is an Iterable consumed exactly once above, so the two
+    # evidence families are folded from the rows collected during that same
+    # pass rather than by re-reading the trail: a second pass over a consumed
+    # iterator would silently report zero incidents on a trail full of them.
+    incident_scan = scan_incidents(incident_rows)
+    intervention_scan = scan_interventions(intervention_rows)
+    by_severity: Counter[str] = Counter()
+    no_report_recorded = 0
+    for view in incident_scan.views:
+        by_severity[view.latest.severity] += 1
+        if view.latest.report_ref is None:
+            no_report_recorded += 1
+    by_action: Counter[str] = Counter()
+    for _seq, intervention in intervention_scan.records:
+        by_action[intervention.action] += 1
 
     return AuditReport(
         ok=verify_result.ok,
@@ -394,6 +505,15 @@ def build_report(
         receipts=receipts,
         separation_degree=separation_degree(declared_topology),
         counted_authorities=counted_authorities(declared_topology),
+        by_risk_tier=_ranked(by_risk_tier),
+        risk_tier_unrecorded=risk_tier_unrecorded,
+        incidents_total=len(incident_scan.views),
+        incidents_no_report_recorded=no_report_recorded,
+        by_incident_severity=_ranked(by_severity),
+        incidents_malformed=incident_scan.unreadable,
+        interventions_total=len(intervention_scan.records),
+        by_intervention_action=_ranked(by_action),
+        interventions_malformed=intervention_scan.unreadable,
     )
 
 
@@ -424,6 +544,71 @@ def _count_table(
     for name, count in counts:
         shown = f"{name[:truncate]}…" if truncate and len(name) > truncate else name
         lines.append(f"| `{shown}` | {count} |")
+    return lines
+
+
+def _incident_lines(
+    total: int | None,
+    no_report_recorded: int | None,
+    by_severity: tuple[tuple[str, int], ...],
+    malformed: tuple[int, ...],
+) -> list[str]:
+    """The incidents section, rendered even when the trail records none.
+
+    Unlike the decisions section, which is omitted when empty, this one is
+    always present. An absent section cannot be told apart from "none
+    recorded" and "never scanned", and those are the two values the third
+    state exists to separate — leaving the reader to infer which is exactly
+    the collapse CLAUDE.md's "Named principle" is about.
+    """
+    lines = ["", "## Incidents", ""]
+    if total is None:
+        lines.append(
+            "- Incident records: **not scanned**. The absence of a scan is "
+            "not a count of zero."
+        )
+        return lines
+    lines.append(
+        f"- Incident records on this trail: **{total}** — a count of RECORDED "
+        "incidents, not evidence that no others occurred."
+    )
+    lines += _count_table("Declared severity", by_severity)
+    if no_report_recorded:
+        lines.append(
+            f"- **No submission recorded** for {no_report_recorded} incident(s): "
+            "the latest row carries no submission reference. That is a fact "
+            "about this trail, not about the authority's channel, which this "
+            "process cannot see. For the reporting-window reading, run "
+            "`waxseal incidents`."
+        )
+    if malformed:
+        seqs = ", ".join(str(s) for s in malformed)
+        lines.append(f"- Unparseable incident payloads at seq {seqs} — {_UNPARSEABLE_NOTE}.")
+    return lines
+
+
+def _intervention_lines(
+    total: int | None,
+    by_action: tuple[tuple[str, int], ...],
+    malformed: tuple[int, ...],
+) -> list[str]:
+    """The human-intervention section, always rendered, for the same reason."""
+    lines = ["", "## Human interventions", ""]
+    if total is None:
+        lines.append(
+            "- Intervention records: **not scanned**. The absence of a scan "
+            "is not a count of zero."
+        )
+        return lines
+    lines.append(
+        f"- Intervention records on this trail: **{total}** — a count of "
+        "RECORDED interventions. A supervision mechanism switched off writes "
+        "nothing, so no log witnesses its own absence."
+    )
+    lines += _count_table("Declared action", by_action)
+    if malformed:
+        seqs = ", ".join(str(s) for s in malformed)
+        lines.append(f"- Unparseable intervention payloads at seq {seqs} — {_UNPARSEABLE_NOTE}.")
     return lines
 
 
