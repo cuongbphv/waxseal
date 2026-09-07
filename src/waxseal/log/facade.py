@@ -8,7 +8,6 @@ because chain integrity ≠ trail completeness (CLAUDE.md rule 5).
 
 from __future__ import annotations
 
-import os
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import replace
@@ -23,16 +22,17 @@ from waxseal.domain.fingerprint import fingerprint
 from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash
 from waxseal.domain.header import Entry, EntryHeader
 from waxseal.domain.registry import VersionRegistry
-from waxseal.domain.sealing import (
-    FS_HMAC_AGG_SCHEME,
-    SEAL_FRAME_PREFIX,
-    AttestResult,
-    aggregate_commit,
-    verify_aggregate,
-    verify_anchored_aggregate,
-    verify_seals,
-)
+from waxseal.domain.sealing import AttestResult
 from waxseal.domain.verify import VerifyResult, verify_chain
+from waxseal.log._anchoring import (
+    aggregate_binding,
+    maybe_record_anchor_sink,
+)
+from waxseal.log._anchoring import (
+    verify_anchored_aggregates as check_anchored_aggregates,
+)
+from waxseal.log._attestation import verify_sidecar
+from waxseal.log._factory import open_backend
 from waxseal.ports.aggregate import AggregateSource
 from waxseal.ports.drops import DropRecorder
 from waxseal.ports.redact import Redactor
@@ -41,8 +41,6 @@ from waxseal.ports.sign import Verifier
 # DSSE rule (SPEC section 1): a generic JSON type defeats the point of
 # payload_type: it names neither the schema nor the producer.
 _REJECTED_PAYLOAD_TYPES = frozenset({"application/json", "text/json"})
-
-_SQLITE_SUFFIXES = frozenset({".db", ".sqlite", ".sqlite3"})
 
 
 class AttestationFailure(RuntimeError):
@@ -87,28 +85,7 @@ class AuditLog:
         # one answer. An attestor is an AggregateSource when it keeps an
         # accumulator; a key-less caller supplies a read-only one instead.
         self._aggregate_source: Any = attestor if aggregate_source is None else aggregate_source
-        if anchor_sink is not None and trail_path is not None:
-            # The README-advertised pattern (open + external sink +
-            # anchor_every) contacted the TSA and DISCARDED every returned
-            # receipt. Only the CLI wrapped sinks in RecordingAnchorSink, so
-            # library callers paid for evidence that landed nowhere. Wrap here,
-            # at the one seam open() and with_anchor_sink() both pass through.
-            # Sinks that already write the sidecar (RecordingAnchorSink,
-            # FileAnchorSink, and MultiAnchorSink (waxseal-4yk, which fans a
-            # checkpoint out to several RecordingAnchorSinks of its own) must
-            # not be wrapped again: a double-filed checkpoint would overstate
-            # anchor coverage. Path-less backends (memory, remote) have no
-            # sidecar location and keep the sink as given. Deferred import,
-            # same as verify_anchored_aggregates.
-            from waxseal.adapters.anchors import (
-                FileAnchorSink,
-                MultiAnchorSink,
-                RecordingAnchorSink,
-            )
-
-            if not isinstance(anchor_sink, (FileAnchorSink, RecordingAnchorSink, MultiAnchorSink)):
-                anchor_sink = RecordingAnchorSink(trail_path, anchor_sink)
-        self._anchor_sink = anchor_sink
+        self._anchor_sink = maybe_record_anchor_sink(anchor_sink, trail_path)
         self._anchor_every = anchor_every
         self._drop_recorder = drop_recorder
         self._dropped = 0
@@ -138,81 +115,23 @@ class AuditLog:
         timeout: float = 10.0,
         receipts_trail: Path | str | None = None,
     ) -> AuditLog:
-        if isinstance(path, str) and path.startswith(("http://", "https://")):
-            # MUST come before Path(path): Path() collapses "//" and drops
-            # the scheme, so checking suffix on a mangled URL would never
-            # even reach a backend choice, the same class of bug M0's suffix
-            # dispatch below already guards against for local paths.
-            if record_drops:
-                raise ValueError(
-                    "record_drops requires a local trail path (a .drops sidecar "
-                    "needs somewhere to live) — not supported for a remote URL target"
-                )
-            from waxseal.adapters.remote import RemoteBackend
-
-            remote_backend: Any = RemoteBackend(
-                path,
-                api_key=os.environ.get("WAXSEAL_API_KEY"),
-                chain_id=chain_id,
-                timeout=timeout,
-                # SPEC.md section 19: where the server's per-append
-                # acknowledgment is filed. Threaded from here because
-                # RemoteBackend has accepted it since 63dbe2d and no documented
-                # entry point passed it, which made the sidecar reachable only
-                # by hand-constructing the backend -- built and unreachable is
-                # not shipped. `None` stays "not recorded", never an error: a
-                # receipt is corroboration, and the chain lives server-side
-                # either way.
-                receipts_trail=receipts_trail,
-            )
-            return cls(
-                remote_backend,
-                redactor=redactor,
-                now_fn=now_fn,
-                registry=registry,
-                attestor=attestor,
-                anchor_sink=anchor_sink,
-                anchor_every=anchor_every,
-                drop_recorder=None,
-            )
-        if receipts_trail is not None:
-            # The mirror image of the record_drops refusal above. A receipt is
-            # a SERVER's acknowledgment that it accepted an append; a local
-            # backend issues none, so accepting the argument here would name a
-            # sidecar location nothing would ever write to -- an operator
-            # reading "not recorded" could not tell that from a server that
-            # never issued one.
-            raise ValueError(
-                "receipts_trail requires a remote (http/https) trail target: a "
-                "receipt is the server's own acknowledgment of an append, and a "
-                "local backend issues none"
-            )
-        p = Path(path).expanduser()
-        if p.suffix == ".jsonl":
-            backend: Any = JSONLBackend(p)
-        elif p.suffix in _SQLITE_SUFFIXES:
-            from waxseal.adapters.sqlite import SQLiteBackend
-
-            backend = SQLiteBackend(p)
-        else:
-            raise ValueError(
-                f"no backend for {p.suffix!r}: use .jsonl or one of {sorted(_SQLITE_SUFFIXES)}"
-            )
-        drop_recorder = None
-        if record_drops:
-            from waxseal.adapters.drops import FileDropRecorder
-
-            drop_recorder = FileDropRecorder(p)
+        opened = open_backend(
+            path,
+            record_drops=record_drops,
+            chain_id=chain_id,
+            timeout=timeout,
+            receipts_trail=receipts_trail,
+        )
         return cls(
-            backend,
+            opened.backend,
             redactor=redactor,
             now_fn=now_fn,
             registry=registry,
             attestor=attestor,
             anchor_sink=anchor_sink,
             anchor_every=anchor_every,
-            drop_recorder=drop_recorder,
-            trail_path=p,
+            drop_recorder=opened.drop_recorder,
+            trail_path=opened.trail_path,
         )
 
     def append(self, *, payload: dict[str, Any] | bytes, payload_type: str) -> Entry:
@@ -288,156 +207,13 @@ class AuditLog:
         handle are reported unverifiable-by-name, never as tampering."""
         if self._attestor is None:
             raise ValueError("this log was opened without an attestor")
-        try:
-            attestations = list(self._attestor.attestations())
-        except (ValueError, KeyError, TypeError):
-            # The sidecar is attacker-writable by threat model. Malformed
-            # bytes are a verdict, never an exception, since crashing the verifier
-            # on attacker-supplied input would deny the audit (same fail-closed
-            # rule as anchoring.verify_membership).
-            return AttestResult(
-                ok=False,
-                checked=0,
-                broken_seq=None,
-                reason="malformed_attestation",
-                unverifiable=(),
-            )
-
-        # journald CVE-2023-31437 lesson: what the reader consumes (the trail)
-        # and what is authenticated (the sidecar) must be cross-checked. The
-        # expected hash is RECOMPUTED from the trail header, so the stored
-        # entry_hash field is attacker-writable.
-        entries = list(self._backend.entries())
-        for position, att in enumerate(attestations):
-            if position >= len(entries):
-                mismatch: int | None = att.seq
-            else:
-                header = entries[position].header
-                # Dispatch by fingerprint (registry.encoder_for), exactly
-                # like verify_chain (domain/verify.py) and verify_proof_bundle
-                # (domain/export.py): recompute a row only under the encoding
-                # its own hash_version names, never under whatever this build
-                # happens to implement.
-                encoder = self._registry.encoder_for(header.hash_version)
-                expected = (
-                    compute_entry_hash(header, frame=encoder)
-                    if encoder is not None
-                    else entries[position].entry_hash
-                )
-                mismatch = att.seq if att.entry_hash != expected else None
-            if mismatch is not None:
-                return AttestResult(
-                    ok=False,
-                    checked=0,
-                    broken_seq=mismatch,
-                    reason="attest_trail_mismatch",
-                    unverifiable=(),
-                )
-
-        if len(attestations) < len(entries):
-            # Coverage, not integrity: rows past the sidecar's end carry no
-            # seal at all. Without this check a truncated (or failure-starved)
-            # sidecar verifies "ok" over whatever remains. The fs-hmac
-            # continuity check cannot see it when the keyfile epoch still
-            # matches the attestation count, and signer mode has no keyfile.
-            return AttestResult(
-                ok=False,
-                checked=0,
-                broken_seq=len(attestations),
-                reason="attestation_gap",
-                unverifiable=(),
-            )
-
-        if initial_key is not None and hasattr(self._attestor, "check_continuity"):
-            # Ma-Tsudik truncation attack: consistent tail-chopping of trail +
-            # sidecar passes both checks above; the one-way keyfile cannot lie.
-            try:
-                reason = self._attestor.check_continuity(initial_key, len(attestations))
-            except (ValueError, KeyError, TypeError):
-                # Keyfile bytes are on the same attacker-writable disk: a
-                # mangled keyfile must surface as a verdict, not a crash.
-                reason = "malformed_keyfile"
-            if reason is not None:
-                return AttestResult(
-                    ok=False,
-                    checked=0,
-                    broken_seq=None,
-                    reason=reason,
-                    unverifiable=(),
-                )
-
-        if verifier is not None:
-            checked = 0
-            unverifiable: list[int] = []
-            scheme = f"sig-{verifier.algorithm}-v1"
-            for att in attestations:
-                if att.scheme != scheme:
-                    unverifiable.append(att.seq)
-                    continue
-                try:
-                    frame = SEAL_FRAME_PREFIX + att.entry_hash.encode("ascii")
-                    signature = bytes.fromhex(att.value)
-                except (ValueError, UnicodeEncodeError):
-                    return AttestResult(
-                        ok=False,
-                        checked=checked,
-                        broken_seq=att.seq,
-                        reason="malformed_attestation",
-                        unverifiable=tuple(unverifiable),
-                    )
-                if not verifier.verify(frame, signature):
-                    return AttestResult(
-                        ok=False,
-                        checked=checked,
-                        broken_seq=att.seq,
-                        reason="signature_invalid",
-                        unverifiable=tuple(unverifiable),
-                    )
-                checked += 1
-            return AttestResult(
-                ok=True,
-                checked=checked,
-                broken_seq=None,
-                reason=None,
-                unverifiable=tuple(unverifiable),
-            )
-        if initial_key is None:
-            raise ValueError("provide initial_key (fs-hmac) or verifier (signatures)")
-        result = verify_seals(attestations, initial_key)
-        if not result.ok:
-            return result
-        if hasattr(self._attestor, "read_aggregate"):
-            # FssAgg: an independent, ADDITIONAL gate checked only once the
-            # per-entry seals themselves are already intact. It exists to
-            # catch what a per-position check structurally cannot (rows
-            # missing entirely), not to duplicate seal_mismatch's more
-            # specific broken_seq. A trail rewritten consistently down to
-            # the .sealagg sidecar itself (an attacker who controls every
-            # file) is the same honest limit anchoring already documents.
-            try:
-                agg_data = self._attestor.read_aggregate()
-            except (ValueError, KeyError, TypeError):
-                return AttestResult(
-                    ok=False, checked=result.checked, broken_seq=None,
-                    reason="malformed_aggregate", unverifiable=result.unverifiable,
-                )
-            has_agg_row = any(att.scheme == FS_HMAC_AGG_SCHEME for att in attestations)
-            if has_agg_row and agg_data is None:
-                return AttestResult(
-                    ok=False, checked=result.checked, broken_seq=None,
-                    reason="aggregate_missing", unverifiable=result.unverifiable,
-                )
-            if agg_data is not None:
-                agg_start, epoch, agg = agg_data
-                reason = verify_aggregate(
-                    attestations, initial_key, agg_start=agg_start, epoch=epoch, agg=agg
-                )
-                if reason is not None:
-                    return AttestResult(
-                        ok=False, checked=result.checked, broken_seq=None,
-                        reason=reason, unverifiable=result.unverifiable,
-                    )
-        return result
+        return verify_sidecar(
+            self._attestor,
+            self._backend,
+            self._registry,
+            initial_key=initial_key,
+            verifier=verifier,
+        )
 
     def try_append(self, *, payload: dict[str, Any] | bytes, payload_type: str) -> bool:
         """Best-effort append: never raises. A lost write increments
@@ -561,41 +337,7 @@ class AuditLog:
         return cp
 
     def _aggregate_binding(self) -> tuple[str | None, int | None]:
-        """The forward-secure aggregate commitment to include in a checkpoint.
-
-        ``(None, None)`` whenever there is no accumulator to commit to: no
-        aggregate source at all (the default, since an attestor only becomes
-        one by keeping an accumulator), a source that exposes no
-        ``read_aggregate``, or one whose ``read_aggregate`` returns None
-        because nothing has aggregated yet. A checkpoint must not claim a
-        binding that nothing can be checked against, and most trails have none.
-
-        Only the commitment leaves this method. The accumulator itself is
-        never published: an attacker who can copy an intermediate value can
-        restore it over a truncated trail, which is the hole the aggregate
-        scheme exists to close.
-        """
-        read_aggregate = getattr(self._aggregate_source, "read_aggregate", None)
-        if read_aggregate is None:
-            return (None, None)
-        try:
-            state = read_aggregate()
-        except (ValueError, KeyError, TypeError) as e:
-            # `.sealagg` is attacker-writable by the same threat model as the
-            # keyfile (attest.py's module docstring). verify_attestations
-            # already turns this into "malformed_aggregate"; anchor() is a
-            # write path so it can only refuse, but CLAUDE.md rule 6 still
-            # requires the refusal be labelled, and a bare JSONDecodeError three
-            # frames down is indistinguishable from an unrelated bug, unlike
-            # attest.py's own epoch-desync RuntimeError.
-            raise RuntimeError(
-                "'.sealagg' sidecar is malformed; cannot bind an aggregate "
-                "commitment for this anchor — operator decision required"
-            ) from e
-        if state is None:
-            return (None, None)
-        _, epoch, agg = state
-        return (aggregate_commit(epoch, agg), epoch)
+        return aggregate_binding(self._aggregate_source)
 
     def verify_anchored_aggregates(self, *, initial_key: bytes) -> AttestResult:
         """Check every anchored aggregate commitment against the attestations.
@@ -614,67 +356,10 @@ class AuditLog:
         """
         if self._attestor is None:
             raise ValueError("verify_anchored_aggregates needs an attestor")
-        read_aggregate = getattr(self._aggregate_source, "read_aggregate", None)
-        agg_start = 0
-        if read_aggregate is not None:
-            state = read_aggregate()
-            if state is not None:
-                agg_start = state[0]
-
-        from waxseal.adapters.anchors import read_anchor_records
-
-        try:
-            sidecar = read_anchor_records(self._attestor.trail_path)
-        except (ValueError, KeyError, TypeError):
-            # Attacker-writable sidecar: malformed bytes are a verdict, never
-            # a crash that denies the audit (same contract as verify_seals).
-            return AttestResult(
-                ok=False,
-                checked=0,
-                broken_seq=None,
-                reason="malformed_anchor",
-                unverifiable=(),
-            )
-
-        if not sidecar.records and not sidecar.unreadable_versions:
-            return AttestResult(
-                ok=True, checked=0, broken_seq=None, reason="no_anchors_recorded", unverifiable=()
-            )
-
-        attestations = list(self._attestor.attestations())
-        checked = 0
-        unverifiable: list[int] = []
-        for record in sidecar.records:
-            cp = record.checkpoint
-            if cp.agg_commit is None or cp.agg_epoch is None:
-                unverifiable.append(cp.seq)
-                continue
-            reason = verify_anchored_aggregate(
-                attestations,
-                initial_key,
-                agg_start=agg_start,
-                anchored_epoch=cp.agg_epoch,
-                anchored_commit=cp.agg_commit,
-            )
-            if reason is not None:
-                return AttestResult(
-                    ok=False,
-                    checked=checked,
-                    broken_seq=cp.seq,
-                    reason=reason,
-                    unverifiable=tuple(unverifiable),
-                )
-            checked += 1
-        # A record in a format this build cannot read is coverage it does not
-        # have, and saying so is the whole of rule 6. `verify --anchors` names
-        # it with this same string; two paths reading one sidecar must not
-        # come back with two different accounts of it.
-        return AttestResult(
-            ok=True,
-            checked=checked,
-            broken_seq=None,
-            reason="unreadable_record_version" if sidecar.unreadable_versions else None,
-            unverifiable=tuple(unverifiable),
+        return check_anchored_aggregates(
+            self._attestor,
+            self._aggregate_source,
+            initial_key=initial_key,
         )
 
     def verify(self, *, measure_drops: bool = True) -> VerifyResult:
