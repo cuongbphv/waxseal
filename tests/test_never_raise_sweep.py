@@ -70,7 +70,7 @@ import json
 import pkgutil
 import re
 import tempfile
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from hypothesis import HealthCheck, given, settings
@@ -98,6 +98,17 @@ from waxseal.domain.export import (
 from waxseal.domain.fingerprint import DESCRIPTOR_PREFIX, fingerprint
 from waxseal.domain.handoff import HandoffBinding, binding_holds
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
+from waxseal.domain.incident import (
+    INCIDENT_PAYLOAD_TYPE,
+    IncidentRecord,
+    IncidentView,
+    scan_incidents,
+    window_status,
+)
+from waxseal.domain.intervention import (
+    INTERVENTION_PAYLOAD_TYPE,
+    scan_interventions,
+)
 from waxseal.domain.ots import decode_receipt as ots_decode_receipt
 from waxseal.domain.pinning import (
     PinState,
@@ -195,6 +206,9 @@ FUZZED_ENTRY_POINTS: frozenset[str] = frozenset(
         "waxseal.domain.export.bundle_from_json",
         "waxseal.domain.export.verify_proof_bundle",
         "waxseal.domain.handoff.binding_holds",
+        "waxseal.domain.incident.scan_incidents",
+        "waxseal.domain.incident.window_status",
+        "waxseal.domain.intervention.scan_interventions",
         "waxseal.domain.ots.decode_receipt",
         "waxseal.domain.pinning.anchor_policy_downgrade",
         "waxseal.domain.pinning.anchor_staleness",
@@ -982,3 +996,115 @@ class TestDecodeDescriptorNeverRaises:
     )
     def test_never_raises(self, raw: bytes) -> None:
         decode_descriptor(raw)
+
+
+# --------------------------------------------------------------------------
+# domain/incident.py + domain/intervention.py -- two evidence payload
+# families whose bytes come off the trail, plus the window reading over one
+# of them. E2a's whole design rests on the reader, not the writer, being the
+# place that parses a caller-asserted timestamp (a writer that parsed would
+# turn a newer timestamp shape into "a bad row" -- beads v1.2.2), so the
+# reader is the surface a hostile timestamp reaches.
+# --------------------------------------------------------------------------
+
+_EVIDENCE_JSON = st.recursive(
+    _JSON_LEAF,
+    lambda children: st.one_of(
+        st.lists(children, max_size=3),
+        st.dictionaries(st.text(max_size=12), children, max_size=4),
+    ),
+    max_leaves=6,
+)
+
+
+def _hostile_family_entry(payload_type: str) -> st.SearchStrategy[Entry]:
+    """An entry that sometimes claims the family's payload type and carries
+    payload bytes ranging from valid-shaped JSON to raw binary to nothing."""
+    return st.builds(
+        Entry,
+        header=st.builds(
+            EntryHeader,
+            seq=_HOSTILE_INT,
+            ts=_HOSTILE_TEXT,
+            hash_version=_HEXLIKE,
+            payload_type=st.one_of(st.just(payload_type), _HOSTILE_TEXT),
+            payload_hash=_HEXLIKE,
+            prev_hash=_HEXLIKE,
+        ),
+        entry_hash=_HEXLIKE,
+        payload=st.one_of(
+            st.none(),
+            _HOSTILE_BYTES,
+            st.builds(
+                lambda obj: json.dumps(obj).encode(),
+                st.dictionaries(st.text(max_size=12), _EVIDENCE_JSON, max_size=6),
+            ),
+        ),
+    )
+
+
+class TestScanIncidentsNeverRaises:
+    @_FUZZ_SETTINGS
+    @given(entries=st.lists(_hostile_family_entry(INCIDENT_PAYLOAD_TYPE), max_size=6))
+    def test_never_raises(self, entries: list[Entry]) -> None:
+        scan_incidents(entries)
+
+
+class TestScanInterventionsNeverRaises:
+    @_FUZZ_SETTINGS
+    @given(entries=st.lists(_hostile_family_entry(INTERVENTION_PAYLOAD_TYPE), max_size=6))
+    def test_never_raises(self, entries: list[Entry]) -> None:
+        scan_interventions(entries)
+
+
+class TestWindowStatusNeverRaises:
+    """Both timestamps window_status reads are attacker-writable strings, and
+    the naive/aware distinction is the one that raises in Python if compared
+    rather than checked -- so `now` is fuzzed offset-naive as well as aware."""
+
+    @staticmethod
+    def _hostile_view() -> st.SearchStrategy[IncidentView]:
+        required = st.text(min_size=1, max_size=20)
+        timestampish = st.one_of(
+            st.none(),
+            _HOSTILE_TEXT,
+            st.just("2026-09-01T08:00:00+00:00"),
+            st.just("2026-09-01T08:00:00Z"),
+            st.just("2026-09-01T08:00:00"),
+        )
+        return st.builds(
+            IncidentView,
+            incident_id=required,
+            first_seq=_HOSTILE_INT,
+            latest_seq=_HOSTILE_INT,
+            rows=_HOSTILE_INT,
+            latest=st.builds(
+                IncidentRecord,
+                incident_id=required,
+                system_id=required,
+                detected_at=required,
+                severity=required,
+                confirmed_at=timestampish,
+                summary=st.one_of(st.none(), _HOSTILE_TEXT),
+                consequence_kinds=st.lists(required, max_size=3).map(tuple),
+                operating_status=st.one_of(st.none(), _HOSTILE_TEXT),
+                report_ref=st.one_of(st.none(), _HOSTILE_TEXT),
+                reported_at=timestampish,
+                trace_id=st.one_of(st.none(), _HOSTILE_TEXT),
+            ),
+        )
+
+    @_FUZZ_SETTINGS
+    @given(
+        view=_hostile_view(),
+        window=st.timedeltas(min_value=timedelta(0), max_value=timedelta(days=400)),
+        now=st.one_of(
+            st.datetimes(),
+            st.datetimes(timezones=st.just(UTC)),
+            st.datetimes(timezones=st.just(timezone(timedelta(hours=7)))),
+        ),
+    )
+    def test_never_raises(
+        self, view: IncidentView, window: timedelta, now: datetime
+    ) -> None:
+        window_status(view, window=window, now=now)
