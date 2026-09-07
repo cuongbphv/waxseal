@@ -20,6 +20,8 @@ from waxseal.domain.export import (
 )
 from waxseal.domain.fingerprint import fingerprint, fingerprint_for
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
+from waxseal.domain.incident import IncidentRecord
+from waxseal.domain.intervention import InterventionRecord
 from waxseal.domain.registry import VersionRegistry
 from waxseal.domain.segments import (
     SegmentRead,
@@ -43,6 +45,8 @@ __all__ = [
     "Entry",
     "EntryHeader",
     "HumanOversight",
+    "IncidentRecord",
+    "InterventionRecord",
     "ModelRef",
     "ProofBundle",
     "SegmentRead",

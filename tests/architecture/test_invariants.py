@@ -161,6 +161,28 @@ class TestPublicApiFrozen:
             # actually needs them here.
             "DecisionRecord",
             "HumanOversight",
+            # 0.1.6. Two evidence-record schemas join DecisionRecord under
+            # the rule this set already follows: a domain schema type an
+            # integrating system writes against is public; the source helper
+            # that appends it is not. So `IncidentRecord` and
+            # `InterventionRecord` are here while `record_incident`,
+            # `record_intervention` and both `iter_*` are not, matching
+            # `record_decision`.
+            #
+            # They exist because a serious-incident record and a
+            # human-intervention record are asked for by name: Decree
+            # 142/2026/ND-CP requires an operator to retain operation logs
+            # AND intervention decisions for inspection, and its own form
+            # asks what measure keeps the log intact. The chain answers that
+            # last question; these two types are what it answers it about.
+            #
+            # Deliberately NOT here: scan_incidents, window_status,
+            # render_incidents, scan_interventions and both PAYLOAD_TYPE
+            # constants. They are readers and renderers for the CLI, on the
+            # same footing as `scan_tickets` and `build_report`, and a frozen
+            # surface is easy to widen later and breaking to narrow.
+            "IncidentRecord",
+            "InterventionRecord",
             "ModelRef",
             "BundleResult",
             "ProofBundle",
