@@ -192,3 +192,74 @@ class TestRedactText:
         assert RegexRedactor().redact_text("nothing secret here") == "nothing secret here"
 
 
+class TestProviderBatches:
+    """Structured-prefix families (plan 3c). Each family: one positive and
+    one near-miss that must not eat an identifier. Literals are split so
+    GitHub push protection cannot treat the fixture as a live secret."""
+
+    def _redact(self, text: str) -> str:
+        return str(RegexRedactor().redact({"cmd": text}))
+
+    def test_stripe_live_key_is_redacted_and_sk_hyphen_still_matches(self) -> None:
+        live = "sk_live_" + "a" * 24
+        assert live not in self._redact(f"key={live}")
+        # The existing sk- family must keep matching Anthropic-style keys.
+        ant = "sk-" + "ant-api03-" + "C" * 20
+        assert ant not in self._redact(f"export {ant}")
+
+    def test_stripe_near_miss_identifier_is_not_eaten(self) -> None:
+        payload = {"id": "task-sk_live_notakey"}
+        assert RegexRedactor().redact(payload) == payload
+
+    def test_huggingface_token_is_redacted(self) -> None:
+        tok = "hf_" + "H" * 34
+        assert tok not in self._redact(f"token={tok}")
+        assert RegexRedactor().redact({"id": "hf_short"}) == {"id": "hf_short"}
+
+    def test_slack_app_and_webhook_are_redacted(self) -> None:
+        xapp = "xapp-" + "1-A000-B000-abcdef"
+        hook = "https://hooks.slack.com/services/T000/B000/" + "xxx"
+        out = self._redact(f"{xapp} {hook}")
+        assert xapp not in out
+        assert "hooks.slack.com/services/T000" not in out
+        assert RegexRedactor().redact({"id": "xapp_config"}) == {"id": "xapp_config"}
+
+    def test_gitlab_extra_prefixes_are_redacted(self) -> None:
+        tok = "gldt-" + "Xk2fjPq81mNbV4wZ"
+        assert tok not in self._redact(f"PRIVATE-TOKEN: {tok}")
+        assert RegexRedactor().redact({"id": "gldt-short"}) == {"id": "gldt-short"}
+
+    def test_pgp_private_block_is_redacted(self) -> None:
+        block = (
+            "-----BEGIN PGP PRIVATE KEY BLOCK-----\n"
+            + ("B" * 64 + "\n")
+            + "-----END PGP PRIVATE KEY BLOCK-----"
+        )
+        out = RegexRedactor().redact_text(block)
+        assert REDACTED in out
+        assert "BEGIN PGP PRIVATE KEY BLOCK" not in out
+
+    def test_http_basic_header_is_redacted_not_the_word_basic(self) -> None:
+        hdr = "Authorization: Basic " + "dXNlcjpwYXNz"
+        out = self._redact(hdr)
+        assert "dXNlcjpwYXNz" not in out
+        assert RegexRedactor().redact({"note": "basic hygiene"}) == {"note": "basic hygiene"}
+
+    def test_database_uri_userinfo_is_redacted_host_only_is_not(self) -> None:
+        uri = "postgres://alice:" + "s3cret" + "@db.internal/app"
+        out = self._redact(uri)
+        assert "s3cret" not in out
+        clean = "postgres://localhost/db"
+        assert RegexRedactor().redact({"url": clean}) == {"url": clean}
+
+    def test_sensitive_header_and_url_key_names(self) -> None:
+        out = RegexRedactor().redact(
+            {
+                "x-api-key": "k",
+                "database_url": "postgres://x:y@h/db",
+                "aws_access_key_id": "A",
+            }
+        )
+        assert set(out.values()) == {REDACTED}
+        assert RegexRedactor().redact({"tokenizer": "bpe"}) == {"tokenizer": "bpe"}
+
