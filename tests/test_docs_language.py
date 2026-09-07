@@ -186,7 +186,7 @@ class TestFileSelection:
     def test_it_includes_the_file_this_bead_edited(self) -> None:
         found = candidate_files()
         assert REPO_ROOT / "docs" / "security" / "threat-model.md" in found
-        assert REPO_ROOT / "src" / "waxseal" / "cli.py" in found
+        assert REPO_ROOT / "src" / "waxseal" / "cli" / "__init__.py" in found
 
     def test_it_includes_the_deploy_tree_and_still_excludes_its_translation(
         self,
