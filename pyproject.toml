@@ -113,6 +113,14 @@ exclude = [
   # consumer downloading the waxseal sdist has no use for a FastAPI app and a
   # Vue project, and every byte of it would be dead weight in the tarball.
   "server",
+  # deploy/ is the deployment layer: a runtime Dockerfile, an installer script,
+  # two Helm charts and systemd units. Same standing as server/ and contracts/
+  # above — a library consumer downloading the sdist to `pip install` it has no
+  # use for a StatefulSet template, and every byte of it is dead weight in the
+  # tarball. tools/build_pyz.py deliberately STAYS in the sdist: it is a build
+  # tool for this project, like the tools/gen_*_vectors.py scripts already
+  # shipped beside it.
+  "deploy",
   # contracts/ is the on-chain layer: Solidity sources, a Foundry toolchain and
   # 21 generated cross-vector files. The line above had NAMED it since 0.1.5
   # while the list did not exclude it, which was harmless only for as long as

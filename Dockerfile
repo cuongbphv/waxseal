@@ -1,3 +1,6 @@
+# NOT the runtime image. The CLI's runtime image is deploy/docker/Dockerfile
+# (ghcr.io/cuongbphv/waxseal); this file has no ENTRYPOINT on purpose.
+#
 # Runs the exact commands .github/workflows/ci.yml runs, in a clean container —
 # a `docker build` that reaches the final stage IS the 100%-pass proof, not a
 # side claim about it (CLAUDE.md: "all green + coverage floor before any
