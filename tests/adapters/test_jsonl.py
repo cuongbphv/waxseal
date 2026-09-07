@@ -7,7 +7,13 @@ from typing import Any
 import pytest
 
 from waxseal.adapters._envelope import to_obj
-from waxseal.adapters.jsonl import _TAIL_SEEK_CHUNK, JSONLBackend, JSONLCorruptionError
+from waxseal.adapters.jsonl import (
+    _TAIL_SEEK_CHUNK,
+    JSONLBackend,
+    JSONLCorruptionError,
+    _read_last_line,
+    read_last_line,
+)
 from waxseal.domain.fingerprint import fingerprint
 from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash, header_frame
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
@@ -80,6 +86,22 @@ class TestAppend:
         }
         import base64
         assert base64.b64decode(obj["payload_b64"]) == b'{"a":1}'
+
+
+class TestReadLastLinePublic:
+    def test_the_public_name_is_the_private_alias(self) -> None:
+        assert read_last_line is _read_last_line
+
+    def test_missing_and_empty_files_yield_none(self, tmp_path: Path) -> None:
+        assert read_last_line(tmp_path / "absent.jsonl") is None
+        empty = tmp_path / "empty.jsonl"
+        empty.write_bytes(b"")
+        assert read_last_line(empty) is None
+
+    def test_it_returns_the_last_non_blank_line(self, tmp_path: Path) -> None:
+        path = tmp_path / "trail.jsonl"
+        path.write_bytes(b'{"a":1}\n{"b":2}\n\n')
+        assert read_last_line(path) == b'{"b":2}'
 
 
 class TestRoundTrip:

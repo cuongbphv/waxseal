@@ -35,11 +35,9 @@ growth J3 exists to prevent, arriving by J3's own hand.
 The receipt log's lock is still taken after the chain's is released, never
 nested inside it: the ordering note on `append` is unchanged by any of this.
 
-One import reaches past the library's public API on purpose. `_read_last_line`
-is format-critical: a second implementation of an O(1) JSONL tail read in this
-repository is a second thing that can drift, and it lives in the same repository,
-versioned and CI-run together, so a change to it breaks these tests in the same
-commit.
+The O(1) JSONL tail read lives in the library (`read_last_line`) so this
+server does not grow a second implementation that can drift. It is a public
+helper as of 0.1.6; the import is no longer a reach past a private name.
 """
 
 from __future__ import annotations
@@ -52,7 +50,7 @@ from typing import Any, Final
 
 from waxseal import Entry, Verdict
 from waxseal.adapters.filelock import file_lock
-from waxseal.adapters.jsonl import JSONLBackend, _read_last_line
+from waxseal.adapters.jsonl import JSONLBackend, read_last_line
 from waxseal.domain.archive import ArchiveDestination
 from waxseal.domain.segments import SEGMENT_SUFFIX, segment_identity
 from waxseal.sources.rotation import (
@@ -192,7 +190,7 @@ class ChainStore:
         None is REMOTE.md section 4's 404: "no entries yet", which a fresh
         writer reads as `(seq=-1, GENESIS)`. It is never an error.
         """
-        last = _read_last_line(self.active_trail_path(chain_id))
+        last = read_last_line(self.active_trail_path(chain_id))
         if last is None:
             return None
         obj = json.loads(last)
@@ -338,7 +336,7 @@ class ChainStore:
     # ------------------------------------------------------------- receipts
 
     def receipt_head(self, chain_id: str) -> tuple[int, str] | None:
-        last = _read_last_line(self.receipt_log_path(chain_id))
+        last = read_last_line(self.receipt_log_path(chain_id))
         if last is None:
             return None
         record = json.loads(last)
@@ -502,7 +500,7 @@ class ChainStore:
         # does: two acknowledgements must never be issued the same receipt_seq,
         # which is the one thing REMOTE.md section 10 forbids answering twice.
         with file_lock(log_path):
-            last = _read_last_line(log_path)
+            last = read_last_line(log_path)
             if last is None:
                 chain = ReceiptChain()
             else:

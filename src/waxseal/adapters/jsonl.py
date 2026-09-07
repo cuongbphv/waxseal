@@ -56,7 +56,7 @@ class JSONLCorruptionError(Exception):
         )
 
 
-def _read_last_line(path: Path) -> bytes | None:
+def read_last_line(path: Path) -> bytes | None:
     """Return the raw bytes of the trail's last non-blank line, or None if
     there is no complete entry yet (missing file, empty file, or a file
     holding only whitespace/newlines).
@@ -90,6 +90,12 @@ def _read_last_line(path: Path) -> bytes | None:
                 # Reached the start of the file with no interior newline
                 # found: the whole (trimmed) file is the one and only line.
                 return trimmed or None
+
+
+# One-release compatibility alias: rotation and the server imported the
+# private name. Keep it bound to the same function so a leftover import
+# does not become an AttributeError while those callers are updated.
+_read_last_line = read_last_line
 
 
 class JSONLBackend:
@@ -175,7 +181,7 @@ class JSONLBackend:
                     yield from_obj(json.loads(line))
 
     def _tail_locked(self) -> tuple[int, str]:
-        last_line = _read_last_line(self._path)
+        last_line = read_last_line(self._path)
         if last_line is None:
             return 0, GENESIS_PREV_HASH
         seq, entry_hash = tail_fields(json.loads(last_line))

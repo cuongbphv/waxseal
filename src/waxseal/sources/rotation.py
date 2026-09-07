@@ -42,7 +42,7 @@ from typing import Any, Final
 # extends it can never disagree about which line is the tail.
 from waxseal.adapters._envelope import tail_fields
 from waxseal.adapters.filelock import file_lock
-from waxseal.adapters.jsonl import _read_last_line
+from waxseal.adapters.jsonl import read_last_line
 from waxseal.domain.archive import (
     ArchiveDestination,
     ArchiveReport,
@@ -156,7 +156,7 @@ def open_segmented(
         if _size(active) < max_segment_bytes:
             return AuditLog.open(active, **open_kwargs)
 
-        tail = _read_last_line(active)
+        tail = read_last_line(active)
         if tail is None:
             # Over threshold with no complete entry (a file of blank lines, a
             # torn single line): there is no tail for a binding to point at,
