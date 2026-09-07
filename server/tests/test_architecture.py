@@ -42,7 +42,7 @@ WEB_MODULES = {"fastapi", "starlette", "uvicorn"}
 
 
 def _modules(layer: str) -> list[Path]:
-    return sorted((PACKAGE / layer).glob("*.py"))
+    return sorted((PACKAGE / layer).rglob("*.py"))
 
 
 def _imported_names(path: Path) -> set[str]:

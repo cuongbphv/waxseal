@@ -13,6 +13,19 @@ REPO = Path(__file__).parent.parent.parent
 SRC = REPO / "src" / "waxseal"
 
 
+def cli_python_files() -> list[Path]:
+    """cli.py today, cli/*.py after the package split, both during the
+    transition so later split beads do not all have to retouch this file."""
+    files: list[Path] = []
+    if (SRC / "cli.py").is_file():
+        files.append(SRC / "cli.py")
+    pkg = SRC / "cli"
+    if pkg.is_dir():
+        files.extend(sorted(pkg.rglob("*.py")))
+    assert files, "neither src/waxseal/cli.py nor src/waxseal/cli/ exists"
+    return files
+
+
 def source_files() -> list[Path]:
     return sorted(SRC.rglob("*.py"))
 
@@ -59,7 +72,7 @@ class TestDomainPurity:
         # CLAUDE.md: domain/ is pure logic — no filesystem, no db, no locks.
         forbidden = {"os", "io", "sqlite3", "pathlib", "fcntl", "msvcrt", "socket"}
         offenders = []
-        for path in sorted((SRC / "domain").glob("*.py")):
+        for path in sorted((SRC / "domain").rglob("*.py")):
             for match in re.finditer(
                 r"^(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)", path.read_text(), re.M
             ):
@@ -69,7 +82,7 @@ class TestDomainPurity:
 
     def test_domain_does_not_import_ports_or_adapters(self) -> None:
         offenders = []
-        for path in sorted((SRC / "domain").glob("*.py")):
+        for path in sorted((SRC / "domain").rglob("*.py")):
             text = path.read_text()
             if "waxseal.ports" in text or "waxseal.adapters" in text:
                 offenders.append(path.name)
@@ -94,8 +107,8 @@ class TestVerdictComposition:
     # break. This is a preventative regression guard: no existing bug to
     # fix, just a shape the source must never regain.
     def test_max_does_not_appear_in_cli(self) -> None:
-        text = (SRC / "cli.py").read_text()
-        assert "max(" not in text
+        for path in cli_python_files():
+            assert "max(" not in path.read_text(), path
 
 
 class TestPublicApiFrozen:
