@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from waxseal import AuditLog
 from waxseal.adapters.redactors import REDACTED, RegexRedactor
 
@@ -98,6 +100,31 @@ class TestKeyRedaction:
         assert out["list"][0]["token"] == REDACTED
         assert "AKIAIOSFODNN7EXAMPLE" not in str(out)
 
+    def test_tuple_values_are_walked(self) -> None:
+        # json.dumps encodes a tuple as a JSON array, so a secret sitting
+        # in a tuple is a real leak unless the walker descends it the way
+        # it already descends a list. Sets are a different shape: no
+        # canonical order, converting them to a list would invent one.
+        secret = "sk-" + "tuplewalksecretkey99"
+        out = RegexRedactor().redact({"args": (secret, "ok")})
+        assert secret not in str(out)
+        assert out["args"][1] == "ok"
+        assert REDACTED in out["args"]
+
+    def test_a_clean_tuple_passes_through_unchanged(self) -> None:
+        payload = {"args": ("hello", 1, None)}
+        assert RegexRedactor().redact(payload) == payload
+
+    def test_a_nested_set_is_refused_not_converted(self) -> None:
+        with pytest.raises(TypeError, match="canonical order"):
+            RegexRedactor().redact({"outer": [{"tags": {"alpha"}}]})
+
+    def test_set_values_are_refused_not_converted_to_a_list(self) -> None:
+        with pytest.raises(TypeError, match="canonical order"):
+            RegexRedactor().redact({"tags": {"alpha", "beta"}})
+        with pytest.raises(TypeError, match="canonical order"):
+            RegexRedactor().redact({"tags": frozenset({"alpha"})})
+
 
 class TestRedactBeforeHash:
     def test_secret_never_reaches_disk(self, tmp_path: Path) -> None:
@@ -112,6 +139,24 @@ class TestRedactBeforeHash:
         )
         raw = path.read_bytes()
         assert b"sk-verysecretkey12345678" not in raw
+        assert log.verify().ok
+
+    def test_bytes_payload_with_a_configured_redactor_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        # Same refuse as sources.decisions.commit_input: the Redactor port
+        # only sees dicts, so claiming bytes were redacted would be a
+        # fail-open with no label (CLAUDE.md rule 6).
+        log = AuditLog.open(tmp_path / "trail.jsonl", redactor=RegexRedactor())
+        with pytest.raises(ValueError, match="cannot inspect bytes"):
+            log.append(payload=b'{"cmd": "x"}', payload_type=PT)
+
+    def test_a_secret_inside_a_tuple_never_reaches_disk(self, tmp_path: Path) -> None:
+        secret = "sk-" + "tupleondisksecret99"
+        path = tmp_path / "trail.jsonl"
+        log = AuditLog.open(path, redactor=RegexRedactor())
+        log.append(payload={"args": (secret, "ok")}, payload_type=PT)
+        assert secret.encode() not in path.read_bytes()
         assert log.verify().ok
 
 
@@ -145,3 +190,5 @@ class TestRedactText:
         from waxseal.adapters.redactors import RegexRedactor
 
         assert RegexRedactor().redact_text("nothing secret here") == "nothing secret here"
+
+

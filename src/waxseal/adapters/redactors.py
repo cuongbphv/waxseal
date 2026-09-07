@@ -77,4 +77,14 @@ class RegexRedactor:
             return {k: self._value(k, v) for k, v in value.items()}
         if isinstance(value, list):
             return [self._walk(v) for v in value]
+        if isinstance(value, tuple):
+            # json encodes a tuple as an array; walking it is the same leak
+            # class as a list. A set has no canonical order, so converting
+            # it to a list would invent one - refuse instead.
+            return tuple(self._walk(v) for v in value)
+        if isinstance(value, (set, frozenset)):
+            raise TypeError(
+                f"{type(value).__name__} values have no canonical order; "
+                "refuse rather than convert to a list"
+            )
         return value

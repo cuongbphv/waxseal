@@ -713,6 +713,14 @@ class AuditLog:
 
     def _canonical_payload(self, payload: dict[str, Any] | bytes) -> bytes:
         if isinstance(payload, bytes):
+            if self._redactor is not None:
+                # Same refuse as sources.decisions.commit_input: the
+                # Redactor port only sees dicts, so "redacted" would be a
+                # claim nothing checked (CLAUDE.md rule 6).
+                raise ValueError(
+                    "a redactor cannot inspect bytes; redact the input as a dict, "
+                    "or commit the bytes without claiming they were redacted"
+                )
             return payload
         if isinstance(payload, dict):
             if self._redactor is not None:
