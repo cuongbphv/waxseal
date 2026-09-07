@@ -3,7 +3,7 @@
 A hash chain resists edits *behind* its tip. It does not resist an attacker who
 rewrites the whole file, because every `prev_hash` downstream of an edit is
 recomputable. The only defence against that is a copy of the chain's state held
-somewhere the attacker cannot write — which is what anchoring is.
+somewhere the attacker cannot write - which is what anchoring is.
 
 This page covers the two external sinks waxseal ships, how to verify what they
 produce with the tools that own those formats, and how to write a sink for a
@@ -16,10 +16,10 @@ chain waxseal does not know about.
 
 ---
 
-## RFC 3161 — a Time-Stamp Authority
+## RFC 3161 - a Time-Stamp Authority
 
 A TSA signs a statement of the form "I saw this digest at this time". waxseal
-sends it `SHA-256(checkpoint_frame(checkpoint))` — the same bytes every other
+sends it `SHA-256(checkpoint_frame(checkpoint))` - the same bytes every other
 sink witnesses, which is why the forward-secure aggregate binding lives inside
 the frame rather than beside it.
 
@@ -34,7 +34,7 @@ or answers about different bytes.
 ```bash
 waxseal verify trail.jsonl --anchors
 # anchors ok (checked=3, latest=seq 240)
-#   note: seq=240: attested time (RFC 3161, structural only — signature NOT
+#   note: seq=240: attested time (RFC 3161, structural only - signature NOT
 #         verified): 2026-08-23T09:22:17+00:00
 ```
 
@@ -42,7 +42,7 @@ waxseal verify trail.jsonl --anchors
 
 waxseal compares the token's status, its `messageImprint`, its digest
 algorithm, and its nonce. It does **not** verify the CMS signature or the TSA's
-X.509 chain — that needs path validation and RSA/ECDSA verification, which a
+X.509 chain - that needs path validation and RSA/ECDSA verification, which a
 zero-dependency library has no business reimplementing. A homegrown signature
 check that is subtly wrong is worse than none, because it reports authenticity
 nobody established.
@@ -69,7 +69,7 @@ openssl ts -verify -in receipts/seq-240.tsr -data receipts/seq-240.frame \
 `--seq N` restricts extraction to records anchored at that seq (duplicate
 records there each get a numbered file); exit 3 means the trail or sidecar is
 missing (nothing is created, not even `--out`), and exit 2 means the sidecar
-holds no matching receipts — absence, not success and not tampering.
+holds no matching receipts - absence, not success and not tampering.
 
 `tsa-chain.pem` is the TSA's certificate chain, obtained from the TSA operator
 out of band. Verifying against a chain the same attacker could supply proves
@@ -89,11 +89,11 @@ openssl ts -reply -in receipts/seq-240.tsr -text
 - A TSA is a trusted third party. It can lie about time; it cannot lie about
   *which digest* it stamped without invalidating its own signature.
 - A receipt is a few kilobytes. With `anchor_every=1` on a hot trail, the
-  `.anchors` sidecar grows accordingly — anchor on a schedule, not per append.
+  `.anchors` sidecar grows accordingly - anchor on a schedule, not per append.
 
 ---
 
-## OpenTimestamps — a Bitcoin calendar
+## OpenTimestamps - a Bitcoin calendar
 
 OpenTimestamps aggregates digests and folds them into a Bitcoin block. Once
 confirmed, the time claim rests on the same authority as the block chain
@@ -105,7 +105,7 @@ waxseal anchor trail.jsonl --ots-calendar https://alice.btc.calendar.opentimesta
 
 The calendar returns a **pending** proof, stored with an `ots:` prefix. Pending
 means exactly what it says: the calendar has accepted the digest, and the
-Bitcoin attestation does not exist until a block confirms — hours to days.
+Bitcoin attestation does not exist until a block confirms - hours to days.
 
 waxseal deliberately ships no OpenTimestamps proof parser. The serialization is
 an attestation-op tree the OpenTimestamps project owns; a partial
@@ -117,7 +117,7 @@ not change the exit code:
 ```bash
 waxseal verify trail.jsonl --anchors
 # anchors ok (checked=1, latest=seq 240)
-#   note: seq=240: pending OpenTimestamps proof — opaque to this library by
+#   note: seq=240: pending OpenTimestamps proof - opaque to this library by
 #         design, NOT checked here; complete and verify it with
 #         `ots upgrade` / `ots verify`
 ```
@@ -143,7 +143,7 @@ ots verify  receipts/seq-240.ots -f receipts/seq-240.frame
 > OpenTimestamps client before relying on this recipe in production.
 
 > **[Unverified]** Which public calendars are live changes over time. waxseal
-> ships no default calendar URL for that reason — pass one explicitly, and
+> ships no default calendar URL for that reason - pass one explicitly, and
 > confirm it is current. Calendars commonly cited in OpenTimestamps
 > documentation include `alice.btc.calendar.opentimestamps.org`,
 > `bob.btc.calendar.opentimestamps.org`, and `finney.calendar.eternitywall.com`.
@@ -174,7 +174,7 @@ Three rules, all of them learned the hard way:
    frame is the canonical byte encoding, and it is where the aggregate binding
    lives. Anchoring `checkpoint.root` alone silently drops that binding.
 2. **Raise on failure. Never return `None` as if it had worked.** `None` means
-   "this sink has no receipt to give" — a legitimate state for a sink whose
+   "this sink has no receipt to give" - a legitimate state for a sink whose
    evidence lives elsewhere. It must never mean "the publish failed".
 3. **Return an opaque receipt with a prefix.** `"<type>:<payload>"`. waxseal
    dispatches on the prefix, and reports a prefix it does not know as
@@ -183,7 +183,7 @@ Three rules, all of them learned the hard way:
    re-verification (an RFC 3161 nonce) returns a
    `waxseal.domain.checkpoint.SinkReceipt` instead of a bare string.
 
-`RecordingAnchorSink` does the sidecar bookkeeping — it publishes first and
+`RecordingAnchorSink` does the sidecar bookkeeping - it publishes first and
 records second, so a failed publish leaves no record behind. `AuditLog` wraps
 a path-backed trail's sink in it automatically; wrapping explicitly, as below,
 is equivalent:
@@ -200,7 +200,7 @@ log.anchor()
 
 ### EVM contract event
 
-waxseal now ships this natively (0.1.5, Workstream F) — see
+waxseal now ships this natively (0.1.5, Workstream F) - see
 `src/waxseal/adapters/evm.py::EvmAnchorSink`. EVM is no longer "a chain
 waxseal does not know about"; use the real sink rather than hand-rolling one:
 
@@ -213,7 +213,7 @@ Store `sha256(frame)` in a contract's calldata or emit it as an event topic;
 the chain id, block number, and transaction hash together are the receipt.
 The transaction signer is never a flag or an env var holding a private key:
 it is an external process named by `WAXSEAL_EVM_SIGNER_CMD`, a three-verb
-protocol (`address` / `sign-digest` / `sign-tx`) — see CLAUDE.md's CLI
+protocol (`address` / `sign-digest` / `sign-tx`) - see CLAUDE.md's CLI
 contract.
 
 Notes specific to EVM, true whether waxseal's own sink handles this or the
@@ -222,14 +222,14 @@ transaction that reverts must raise, not return (the shipped sink does this);
 a reorg can undo a confirmed anchor, so wait for the confirmation depth your
 threat model requires before treating the receipt as evidence
 (`EvmLedgerSink`'s `confirm_tag` defaults to `finalized` for exactly this
-reason); and the digest is public forever, which is fine — it is a hash of a
+reason); and the digest is public forever, which is fine - it is a hash of a
 hash, and the payloads never leave your storage.
 
 ### Hyperledger Fabric
 
 Invoke a chaincode function with the digest as its argument; the receipt is the
 channel name plus the transaction ID. Fabric's endorsement policy is what gives
-the anchor its separation of authority — an anchor endorsed only by the same
+the anchor its separation of authority - an anchor endorsed only by the same
 organization that runs the audit trail is not an external witness.
 
 ### A private or consortium chain

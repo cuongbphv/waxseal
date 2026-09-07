@@ -81,7 +81,11 @@ def candidate_files() -> list[Path]:
         if _is_excluded(rel):
             continue
         is_shipped_py = path.suffix == ".py" and rel[0] in ("src", "examples")
-        is_top_level_or_docs = len(rel) == 1 or rel[0] == "docs"
+        # `deploy/` joined the scan when that tree landed (0.1.6). It is prose
+        # an operator reads before standing anything up, and prose about what a
+        # deployment does and does not prove is exactly where an unscoped claim
+        # would do the most damage.
+        is_top_level_or_docs = len(rel) == 1 or rel[0] in ("docs", "deploy")
         is_english_md = (
             path.suffix == ".md"
             and is_top_level_or_docs
@@ -183,3 +187,15 @@ class TestFileSelection:
         found = candidate_files()
         assert REPO_ROOT / "docs" / "security" / "threat-model.md" in found
         assert REPO_ROOT / "src" / "waxseal" / "cli.py" in found
+
+    def test_it_includes_the_deploy_tree_and_still_excludes_its_translation(
+        self,
+    ) -> None:
+        # The deploy tree is prose an operator reads before standing anything
+        # up. It was outside every glob until 0.1.6, which meant a claim about
+        # what a topology proves could sit there unscoped indefinitely.
+        found = candidate_files()
+        assert REPO_ROOT / "deploy" / "README.md" in found
+        assert REPO_ROOT / "deploy" / "systemd" / "README.md" in found
+        assert (REPO_ROOT / "deploy" / "README.vi.md").is_file()
+        assert REPO_ROOT / "deploy" / "README.vi.md" not in found

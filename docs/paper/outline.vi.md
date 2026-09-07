@@ -1,8 +1,8 @@
-# Đề cương bài báo — nhật ký quyết định chống sửa đổi, an toàn với tiến hoá schema cho AI agent
+# Đề cương bài báo - nhật ký quyết định chống sửa đổi, an toàn với tiến hoá schema cho AI agent
 
 *[English](outline.md)*
 
-Đề cương làm việc cho một bài báo hệ thống–an toàn dựa trên waxseal. Tài liệu này không ghi
+Đề cương làm việc cho một bài báo hệ thống-an toàn dựa trên waxseal. Tài liệu này không ghi
 tác giả hay tổ chức nào; bổ sung khi nộp bài.
 
 **Tiêu đề làm việc:** *Schema-Evolution-Safe, Tamper-Evident Decision Logs for AI Agents in
@@ -17,7 +17,7 @@ Financial Services*
 | Pháp lý | *Verifiable Decision Records for Regulated AI Deployment* | FC / WTSC |
 
 Cách đóng khung theo lớp lỗi là mạnh nhất. Đóng góp cốt lõi không phải một cấu trúc mật mã
-mới — mà là quan sát rằng một lớp bug triển khai lặp đi lặp lại (định danh phiên bản theo
+mới - mà là quan sát rằng một lớp bug triển khai lặp đi lặp lại (định danh phiên bản theo
 thứ tự + coi phiên bản lạ là lỗi) là **có thể loại bỏ được ngay từ cấu trúc**, cộng với một
 hệ thống làm được điều đó và một phép đo chi phí của nó.
 
@@ -30,8 +30,8 @@ Nêu sớm những điều này và giữ bài báo trung thực đúng với b�
 1. **Một lớp lỗi, được đặt tên và mô tả đặc trưng.** Hai sự cố sản xuất độc lập (§1) có
    chung một nguyên nhân gốc: định danh phiên bản mang tính *thứ tự và thủ công*, và một
    phiên bản không nhận diện được bị coi là lỗi thay vì được coi là *thiếu thông tin*. Ta
-   chỉ ra rằng điều này gộp hai phán quyết khác nhau — *bản ghi này sai* và *tôi không kiểm
-   tra được bản ghi này* — thành một, và chính sự gộp đó biến một lần rollback vô hại thành
+   chỉ ra rằng điều này gộp hai phán quyết khác nhau - *bản ghi này sai* và *tôi không kiểm
+   tra được bản ghi này* - thành một, và chính sự gộp đó biến một lần rollback vô hại thành
    hoặc một cảnh báo sai hàng loạt, hoặc một cơ chế an toàn bị vô hiệu hoá âm thầm.
 2. **Một cấu trúc làm cho lớp lỗi đó không biểu diễn được.** Định danh phiên bản là
    *fingerprint suy ra từ nội dung* của bộ mô tả trường chuẩn tắc, nên việc mở rộng bộ
@@ -59,27 +59,27 @@ Mở đầu bằng hai sự cố, vì chúng chuyển tải lập luận tốt h
 
 - **Sự cố A ("migration 060").** Một hệ thống sản xuất mở rộng tập trường được phủ bởi hash
   của một dòng mà không đổi bất kỳ định danh phiên bản nào. Toàn bộ các dòng lịch sử sau đó
-  fail verification: verifier tính lại các dòng cũ theo bộ trường mới và — hoàn toàn đúng
-  theo logic của chính nó — thấy sai lệch. Kết quả là một cảnh báo can thiệp sai hàng loạt
+  fail verification: verifier tính lại các dòng cũ theo bộ trường mới và - hoàn toàn đúng
+  theo logic của chính nó - thấy sai lệch. Kết quả là một cảnh báo can thiệp sai hàng loạt
   trên toàn bộ lịch sử.
 - **Sự cố B (một công cụ theo dõi issue, v1.2.2, 08/2026).** Một bản phát hành nhầm đã
   migrate schema từ v53 lên v65. Bản binary được revert coi phiên bản lạ-nhưng-cao-hơn là
   lỗi nghiêm trọng. Lối thoát duy nhất là một biến môi trường vô hiệu hoá hoàn toàn cơ chế
-  kiểm tra schema — biến một tình huống thiếu thông tin một phần thành lựa chọn nhị phân
+  kiểm tra schema - biến một tình huống thiếu thông tin một phần thành lựa chọn nhị phân
   giữa "từ chối chạy" và "chạy mà không có an toàn nào".
 
 Cả hai là cùng một bug: **verifier không có cách nào để nói "tôi không kiểm tra được cái
 này."** Sự cố A trả lời *bị can thiệp* trong khi câu trả lời trung thực là *không kiểm
 chứng được*; Sự cố B trả lời *lỗi nghiêm trọng* cho cùng tình huống đó. RFC 6962 §4.6 đã
-nêu sẵn câu trả lời đúng cho các kiểu không nhận diện được — coi chúng là mờ đục, không
-phải lỗi — nhưng nguyên tắc này được phát biểu cho định dạng wire và trên thực tế không
+nêu sẵn câu trả lời đúng cho các kiểu không nhận diện được - coi chúng là mờ đục, không
+phải lỗi - nhưng nguyên tắc này được phát biểu cho định dạng wire và trên thực tế không
 được mang vào các verifier của audit log.
 
 Sau đó nêu động lực cho bối cảnh AI agent: quyết định của agent nay là đối tượng của các
 nghĩa vụ lưu trữ hồ sơ (EU AI Act Điều 12/19/26(6); RTS của DORA yêu cầu log phải được bảo
 vệ khỏi bị can thiệp và bị xoá), schema quyết định của một hệ thống agent thay đổi nhanh
 thường xuyên hơn nhiều so với schema cơ sở dữ liệu, và bên vận hành agent thường cũng chính
-là bên giữ nhật ký của nó — đúng cấu hình mà ở đó một bản ghi không giả mạo được và được
+là bên giữ nhật ký của nó - đúng cấu hình mà ở đó một bản ghi không giả mạo được và được
 neo ra bên ngoài mới có giá trị.
 
 **Cấu trúc lập luận:** tốc độ biến động schema của các hệ thống AI làm cho lớp lỗi này *dễ
@@ -95,7 +95,7 @@ Tổ chức thành bốn mạch, và với mỗi mạch nói thẳng nó cho gì
 **Logging chuỗi-hash và forward-secure.** Audit log forward-secure của Schneier & Kelsey;
 định nghĩa forward-security của Bellare & Yee; chữ ký tổng hợp FssAgg của Ma & Tsudik.
 *Cho*: phát hiện cắt đuôi và viết lại sau khi khoá bị lộ. *Để ngỏ*: không nói gì về định
-danh schema — bộ trường được băm được giả định là cố định.
+danh schema - bộ trường được băm được giả định là cố định.
 
 **Transparency log.** History tree của Crosby & Wallach; RFC 6962 (Certificate
 Transparency) với membership và consistency proof; RFC 9162 §2.1.4. *Cho*: bộ máy chứng
@@ -112,7 +112,7 @@ và không xử lý trường hợp verifier-không-kiểm-tra-được.
 **Trách nhiệm giải trình và kiểm toán AI.** Model card, datasheet, kiểm toán thuật toán, và
 bản thân các văn bản pháp quy. *Cho*: yêu cầu. *Để ngỏ*: những thứ này mô tả *cái gì* nên
 được ghi lại và gần như không bao giờ mô tả *làm sao để bản ghi đó đáng tin trước chính bên
-đang giữ nó* — đúng khoảng trống mà công trình này lấp.
+đang giữ nó* - đúng khoảng trống mà công trình này lấp.
 
 **Tuyên bố lập trường cho phần công trình liên quan:** mọi nguyên thuỷ dùng ở đây đều là
 chuẩn mực sẵn có. Đóng góp nằm ở cách tổ hợp và, cụ thể hơn, ở thiết kế định danh và không
@@ -154,7 +154,7 @@ fingerprint)*. Tính chất đúng đắn then chốt mang dạng phủ định 
 Báo một bản ghi là nguyên vẹn dựa trên một hash mà nó không tái tạo được là lời nói dối duy
 nhất mà cơ chế tamper-evidence không bao giờ được phép nói; báo nó là *bị can thiệp* chính
 là Sự cố A. Chỉ tránh được cả hai khi có giá trị kết quả thứ ba, và giá trị đó phải sống sót
-tới tận exit code — một phân biệt ở tầng API mà sụp đổ ở biên tiến trình thì coi như không
+tới tận exit code - một phân biệt ở tầng API mà sụp đổ ở biên tiến trình thì coi như không
 được triển khai.
 
 ### 3.4 Mã hoá chuẩn tắc
@@ -166,10 +166,10 @@ in-band), và vì sao sentinel NULL là một thể hiện của chủ đề xuy
 và *rỗng* là hai khẳng định khác nhau, và một mã hoá chuẩn tắc gộp chúng lại sẽ cho phép hai
 bản ghi khác nhau băm ra giống hệt nhau.
 
-**Rồi lật chính ví dụ đó lại — đây là đoạn mạnh nhất có thể viết.** Sentinel của lp64v1 là
+**Rồi lật chính ví dụ đó lại - đây là đoạn mạnh nhất có thể viết.** Sentinel của lp64v1 là
 `b"\x00NULL\x00"`, mà bản thân nó *là UTF-8 hợp lệ*: nó decode ra một chuỗi 6 ký tự. Nên
 đúng một giá trị trường bằng chuỗi đó sẽ mã hoá giống hệt *vắng mặt*. Mã hoá được chọn để
-giữ "vắng mặt" và "rỗng" tách nhau lại gộp "vắng mặt" với một giá trị *có mặt* cụ thể —
+giữ "vắng mặt" và "rỗng" tách nhau lại gộp "vắng mặt" với một giá trị *có mặt* cụ thể -
 đúng cái lỗi mà mục này lập luận chống lại, ngay trong ví dụ minh hoạ cho lập luận đó. Nó
 tiềm ẩn (không call site nào đã ship chạm tới được) và vẫn là sai, vì đúng lý do bài báo
 quan tâm: mã hoá này được chào là portable, và một implementation độc lập viết từ phần văn
@@ -177,7 +177,7 @@ xuôi sẽ tái tạo lại sự nhập nhằng đó một cách trung thành.
 
 lp64 sửa nó về mặt cấu trúc: một type tag *nằm trong* vùng có tiền tố độ dài (`0x00` cho
 vắng mặt, `0x01` trước các byte UTF-8 của chuỗi), nên hai bên khác nhau ngay từ byte đầu
-với mọi input có thể. Tính đơn ánh trở thành vô điều kiện — không điều kiện phụ, không bất
+với mọi input có thể. Tính đơn ánh trở thành vô điều kiện - không điều kiện phụ, không bất
 biến phải duy trì, không input nào phải từ chối.
 
 Việc nâng cấp mới là tải trọng thật của mục này, và nó thuộc về đây chứ không phải §3.3: vì
@@ -185,7 +185,7 @@ tên mã hoá là một thành phần của descriptor phiên bản, việc đ�
 fingerprint*. Không có migration nào phải viết và không định danh đã phát hành nào bị định
 nghĩa lại tại chỗ; một binary có trước thay đổi này báo các row mới là *unverifiable*, không
 phải *tampered*. Nói thẳng cái giá phải trả: lp64v1 bị **gỡ bỏ** chứ không mang theo, nên
-trail viết dưới nó không build hiện tại nào verify được — cái giá chỉ trả được vì chưa có
+trail viết dưới nó không build hiện tại nào verify được - cái giá chỉ trả được vì chưa có
 trail nào như vậy tồn tại ngoài môi trường phát triển, và được ghi lại như một ngoại lệ
 một lần chứ không phải tiền lệ. Cơ chế schema evolution mà bài báo đề xuất hoá ra chính là thứ cho
 phép artifact tự sửa mã hoá chuẩn tắc của chính nó mà không cần migration. Một thiết kế có
@@ -195,7 +195,7 @@ tải trọng chứ không phải trang trí.
 ### 3.5 Redact trước khi hash
 
 Redaction chạy trước khi tính `payload_hash`, nên bí mật không bao giờ chạm đĩa. Nêu hệ quả
-một cách trung thực: một lần redaction sót là không cứu được — cleartext chính là thứ lẽ ra
+một cách trung thực: một lần redaction sót là không cứu được - cleartext chính là thứ lẽ ra
 đã được cam kết. Thứ tự chính là biện pháp giảm thiểu, không phải một bước tuỳ chọn.
 
 ### 3.6 Bản ghi quyết định và cam kết
@@ -205,7 +205,7 @@ hình, kết quả, căn cứ, phiên bản policy, độ tin cậy, chế độ
 điểm thiết kế đáng mỗi điểm một đoạn:
 
 - **Cam kết input được tính trên input đã redact.** Cam kết trên cleartext sẽ cho phép bất
-  kỳ ai giữ nhật ký xác nhận một phán đoán về bí mật bằng cách tính lại hash — nhật ký khi
+  kỳ ai giữ nhật ký xác nhận một phán đoán về bí mật bằng cách tính lại hash - nhật ký khi
   đó trở thành một oracle xác nhận phán đoán cho đúng những bí mật mà redaction đã gỡ bỏ.
 - **Giám sát chưa được ghi nhận là một giá trị khác với giám sát tự động.** Gộp chúng lại là
   báo cáo "thiếu bằng chứng" thành "bằng chứng". Đây chính là kỷ luật ba giá trị ở §3.3, áp
@@ -236,7 +236,7 @@ Hai điểm đáng nói hơn một dòng vì đó là chỗ thiết kế chạm 
   ghi chép rằng nó fail khi gỡ lock đi. Một test đồng thời chưa từng được chứng minh là có
   thể fail thì không phải bằng chứng cho điều gì cả.
 - **Vector liên-cài-đặt.** Golden test vector là ghi-một-lần và được đối chiếu chéo bởi một
-  script độc lập cài đặt trực tiếp phần văn xuôi của đặc tả, thay vì import thư viện — nếu
+  script độc lập cài đặt trực tiếp phần văn xuôi của đặc tả, thay vì import thư viện - nếu
   không thì vector chỉ đang kiểm tra cài đặt bằng chính nó.
 
 ---
@@ -259,10 +259,10 @@ phát hiện sống sót qua T3 *với một giả định phân tách*, và th�
 nói bảo đảm của nó dừng ở đâu thì đang mời người phản biện tự tìm ra ranh giới đó rồi không
 tin phần còn lại.
 
-### 5.2 Bản đồ tấn công → cơ chế
+### 5.2 Bản đồ tấn công -> cơ chế
 
 Case study đánh giá (§6.3) đi qua tám tấn công cụ thể. Mỗi dòng nêu tấn công, cơ chế bắt
-được nó, và — quan trọng nhất — giả định tin cậy mà cơ chế đó phụ thuộc vào. Viết lại toàn
+được nó, và - quan trọng nhất - giả định tin cậy mà cơ chế đó phụ thuộc vào. Viết lại toàn
 bộ trail bị bắt bởi neo *chỉ khi miền neo được quản trị tách biệt*; cắt đuôi bị bắt bởi niêm
 phong forward-secure *chỉ khi khoá ban đầu được ký quỹ ngoài máy ghi*. Chính các mệnh đề
 điều kiện này là đóng góp hữu ích nhất của bài báo cho người làm thực tế.
@@ -272,7 +272,7 @@ phong forward-secure *chỉ khi khoá ban đầu được ký quỹ ngoài máy 
 Một write chưa từng xảy ra thì không để lại khoảng trống thứ tự nào và không làm đứt liên
 kết nào, nên một thất bại về tính đầy đủ là vô hình với việc kiểm chứng chuỗi ngay từ cấu
 trúc. `dropped_writes` đo nó một cách tách bạch và báo một **cận dưới đã đo**, với `None`
-nghĩa là *chưa đo* — không bao giờ là 0. Bản thân sidecar ghi rớt cũng có thể mất, và một ổ
+nghĩa là *chưa đo* - không bao giờ là 0. Bản thân sidecar ghi rớt cũng có thể mất, và một ổ
 đĩa hỏng tới mức không ghi nổi một bản ghi rớt thì không làm chứng được cho chính sự cố của
 nó. Đây là lần xuất hiện thứ ba của chủ đề xuyên suốt (§3.3, §3.6), và phần thảo luận nên
 nói rõ: kỷ luật thiết kế này tổng quát hoá cho *mọi* thước đo mà ở đó việc "không đo" có thể
@@ -285,7 +285,7 @@ bị nhầm thành "đo được là không có".
 - Một chain server từ xa là *trusted writer*, không phải Byzantine-fault-tolerant: một
   server bất lương có thể phục vụ một bản viết lại giả mạo nhất quán mà riêng phép kiểm
   chuỗi không phát hiện được. Pinned head và witness cross-check thu hẹp điều này xuống
-  còn: client lần đầu kết nối, witness thông đồng, hoặc client bị eclipse — chúng không
+  còn: client lần đầu kết nối, witness thông đồng, hoặc client bị eclipse - chúng không
   loại bỏ được sự tin cậy.
 - Dấu thời gian do bên gọi khẳng định, không được chứng thực; thời gian được chứng thực đòi
   hỏi một bên có thẩm quyền bên ngoài.
@@ -301,7 +301,7 @@ bị nhầm thành "đo được là không có".
 Thông lượng và độ trễ của append và verify trên các backend; chi phí biên của niêm phong
 forward-secure cho mỗi entry và của một checkpoint Merkle cho mỗi *N* entry; chi phí kiểm
 chứng theo độ dài trail, và mức cải thiện khi kiểm chứng tăng dần bằng consistency proof từ
-checkpoint đã neo gần nhất. Báo cáo phân phối, không phải giá trị trung bình — độ trễ đuôi
+checkpoint đã neo gần nhất. Báo cáo phân phối, không phải giá trị trung bình - độ trễ đuôi
 trên đường audit mới là thứ người vận hành thực sự cảm nhận.
 
 ### 6.2 Kích thước proof bundle
@@ -315,7 +315,7 @@ tăng trưởng tuyến tính của trail.
 
 Bài trình diễn tám kịch bản từ triển khai tham chiếu, chạy như một thí nghiệm chứ không phải
 một demo: kết quả kỳ vọng của mỗi kịch bản đều được assert, và harness fail nếu bất kỳ kịch
-bản nào ngừng hành xử như tài liệu mô tả. Đưa vào cả các đối chứng âm một cách tường minh —
+bản nào ngừng hành xử như tài liệu mô tả. Đưa vào cả các đối chứng âm một cách tường minh -
 hai kịch bản mà việc kiểm chứng chuỗi thuần tuý báo "nguyên vẹn" một cách *đúng đắn*, và
 kịch bản mà câu trả lời đúng là *không kiểm chứng được* chứ không phải *bị can thiệp*. Một
 bảng mà dòng nào cũng ghi "đã phát hiện" là một bảng không ai nên tin.
@@ -338,14 +338,14 @@ quanh nó.
 
 ## 7. Thảo luận: bối cảnh pháp lý
 
-Ngắn, và khiêm tốn có chủ ý — đây là bài báo hệ thống, không phải bài báo luật.
+Ngắn, và khiêm tốn có chủ ý - đây là bài báo hệ thống, không phải bài báo luật.
 
 Một lớp toàn vẹn có thể và không thể đóng góp gì cho các nghĩa vụ lưu trữ hồ sơ (EU AI Act
 Điều 12/19/26(6); yêu cầu trong RTS của DORA rằng log phải được bảo vệ khỏi bị can thiệp và
 bị xoá, và rằng lỗi của hệ thống ghi log phải phát hiện được; các kỳ vọng về tài liệu trong
 quản trị rủi ro mô hình). Cách đóng khung trung thực: các văn bản này đòi hỏi bản ghi phải
 được *giữ*, và phần lớn không quy định rằng chúng phải *không giả mạo được trước chính bên
-giữ*. Tamper-evidence do đó là tư thế mạnh hơn mức hầu hết văn bản đòi hỏi — đó là lý lẽ để
+giữ*. Tamper-evidence do đó là tư thế mạnh hơn mức hầu hết văn bản đòi hỏi - đó là lý lẽ để
 áp dụng nó, và là lý lẽ chống lại việc tuyên bố rằng có văn bản nào bắt buộc nó.
 
 Cũng đáng một đoạn: cái bẫy "hiện vật tuân thủ". Một nhật ký đã kiểm chứng của một hệ thống
@@ -375,12 +375,12 @@ Toàn vẹn là điều kiện cần cho trách nhiệm giải trình, không ba
 |---|---|---|
 | **ACSAC** | mạnh | hệ thống an toàn ứng dụng kèm câu chuyện triển khai; case study hợp phong cách |
 | **DIMVA** | mạnh | đóng khung theo lớp lỗi và phát hiện nằm đúng phạm vi |
-| **FC — workshop WTSC** | tốt | đóng khung dịch vụ tài chính; dòng dõi transparency log quen thuộc với cộng đồng đó |
+| **FC - workshop WTSC** | tốt | đóng khung dịch vụ tài chính; dòng dõi transparency log quen thuộc với cộng đồng đó |
 | **Workshop của IEEE S&P / CCS** (SafeThings, AISec) | tốt | đường ngắn nhất nếu góc trách nhiệm giải trình AI dẫn dắt |
 | **USENIX Security** | khó | cần một tuyên bố về tính mới mạnh hơn hẳn "tổ hợp cộng thiết kế định danh" |
 
 **Đánh giá artefact.** Phần cài đặt có giấy phép MIT, không dependency, và đi kèm golden
-vector cộng một case study đối kháng chạy được — hãy nhắm tới huy hiệu artefact ở hội nghị
+vector cộng một case study đối kháng chạy được - hãy nhắm tới huy hiệu artefact ở hội nghị
 nào có, và trích dẫn artefact thay vì kể lại đầu ra của nó trong bài.
 
 ---

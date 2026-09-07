@@ -18,13 +18,13 @@ bạn biết đang ở đâu và bao giờ xong. Xong thì viết spec tiếp v�
                 │
                 ▼
         bead-pm-loop ─────────► kiểm tra gate, rồi làm một vòng
-           │      │              (bead-loop → bead-take, hoặc bead-fleet)
+           │      │              (bead-loop -> bead-take, hoặc bead-fleet)
            │      └───────────► bead-report    đang ở đâu
            │                    bead-forecast  bao giờ xong
            ▼
         bead-audit ───────────► "xong" có xong thật không?
                 │
-                └─────────────► phát sinh việc mới → quay lại bead-split
+                └─────────────► phát sinh việc mới -> quay lại bead-split
 ```
 
 Tên skill giống nhau trên mọi harness. Trong Claude Code và Cursor bạn gõ `/bead-report`; trong
@@ -46,17 +46,17 @@ bin/bd-kit install --into ~/Projects/du-an-cua-toi
 bin/bd-kit doctor  --into ~/Projects/du-an-cua-toi   # chạy lại: phải về 0 failure
 ```
 
-`install` sẽ không ghi gì nếu chưa có `bd` trong PATH hoặc project chưa có thư mục `.beads` — cài
+`install` sẽ không ghi gì nếu chưa có `bd` trong PATH hoặc project chưa có thư mục `.beads` - cài
 skill vào một repo không chạy được chúng thì chỉ để lại một mớ hướng dẫn không ai làm theo được. Nó
 in các lệnh cài `bd` và `bd init` thay vì cài bừa. Nếu bạn biết mình đang làm gì thì `--force` bỏ
 qua chỗ này.
 
-Có hai file được cài mà bạn nên biết tên. `.beads/PRIME.md` ghi đè `bd prime` — đây là đường duy
+Có hai file được cài mà bạn nên biết tên. `.beads/PRIME.md` ghi đè `bd prime` - đây là đường duy
 nhất đưa quy ước label và size vào **mọi** session trên **mọi** harness, kể cả khi không skill nào
 được load. `scripts/pm/board.py` là nơi mọi con số ra đời: `bead-report` và `bead-forecast` đều gọi
 nó, và đó là lý do duy nhất khiến hai skill này không thể nói khác nhau.
 
-## 1. Nạp việc vào board — `bead-split`
+## 1. Nạp việc vào board - `bead-split`
 
 Bạn đang có spec, roadmap hay plan nằm trong một file markdown. Skill này biến nó thành một epic
 kèm các task con, và phân loại từng task con theo việc agent có thể làm xong hay không.
@@ -76,13 +76,13 @@ Mỗi task con nhận đúng một label phân loại, và đây là hợp đồ
 | Label | Nghĩa là gì | Agent được làm gì |
 |---|---|---|
 | `auto-ok` | mọi điều kiện đóng đều nằm trong code và test của repo này | làm hết, kể cả `bd close` |
-| `auto-partial` | phần code làm được ở đây, nhưng để đóng cần thứ bên ngoài — CI xanh thật, môi trường thật | viết code rồi dừng, ghi note; **không** được đóng |
+| `auto-partial` | phần code làm được ở đây, nhưng để đóng cần thứ bên ngoài - CI xanh thật, môi trường thật | viết code rồi dừng, ghi note; **không** được đóng |
 | `needs-human` | muốn đóng phải có người: credential, chi phí, bên thứ ba, một quyết định | không được chạm vào |
 
-Cái gì không đo được thì là `needs-human`. Tuyệt đối không đoán label từ cái tiêu đề — một bead
+Cái gì không đo được thì là `needs-human`. Tuyệt đối không đoán label từ cái tiêu đề - một bead
 chưa đo không đồng nghĩa với một bead nhỏ.
 
-## 2. Làm cho nó đo được — `bead-estimate`
+## 2. Làm cho nó đo được - `bead-estimate`
 
 Bead không có size thì vô hình với mọi con số về sau. Đây chính là bước giữ cho báo cáo tiến độ của
 bạn không trở thành một kiểu nói dối bằng cách im lặng.
@@ -99,7 +99,7 @@ của `bd` để script không phải parse chuỗi:
 
 `size:XS` 0.5 đ · `size:S` 1 đ · `size:M` 3 đ · `size:L` 8 đ · `size:XL` 13 đ
 
-`size:L` là mức lớn nhất được phép nhận. `size:XL` không phải một estimate — nó là lời thừa nhận
+`size:L` là mức lớn nhất được phép nhận. `size:XL` không phải một estimate - nó là lời thừa nhận
 rằng chưa ai hiểu việc này, nên skill từ chối cho nhận và bắt bạn chia nhỏ. Epic thì không bao giờ
 được size trực tiếp; size của epic là tổng của các con. Vừa là nguyên tắc, vừa là tự vệ: `bd` copy
 label của cha xuống con mới, nên một label size trên epic sẽ âm thầm phá toàn bộ số liệu bên dưới.
@@ -125,7 +125,7 @@ là cùng issue type. Một tập tham chiếu toàn trùng hợp còn tệ hơn
 có ngưỡng tương đồng và ngưỡng hợp lý, và tool nói thẳng "không có reference class dùng được" thay vì
 bịa ra một cái.
 
-## 3. Làm việc — `bead-pm-loop`
+## 3. Làm việc - `bead-pm-loop`
 
 Đây là vòng bạn thực sự chạy, lặp đi lặp lại.
 
@@ -136,14 +136,14 @@ bịa ra một cái.
 /bead-pm-loop --report-every 3     # báo cáo mỗi 3 vòng thay vì mỗi 5
 ```
 
-Nó không quyết định bead nào tiếp theo — `bead-loop` làm việc đó, còn `bead-take` mới là cái làm
+Nó không quyết định bead nào tiếp theo - `bead-loop` làm việc đó, còn `bead-take` mới là cái làm
 việc trong một git worktree riêng. Phần `bead-pm-loop` thêm vào là tất cả những gì một board cần để
 còn quản được sau nhiều vòng, và nó kiểm hết trước mỗi vòng:
 
 - **Giới hạn WIP.** Mỗi người một bead đang làm. Vượt hạn thì đóng nốt việc đang dở, đừng nhận thêm
   cho ra vẻ đang bận.
 - **Có estimate mới được nhận.** Bead được chọn phải có đúng một label size, `size:L` trở xuống.
-  Chưa có size thì nó được size ngay trong vòng này chứ không bị bỏ qua — size mất mấy phút, còn bỏ
+  Chưa có size thì nó được size ngay trong vòng này chứ không bị bỏ qua - size mất mấy phút, còn bỏ
   qua thì mất mọi dự báo về sau.
 - **Việc để lâu.** Bead không ai chạm trong 7 ngày, hoặc đang làm quá 3 ngày, đều được liệt kê kèm
   người phụ trách. Không bao giờ tự động chuyển tay.
@@ -159,7 +159,7 @@ gate, `/bead-fleet --batch 4` cho một lô song song. Dùng `bead-fleet` khi c�
 sẵn sàng và chạm vào các file khác nhau; nó cho mỗi bead một worktree riêng, **kiểm chứng** thứ mỗi
 agent khai báo chứ không tin, rồi rebase và fast-forward từng cái một.
 
-## 4. Xem đang ở đâu — `bead-report`
+## 4. Xem đang ở đâu - `bead-report`
 
 ```
 /bead-report                        # cả board
@@ -168,7 +168,7 @@ python3 scripts/pm/board.py report   # y hệt, gọi thẳng module
 ```
 
 Sáu mục, luôn cùng thứ tự, để báo cáo tuần này so được với tuần trước: số lượng, mức hoàn thành,
-dòng chảy công việc, velocity, rủi ro, việc nên làm tiếp. Mục nào không có gì thì in `— none` chứ
+dòng chảy công việc, velocity, rủi ro, việc nên làm tiếp. Mục nào không có gì thì in `- none` chứ
 không biến mất.
 
 Mấy chỗ nên đọc kỹ:
@@ -176,7 +176,7 @@ Mấy chỗ nên đọc kỹ:
 **Mức hoàn thành có hai con số và một chỉ số phủ.** Theo số lượng, theo điểm, rồi bao nhiêu bead
 đang mở thực sự đã có size. Khi độ phủ dưới 60%, báo cáo nói thẳng rằng con số theo điểm chỉ đang
 mô tả phần việc đã xong và gần như không nói gì về phần còn lại. Trên board thật đầu tiên, nó hiện
-*100% theo điểm* trong khi 0/17 bead đang mở có size — đúng, và vô dụng nếu không có câu cảnh báo
+*100% theo điểm* trong khi 0/17 bead đang mở có size - đúng, và vô dụng nếu không có câu cảnh báo
 nằm ngay bên cạnh.
 
 **Việc bị chặn được gom theo cái đang chặn nó.** "5 bead bị chặn" thì bạn không làm gì được với nó.
@@ -184,12 +184,12 @@ nằm ngay bên cạnh.
 ngay, và thường đó là việc đáng làm nhất trên board bất kể mấy ô priority ghi gì.
 
 **Velocity đi kèm chế độ tin cậy, không chỉ là một con số.** Từ 5 bead có size đóng trong kỳ trở
-lên thì là `measured`. Được 2–4 thì là `provisional`, dải rộng ra có chủ ý và ngày pessimistic là
+lên thì là `measured`. Được 2-4 thì là `provisional`, dải rộng ra có chủ ý và ngày pessimistic là
 ngày để lên kế hoạch. Dưới 2 thì không có ngày nào cả, chỉ có danh sách cần gì để có. Cái này tồn
-tại vì lần chạy đầu cho ra 5.86 điểm/ngày từ ba bead đã đóng — một con số vô nghĩa nhưng có dấu
+tại vì lần chạy đầu cho ra 5.86 điểm/ngày từ ba bead đã đóng - một con số vô nghĩa nhưng có dấu
 thập phân nên nghe rất thật.
 
-## 5. Xem bao giờ xong — `bead-forecast`
+## 5. Xem bao giờ xong - `bead-forecast`
 
 ```
 /bead-forecast                          # mọi epic
@@ -197,7 +197,7 @@ thập phân nên nghe rất thật.
 /bead-forecast --apply                  # ghi snapshot lên epic
 ```
 
-Ba mốc ngày cho mỗi epic — lạc quan, khả năng cao, bi quan — và luôn kèm danh sách những thứ làm
+Ba mốc ngày cho mỗi epic - lạc quan, khả năng cao, bi quan - và luôn kèm danh sách những thứ làm
 dải ngày rộng ra như vậy: bead chưa có size nên không nằm trong tổng còn lại, chuỗi bị chặn và bead
 nào mà mấy mốc ngày đang mặc định là sẽ chạy trước, việc `needs-human` mà không velocity nào của
 agent áp vào được, và liệu cách tính thời lượng có bao gồm quãng bead nằm chờ trong backlog hay
@@ -205,12 +205,12 @@ không. Một dự báo thiếu danh sách đó chỉ là một con số đóng 
 
 Với `--apply` nó ghi snapshot lên epic dưới dạng metadata kèm một note, và đó là thứ duy nhất skill
 này ghi. Lý do phải ghi lại là để lần sau: `forecast` mở đầu bằng việc **tự cho điểm dự báo lần
-trước** — bao nhiêu điểm đã dịch chuyển, epic còn đúng hẹn so với mốc khả năng cao hay đã quá mốc bi
+trước** - bao nhiêu điểm đã dịch chuyển, epic còn đúng hẹn so với mốc khả năng cao hay đã quá mốc bi
 quan và quá mấy ngày, velocity có nhảy hơn gấp đôi hay không. Phép tính chỉ nói được là ngày đã
 trượt. Còn lý do nào trong danh sách kia mới là lý do thật thì chỉ bạn nói được, và đúng một câu đó
 là toàn bộ giá trị của việc này.
 
-## 6. Kiểm lại lời khai — `bead-audit`
+## 6. Kiểm lại lời khai - `bead-audit`
 
 ```
 /bead-audit                          # cả board
@@ -219,7 +219,7 @@ là toàn bộ giá trị của việc này.
 ```
 
 Dùng khi chữ "đã xong" bắt đầu nghe hơi lạc quan. Nó tỏa ra nhiều agent chỉ-đọc để đo lại, mỗi agent
-trả về DONE, NOT DONE hay PARTIAL kèm bằng chứng cụ thể — file và số dòng, lệnh đã chạy, exit code
+trả về DONE, NOT DONE hay PARTIAL kèm bằng chứng cụ thể - file và số dòng, lệnh đã chạy, exit code
 nhận được. Không có bằng chứng thì tính là NOT DONE. Chỉ nói miệng thì tính là PARTIAL.
 
 Sau đó chỉ vòng chính được đóng hay sửa bead. Chỗ tách vai này quan trọng: một agent vừa được quyền
@@ -242,13 +242,13 @@ theo, và vòng lặp khép lại.
 | cái này trông như tài liệu | bạn trỏ `bead-split` vào một README | trỏ vào spec, hoặc chỉ rõ mục cần lấy |
 
 Không cái nào trong đây là lỗi. Tất cả đều là skill từ chối đưa cho bạn một câu trả lời tự tin mà nó
-không chứng minh được — và đó là lý do duy nhất để tin những câu trả lời mà nó có đưa.
+không chứng minh được - và đó là lý do duy nhất để tin những câu trả lời mà nó có đưa.
 
 ## Tra nhanh
 
 | Skill | Để làm gì | Có ghi vào board? |
 |---|---|---|
-| `bead-split` | spec markdown → epic + task con đã size và phân loại | chỉ khi `--apply` |
+| `bead-split` | spec markdown -> epic + task con đã size và phân loại | chỉ khi `--apply` |
 | `bead-estimate` | size bead theo lịch sử đo được | một id thì có; `--backfill` và `--epic` chỉ khi `--apply` |
 | `bead-take` | một bead, một worktree, đóng kèm bằng chứng | có |
 | `bead-loop` | một bead sẵn sàng mỗi vòng | có |
@@ -260,7 +260,7 @@ không chứng minh được — và đó là lý do duy nhất để tin nhữn
 
 Không skill nào chạy `git push` hay `bd dolt push`. Chúng báo file đã sửa và những lệnh chúng **không**
 chạy. Đây là chủ ý: miễn là history còn thẳng và chưa push, một lệnh `git reset --hard` xoá sạch cả
-một đêm chạy tự động — và đó là tấm lưới an toàn duy nhất mà toàn bộ chuyện này có.
+một đêm chạy tự động - và đó là tấm lưới an toàn duy nhất mà toàn bộ chuyện này có.
 
 ## Sửa một skill
 
@@ -278,7 +278,7 @@ bin/bd-kit install --into ../du-an-cua-toi
 ```
 
 `docs/authoring.md` nói về bộ token và các field theo từng bề mặt. `docs/transforms.md` liệt kê mọi
-điểm khác nhau giữa ba bề mặt — nếu một khác biệt không có trong danh sách đó thì ba bề mặt không
+điểm khác nhau giữa ba bề mặt - nếu một khác biệt không có trong danh sách đó thì ba bề mặt không
 khác nhau ở chỗ đó, và cái bạn thấy trong bản đã cài là drift.
 
 ## Cái gì đã chạy thật
@@ -287,8 +287,8 @@ Nói thẳng cho rõ, vì một tài liệu nói quá về mức độ đã ki�
 
 Đã đo trên board thật 75 bead trong lúc viết kit này: `board.py report`, `forecast` và `refclass` ở
 mọi mode, một snapshot `pm.forecast` thật được ghi rồi đọc lại qua đường calibration, cùng
-`bd-kit install`, `diff`, `doctor` và `uninstall`. Ba chỗ "từ chối trả lời" nói ở trên — chế độ tin
-cậy của velocity, cảnh báo độ phủ, hai ngưỡng của reference class — tồn tại vì chính board đó đã cho
+`bd-kit install`, `diff`, `doctor` và `uninstall`. Ba chỗ "từ chối trả lời" nói ở trên - chế độ tin
+cậy của velocity, cảnh báo độ phủ, hai ngưỡng của reference class - tồn tại vì chính board đó đã cho
 ra câu trả lời sai nhưng tự tin trước đó, và mỗi chỗ đều có test dựng lại đúng tình huống.
 
 Chưa chạy lại trong phiên đó: `bead-split`, `bead-take`, `bead-loop`, `bead-fleet` và `bead-audit`

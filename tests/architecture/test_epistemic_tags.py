@@ -69,6 +69,13 @@ def fold(text: str) -> str:
 # cover for it. That is the same failure this file guards against in prose.
 DOC_GLOBS = (
     "*.md",
+    # deploy/ is a documentation tree in its own right -- an index, a systemd
+    # guide and a chart-test note, all of which make claims about what was and
+    # was not verified on the machine that wrote them. Added when that tree
+    # landed (0.1.6): a new directory of prose outside every glob is a place
+    # an unlabelled claim can sit forever without anyone able to grep for it,
+    # which is the exact failure this file exists to prevent.
+    "deploy/**/*.md",
     "docs/**/*.md",
     "examples/**/*.md",
     "integrations/*/README*.md",

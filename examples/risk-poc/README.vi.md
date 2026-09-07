@@ -1,4 +1,4 @@
-# PoC quét rủi ro — nhật ký quyết định AI có thể kiểm chứng
+# PoC quét rủi ro - nhật ký quyết định AI có thể kiểm chứng
 
 *[English](README.md)*
 
@@ -8,7 +8,7 @@ toán; mọi quyết định được ghi vào chuỗi chống sửa đổi, và
 kiểm tra một quyết định đơn lẻ mà không cần được trao toàn bộ nhật ký.
 
 Toàn bộ dữ liệu ở đây là **tổng hợp (synthetic)**. Không có dữ liệu khách hàng, không có
-tổ chức nào, không có cá nhân nào, và không có mô hình thật — "agent" là một tập luật
+tổ chức nào, không có cá nhân nào, và không có mô hình thật - "agent" là một tập luật
 tất định, nên demo cho ra cùng một kết quả ở mọi lần chạy và có thể lập luận được về
 trail. Thứ được trình diễn là lớp bằng chứng, không phải mô hình.
 
@@ -31,7 +31,7 @@ tự lùi về ký tự ASCII trên console không encode được ký tự khun
 
 Cả hai script đều được phủ bởi `tests/test_examples_risk_poc.py`, test này kiểm chứng
 đúng những khẳng định trang này đưa ra. Một ví dụ đã lệch khỏi thư viện mà không ai biết
-thì còn tệ hơn không có ví dụ — nó dạy sai một cách rất tự tin — nên nó được test như code.
+thì còn tệ hơn không có ví dụ - nó dạy sai một cách rất tự tin - nên nó được test như code.
 
 ---
 
@@ -44,7 +44,7 @@ Sáu lệnh thanh toán tổng hợp được sàng lọc. Với mỗi lệnh:
 | `decide` | agent luật-cơ-bản trả về approve / deny / escalate | đóng vai mô hình |
 | `redact` | `RegexRedactor` che bí mật trong input | **trước** mọi phép băm |
 | `commit` | `input_commitment = sha256(canonical_json(input_đã_che))` | input được cam kết, không bao giờ được lưu |
-| `canon` | bản ghi quyết định → JSON chuẩn tắc | khoá đã sắp xếp, không khoảng trắng, một chủ sở hữu duy nhất |
+| `canon` | bản ghi quyết định -> JSON chuẩn tắc | khoá đã sắp xếp, không khoảng trắng, một chủ sở hữu duy nhất |
 | `hash` | `payload_hash = sha256(payload)` | payload chỉ được tham chiếu qua hash |
 | `chain` | `EntryHeader` liên kết tới `prev_hash` | chuỗi băm header, không băm payload |
 | `seal` | niêm phong HMAC forward-secure, khoá tiến hoá | khoá ký entry *n* đã biến mất ở *n+1* |
@@ -67,7 +67,7 @@ input **đã redact** một cách có chủ ý: nếu cam kết trên cleartext,
 ### Một quyết định cố tình không ghi nhận giám sát của con người
 
 Một nhánh code để `human_oversight` trống. Report phải hiển thị đó là *oversight not
-recorded*, đếm tách khỏi `automated` — đây là hai khẳng định khác nhau, gộp chúng lại
+recorded*, đếm tách khỏi `automated` - đây là hai khẳng định khác nhau, gộp chúng lại
 chính là báo cáo "thiếu bằng chứng" thành "bằng chứng"
 (CLAUDE.md quy tắc 5: `None` ≠ `0`, chưa đo ≠ không có).
 
@@ -79,27 +79,27 @@ examples/poc-out/
   decisions.jsonl.anchors   các Merkle root đã công bố (bản ghi VỀ trail)
   decisions.jsonl.attest    các niêm phong forward-secure
   decisions.jsonl.sealkey   epoch khoá hiện tại
-  sealkey.escrow            A₀ — xem cảnh báo bên dưới
+  sealkey.escrow            A₀ - xem cảnh báo bên dưới
 ```
 
 Không có sidecar `.drops` vì không có write nào bị rớt. Report ghi
-`Dropped writes: >= 0 (measured minimum, source: sidecar)` — một **cận dưới đã đo**, không
+`Dropped writes: >= 0 (measured minimum, source: sidecar)` - một **cận dưới đã đo**, không
 phải bảo đảm về tính đầy đủ. Bản thân sidecar có thể bị xoá, và một ổ đĩa hỏng tới mức
 không ghi nổi bản ghi rớt thì cũng không thể làm chứng cho chính sự cố của nó.
 
 > **`sealkey.escrow` là hiện vật của demo.** A₀ được ghi cạnh trail ở đây chỉ vì demo
 > không có chỗ nào khác để đặt. Trong triển khai thật, đây là bí mật **không được** nằm
-> trên máy ghi log — nó thuộc về bên verifier. Kịch bản 6 bên dưới chỉ bị phát hiện vì
+> trên máy ghi log - nó thuộc về bên verifier. Kịch bản 6 bên dưới chỉ bị phát hiện vì
 > verifier giữ một khoá mà kẻ tấn công không có.
 
 ---
 
-## Hướng dẫn cho kiểm toán viên — tám kịch bản
+## Hướng dẫn cho kiểm toán viên - tám kịch bản
 
 `tamper_demo.py` sao chép trail một lần cho mỗi kịch bản, tấn công bản sao, rồi in ra lệnh
 mà kiểm toán viên sẽ chạy kèm exit code thật. **Trail gốc không bao giờ bị sửa** (có test
 kiểm chứng). Script tự assert kết quả kỳ vọng của từng kịch bản và thoát khác 0 nếu có
-kịch bản nào lệch — đó là biên nhận khả-phủ-định (falsifiability receipt) cho bảng này.
+kịch bản nào lệch - đó là biên nhận khả-phủ-định (falsifiability receipt) cho bảng này.
 
 | # | Kịch bản | Phát hiện bởi | Exit |
 |---:|---|---|---:|
@@ -107,12 +107,12 @@ kịch bản nào lệch — đó là biên nhận khả-phủ-định (falsifia
 | 2 | Xoá một quyết định | chuỗi: `seq_gap` | 1 |
 | 3 | Đảo thứ tự lịch sử | chuỗi: `prev_hash_mismatch` | 1 |
 | 4 | Chèn thêm một quyết định | chuỗi: `prev_hash_mismatch` | 1 |
-| 5 | Viết lại **toàn bộ** trail một cách nhất quán | anchor — riêng chuỗi báo `ok` | 1 |
-| 6 | Cắt đuôi trail, cắt cả sidecar | niêm phong forward-secure — riêng chuỗi báo `ok` | 1 |
-| 7 | Một dòng từ phiên bản phần mềm **mới hơn** | không gì cả — báo *không kiểm chứng được*, **không phải** bị sửa | 2 |
+| 5 | Viết lại **toàn bộ** trail một cách nhất quán | anchor - riêng chuỗi báo `ok` | 1 |
+| 6 | Cắt đuôi trail, cắt cả sidecar | niêm phong forward-secure - riêng chuỗi báo `ok` | 1 |
+| 7 | Một dòng từ phiên bản phần mềm **mới hơn** | không gì cả - báo *không kiểm chứng được*, **không phải** bị sửa | 2 |
 | 8 | Cung cấp một quyết định cho kiểm toán viên | membership proof (bundle hợp lệ thoát 0) | 1 |
 
-### Kịch bản 1–4: chuỗi tự làm việc của nó
+### Kịch bản 1-4: chuỗi tự làm việc của nó
 
 Sửa, xoá, đảo thứ tự và chèn thông thường đều làm đứt một liên kết. `verify` in ra chỗ
 đứt đầu tiên kèm số thứ tự và lý do, rồi dừng. Nó **báo cáo**, không bao giờ **sửa chữa**.
@@ -138,7 +138,7 @@ ANCHOR BROKEN at seq=3: anchor_entry_hash_mismatch
 exit 1
 ```
 
-Trong demo này, sidecar anchor nằm ngay cạnh trail — điều đó chứng minh cơ chế, nhưng
+Trong demo này, sidecar anchor nằm ngay cạnh trail - điều đó chứng minh cơ chế, nhưng
 không chứng minh thuộc tính an toàn: kẻ đã viết lại được trail thì cũng xoá được sidecar
 bên cạnh. **Hãy neo vào một miền tin cậy mà máy ghi log không kiểm soát.**
 
@@ -154,7 +154,7 @@ exit 0
 ```
 
 Niêm phong forward-secure bắt được, vì epoch khoá trên đĩa không thể quay ngược về epoch
-trước đó — `A_{j+1} = SHA-256(A_j)` là hàm một chiều:
+trước đó - `A_{j+1} = SHA-256(A_j)` là hàm một chiều:
 
 ```
 $ log.verify_attestations(initial_key=A_0)   # ký quỹ ngoài máy ghi
@@ -176,7 +176,7 @@ exit 2
 Exit 2 là một phán quyết riêng. Verifier không được tính lại một dòng theo bộ trường mà
 dòng đó không được ký cùng: báo một dòng là nguyên vẹn dựa trên một hash mà nó không tái
 tạo được chính là lời nói dối duy nhất mà cơ chế tamper-evidence không bao giờ được phép
-nói — còn gọi đó là *bị can thiệp* chính là cảnh báo sai hàng loạt mà thư viện này ra đời
+nói - còn gọi đó là *bị can thiệp* chính là cảnh báo sai hàng loạt mà thư viện này ra đời
 để làm cho không thể xảy ra (RFC 6962 §4.6: kiểu không nhận diện được là mờ đục, không
 phải lỗi).
 
@@ -217,7 +217,7 @@ waxseal report examples/poc-out/decisions.jsonl --anchors  # đồng thời phá
 Báo cáo nêu phán quyết về chuỗi, tính đầy đủ (`dropped_writes` kèm nguồn), kiểm kê theo
 payload type và schema fingerprint, thống kê quyết định theo loại và theo chế độ giám sát,
 cùng trạng thái của từng kiểm tra sidecar. Kiểm tra **không được chạy** sẽ in là *not
-checked* — không bao giờ in là đạt. Một báo cáo nói "ok" cho thứ nó đã bỏ qua sẽ thổi
+checked* - không bao giờ in là đạt. Một báo cáo nói "ok" cho thứ nó đã bỏ qua sẽ thổi
 phồng bằng chứng, đúng cái sai lầm mà cả lớp này sinh ra để tránh.
 
 ---
@@ -229,7 +229,7 @@ phồng bằng chứng, đúng cái sai lầm mà cả lớp này sinh ra để 
   niêm phong đã tiến hoá ở ngoài tầm với của kẻ đó.
 - **Toàn vẹn chuỗi không phải là tính đầy đủ của trail.** Một write chưa từng xảy ra thì
   không để lại khoảng trống seq nào. `dropped_writes` đo tính đầy đủ một cách tách bạch,
-  và `None` ở đó nghĩa là *chưa đo* — không bao giờ là 0.
+  và `None` ở đó nghĩa là *chưa đo* - không bao giờ là 0.
 - **Cam kết trên input entropy thấp là có thể xác nhận được.** Nếu input chỉ có ít giá trị
   khả dĩ, ai cũng có thể liệt kê hết rồi dò khớp hash. Commitment không phải mã hoá.
 - **Không có gì ở đây là một phán quyết về tuân thủ.** Lớp này tạo ra bằng chứng kỹ thuật
