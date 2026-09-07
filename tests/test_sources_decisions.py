@@ -252,3 +252,28 @@ class TestIterDecisions:
         _, read_back = next(iter(iter_decisions(log)))
         assert read_back is not None
         assert read_back.human_oversight == oversight
+
+    @pytest.mark.parametrize("name", ["trail.jsonl", "trail.db"])
+    def test_declared_risk_tier_survives_the_round_trip(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        # The tier is the provider's own declaration (Law on AI 134/2025
+        # Art. 10(1)); a backend that dropped or normalized it would change
+        # what the provider is on record as having declared.
+        log = open_log(tmp_path / name)
+        record_decision(
+            log, a_record(risk_tier="cao", classification_ref="HSPL-2026-014/v3")
+        )
+        _, read_back = next(iter(iter_decisions(log)))
+        assert read_back is not None
+        assert read_back.risk_tier == "cao"
+        assert read_back.classification_ref == "HSPL-2026-014/v3"
+
+    def test_a_decision_with_no_declared_tier_reads_back_as_none(self, tmp_path: Path) -> None:
+        # rule 5: nothing declared is its own state, never the lowest tier.
+        log = open_log(tmp_path / "trail.jsonl")
+        record_decision(log, a_record())
+        _, read_back = next(iter(iter_decisions(log)))
+        assert read_back is not None
+        assert read_back.risk_tier is None
+        assert read_back.classification_ref is None
