@@ -39,6 +39,7 @@ import StatusPill from '@/components/ui/StatusPill.vue'
 import TintPanel from '@/components/ui/TintPanel.vue'
 import PrincipalCard from '@/components/app/PrincipalCard.vue'
 import AuthNeeded from '@/components/app/AuthNeeded.vue'
+import { needsCredential } from '@/services/serverFacts'
 
 const { t } = useI18n()
 
@@ -267,7 +268,7 @@ function ownerLabel(row: ApiKeyRecord): string {
     <p class="desc">{{ t('adminDocsWhere') }}</p>
   </AppCard>
 
-  <AuthNeeded />
+  <AuthNeeded v-if="needsCredential" />
 
   <p class="foot">{{ t('tokenSub') }}</p>
 </template>

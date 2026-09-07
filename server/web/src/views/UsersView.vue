@@ -42,6 +42,7 @@ import StatusPill from '@/components/ui/StatusPill.vue'
 import TintPanel from '@/components/ui/TintPanel.vue'
 import PrincipalCard from '@/components/app/PrincipalCard.vue'
 import AuthNeeded from '@/components/app/AuthNeeded.vue'
+import { needsCredential } from '@/services/serverFacts'
 
 const { t } = useI18n()
 const { operators, creating, createError, created, invite } = useOperators()
@@ -247,7 +248,7 @@ async function submit(): Promise<void> {
     </TintPanel>
   </AsyncBlock>
 
-  <AuthNeeded />
+  <AuthNeeded v-if="needsCredential" />
 
   <p class="foot">{{ t('adminDocsWhere') }}</p>
 </template>
