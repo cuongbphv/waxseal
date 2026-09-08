@@ -354,7 +354,10 @@ jobs:
       # declares `#!/bin/sh` and must stay POSIX — shellcheck's default guess
       # would let a bashism through.
       - run: shellcheck --shell=sh deploy/install.sh
-      - run: shellcheck server/scripts/*.sh
+      # -x follows `source`, -P SCRIPTDIR resolves the `# shellcheck source=`
+      # directives next to each script, so SERVER_DIR and friends are seen
+      # where they are set instead of flagged as unassigned.
+      - run: shellcheck -x -P SCRIPTDIR server/scripts/*.sh
 
       - run: uv run --extra dev python tools/build_pyz.py
       - name: publish digests the way the release does

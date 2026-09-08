@@ -259,7 +259,9 @@ install_pyz() {
         # from anywhere.
         [ -d "$FROM_DIR" ] || die "--from-dir $FROM_DIR is not a directory"
         srcdir="$(cd "$FROM_DIR" && pwd)"
-        artifact="$(ls "$srcdir"/waxseal-*.pyz 2>/dev/null | head -n 1)" \
+        # find, not ls: shellcheck SC2012, and a filename with a newline in it
+        # would otherwise split into two candidates. sort keeps ls's order.
+        artifact="$(find "$srcdir" -maxdepth 1 -name 'waxseal-*.pyz' 2>/dev/null | sort | head -n 1)" \
             || die "no waxseal-*.pyz in $srcdir (build one with: python3 tools/build_pyz.py)"
         [ -n "$artifact" ] || die "no waxseal-*.pyz in $srcdir (build one with: python3 tools/build_pyz.py)"
         sums="$srcdir/SHA256SUMS"

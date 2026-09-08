@@ -11,6 +11,7 @@
 # Written with the waxseal LIBRARY, not by hand — the same path a real client
 # takes, so the demo cannot be a shape no actual client produces.
 
+# shellcheck source=_lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 DATA_DIR="$SERVER_DIR/.local-data"
@@ -25,7 +26,7 @@ done
 
 py="$(server_python)"
 step "Seeding demo chains into $DATA_DIR/chains"
-cd "$SERVER_DIR"
+cd "$SERVER_DIR" || exit 1
 DATA_DIR="$DATA_DIR" $py - <<'PYEOF'
 import os
 from pathlib import Path

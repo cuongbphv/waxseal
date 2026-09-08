@@ -22,6 +22,7 @@
 # through, so the published frames read as a deployment rather than as somebody's
 # laptop.
 
+# shellcheck source=_lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 OUT="$SERVER_DIR/docs/screenshots"

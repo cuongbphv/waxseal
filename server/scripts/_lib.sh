@@ -8,7 +8,11 @@
 set -euo pipefail
 
 SERVER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Read by the scripts that source this file, not here; shellcheck checks this
+# file on its own in CI and cannot see those readers.
+# shellcheck disable=SC2034
 REPO_ROOT="$(cd "$SERVER_DIR/.." && pwd)"
+# shellcheck disable=SC2034
 WEB_DIR="$SERVER_DIR/web"
 
 if [[ -t 1 ]]; then
