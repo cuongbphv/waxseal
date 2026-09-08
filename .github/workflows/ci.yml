@@ -474,3 +474,48 @@ jobs:
             exit 1
           }
           echo "all value files are rendered: $actual"
+
+  # Advisory dependency audit (0.1.6 S3). Findings are labelled, never a
+  # silent 0 and never a merge gate until the owner decides they should be.
+  # Close bar is this file plus the local commands below, not this job going
+  # green on GitHub.
+  #
+  # Local:
+  #   uvx pip-audit
+  #   (cd server && uvx pip-audit)
+  #   (cd server/web && npm audit --audit-level=high)
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: pip-audit library
+        run: uvx pip-audit
+      - name: pip-audit server
+        run: uvx pip-audit
+        working-directory: server
+      - name: npm audit web
+        working-directory: server/web
+        run: |
+          npm ci || npm install
+          npm audit --audit-level=high
+      # The image job builds waxseal:ci; this job does not. A scanner with
+      # nothing to scan is UNMEASURED, not a pass (CLAUDE.md rule 5).
+      - name: optional trivy on waxseal:ci
+        run: |
+          if ! command -v trivy >/dev/null 2>&1; then
+            echo "trivy not on PATH — UNMEASURED"
+            exit 0
+          fi
+          if ! docker image inspect waxseal:ci >/dev/null 2>&1; then
+            echo "waxseal:ci not present in this job — UNMEASURED"
+            exit 0
+          fi
+          trivy image --exit-code 0 waxseal:ci
+
