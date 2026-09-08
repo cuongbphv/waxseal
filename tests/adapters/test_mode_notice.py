@@ -20,7 +20,12 @@ from waxseal.log import AuditLog
 
 PT = "application/vnd.test.event+json"
 
-pytestmark = pytest.mark.skipif(
+# Only the chmod-driven end-to-end tests skip on Windows: os.chmod cannot set
+# POSIX group/other bits there. The mode -> notice logic itself is tested
+# below on every platform, so the module's body stays covered on the
+# windows-latest job too (the first Windows run of 0.1.6 failed the 100%
+# floor on exactly these lines, with every test green).
+posix_modes_only = pytest.mark.skipif(
     sys.platform == "win32",
     reason=(
         "UNMEASURED: POSIX file modes are not a Windows fact; the notice is "
@@ -29,6 +34,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@posix_modes_only
 def test_a_world_readable_trail_prints_a_notice_and_still_opens(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -45,6 +51,7 @@ def test_a_world_readable_trail_prints_a_notice_and_still_opens(
     assert opened.verify().ok
 
 
+@posix_modes_only
 def test_a_0600_trail_is_silent(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = tmp_path / "trail.jsonl"
     log = AuditLog.open(path)
@@ -56,6 +63,7 @@ def test_a_0600_trail_is_silent(tmp_path: Path, capsys: pytest.CaptureFixture[st
     assert capsys.readouterr().err == ""
 
 
+@posix_modes_only
 def test_a_world_readable_sealkey_prints_a_notice(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -72,16 +80,51 @@ def test_a_world_readable_sealkey_prints_a_notice(
     assert str(key_path) in err
 
 
-def test_a_stat_error_is_silent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    path = tmp_path / "missing.jsonl"
-    real_stat = Path.stat
+def _stat_with_mode(mode: int) -> os.stat_result:
+    return os.stat_result((mode, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 
-    def boom(self: Path, *, follow_symlinks: bool = True) -> os.stat_result:
-        if self == path:
-            raise OSError("UNMEASURED")
-        return real_stat(self, follow_symlinks=follow_symlinks)
 
-    monkeypatch.setattr(Path, "stat", boom)
-    from waxseal.adapters.mode_notice import notice_if_group_or_world_readable
+class TestThePosixBodyOnEveryPlatform:
+    """`_posix_mode_notice` is the stat + format step behind the win32 gate.
 
-    notice_if_group_or_world_readable(path)
+    Called directly, it runs on Windows too: a stat_result carries st_mode
+    everywhere, only its meaning is POSIX. That is what keeps these lines
+    inside the coverage floor on the windows-latest job.
+    """
+
+    def test_a_stat_error_is_silent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from waxseal.adapters.mode_notice import _posix_mode_notice
+
+        path = tmp_path / "missing.jsonl"
+        real_stat = Path.stat
+
+        def boom(self: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+            if self == path:
+                raise OSError("UNMEASURED")
+            return real_stat(self, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(Path, "stat", boom)
+        _posix_mode_notice(path)
+        assert capsys.readouterr().err == ""
+
+    def test_group_or_world_bits_print_the_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from waxseal.adapters.mode_notice import _posix_mode_notice
+
+        path = tmp_path / "trail.jsonl"
+        monkeypatch.setattr(Path, "stat", lambda self, **_: _stat_with_mode(0o100644))
+        _posix_mode_notice(path)
+        err = capsys.readouterr().err
+        assert "notice:" in err and str(path) in err and "0644" in err
+
+    def test_owner_only_bits_are_silent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from waxseal.adapters.mode_notice import _posix_mode_notice
+
+        monkeypatch.setattr(Path, "stat", lambda self, **_: _stat_with_mode(0o100600))
+        _posix_mode_notice(tmp_path / "trail.jsonl")
+        assert capsys.readouterr().err == ""

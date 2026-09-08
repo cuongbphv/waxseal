@@ -17,6 +17,20 @@ from pathlib import Path
 def notice_if_group_or_world_readable(path: Path) -> None:
     if sys.platform == "win32":  # pragma: no cover - exercised on the windows-latest CI job
         return
+    # Same two-platform pragma pair as adapters/filelock.py: each line names the
+    # CI job that reaches it, so neither job can read the other's line as a gap.
+    _posix_mode_notice(path)  # pragma: no cover - exercised on the ubuntu-latest CI job
+
+
+def _posix_mode_notice(path: Path) -> None:
+    """The stat + format step, kept apart from the platform gate on purpose.
+
+    Behind the gate alone, these lines ran on no Windows job and the 100%
+    floor failed there with every test green (first Windows run of 0.1.6). A
+    stat_result carries st_mode on every platform; only its meaning is POSIX,
+    so the tests call this directly and the gate above stays the one line
+    that is platform-specific.
+    """
     try:
         mode = path.stat().st_mode
     except OSError:
