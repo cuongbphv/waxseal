@@ -64,6 +64,7 @@ def _report(
     # same reason verify uses measure_drops=False: a CLI process observed no
     # writes, so it must report "not measured", never zero.
     result, entries = log._verify_and_entries()
+    hashes = [e.entry_hash for e in entries]
 
     # Anchors and witnesses are measured before the pin check, same reorder
     # as _verify and for the same reason: _pin_check needs what this run
@@ -75,7 +76,7 @@ def _report(
     observed_anchor_records: tuple[AnchorRecord, ...] | None = None
     observed_anchor_unreadable: bool | None = None
     if check_anchors and trail is not None:
-        anchors = _anchor_check(log, trail, tsa_ca_file=tsa_ca_file).summary
+        anchors = _anchor_check(log, trail, tsa_ca_file=tsa_ca_file, hashes=hashes).summary
         observed_anchor_sinks = _observed_anchor_sinks(trail)
         observed_anchor_records = _observed_anchor_records(trail)
         observed_anchor_unreadable = _observed_anchor_unreadable(trail)
@@ -83,7 +84,7 @@ def _report(
     witness_verdicts: tuple[WitnessVerdict, ...] | None = None
     observed_witness_consistent: bool | None = None
     if witnesses:
-        witness_verdicts = tuple(_witness_verdicts(log, witnesses))
+        witness_verdicts = tuple(_witness_verdicts(log, witnesses, hashes=hashes))
         observed_witness_consistent = _observed_witness_consistent(list(witness_verdicts))
 
     # Ledger (waxseal-fg4.45), measured here — before the pin check, same
@@ -121,6 +122,7 @@ def _report(
             declare_max_anchor_age_s=declare_max_anchor_age_s,
             declare_topology=declare_topology,
             observed_ledger_ok=observed_ledger_ok,
+            hashes=hashes,
         )
         pin = pin_check.summary
     if trail is not None:
@@ -135,7 +137,7 @@ def _report(
     # `report` had no receipts dimension at all until this, so the document
     # that outlives the terminal was the one place receipt coverage could not
     # be read off (waxseal-fg4.24).
-    receipts = _receipts_check(log, trail).summary
+    receipts = _receipts_check(log, trail, hashes=hashes).summary
 
     # τ (waxseal-mfi, closing conformance.md gap G1): `None` when no --pin was
     # given, or the pin carries no declared_topology: same rule as _verify's

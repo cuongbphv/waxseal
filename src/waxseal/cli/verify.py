@@ -51,7 +51,12 @@ def _verify(
     ledger_trail_id: str | None = None,
 ) -> int:
     # A CLI process saw no writes, so it cannot measure drops (None, not 0).
-    result = log.verify(measure_drops=False)
+    # One materializing pass: the chain verdict and the hashes every later
+    # dimension (anchors, witnesses, pin, receipts, ledger) is computed over.
+    # Each of those used to call entry_hashes() on its own, rematerializing
+    # the same trail (P1 / test_perf_receipts.TestVerifyReadsHashesOnce).
+    result, entries = log._verify_and_entries()
+    hashes = [e.entry_hash for e in entries]
     codes = [0]
     if not result.ok:
         print(f"BROKEN at seq={result.broken_seq}: {result.reason} (checked={result.checked})")
@@ -96,7 +101,7 @@ def _verify(
     # check_anchors False in that case (no local sidecar to check), and this
     # guard just makes that invariant visible to mypy, not a new behavior.
     if check_anchors and trail is not None:
-        anchor_check = _anchor_check(log, trail, tsa_ca_file=tsa_ca_file)
+        anchor_check = _anchor_check(log, trail, tsa_ca_file=tsa_ca_file, hashes=hashes)
         observed_anchor_sinks = _observed_anchor_sinks(trail)
         observed_anchor_records = _observed_anchor_records(trail)
         observed_anchor_unreadable = _observed_anchor_unreadable(trail)
@@ -104,7 +109,7 @@ def _verify(
     witness_verdicts: list[WitnessVerdict] | None = None
     observed_witness_consistent: bool | None = None
     if witnesses:
-        witness_verdicts = _witness_verdicts(log, witnesses)
+        witness_verdicts = _witness_verdicts(log, witnesses, hashes=hashes)
         observed_witness_consistent = _observed_witness_consistent(witness_verdicts)
 
     # Ledger (waxseal-fg4.45), measured here for the same reason anchors and
@@ -121,7 +126,7 @@ def _verify(
     if ledger_liveness is not None or ledger_registry is not None:
         assert ledger_trail_id is not None  # main() always fills this in
         ledger_check = _ledger_check(
-            log.entries(),
+            iter(entries),
             rpc_urls=ledger_rpc_urls,
             liveness=ledger_liveness,
             registry=ledger_registry,
@@ -147,6 +152,7 @@ def _verify(
             declare_max_anchor_age_s=declare_max_anchor_age_s,
             declare_topology=declare_topology,
             observed_ledger_ok=observed_ledger_ok,
+            hashes=hashes,
         )
         print(check.line)
         codes.append(check.exit_code)
@@ -170,7 +176,7 @@ def _verify(
         print(ledger_check.line)
         codes.append(ledger_check.exit_code)
 
-    receipts_check = _receipts_check(log, trail)
+    receipts_check = _receipts_check(log, trail, hashes=hashes)
     print(receipts_check.line)
     codes.append(receipts_check.exit_code)
 

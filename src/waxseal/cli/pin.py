@@ -35,6 +35,7 @@ def _pin_check(
     declare_max_anchor_age_s: int | None = None,
     declare_topology: SeparationTopology | None = None,
     observed_ledger_ok: bool | None = None,
+    hashes: list[str] | None = None,
 ) -> tuple[_Check, PinState | None]:
     """Check the trail against what this verifier last confirmed.
 
@@ -114,7 +115,8 @@ def _pin_check(
             None,
         )
 
-    hashes = log.entry_hashes()
+    if hashes is None:
+        hashes = log.entry_hashes()
     now_dt = now_fn()
     now = now_dt.isoformat()
 

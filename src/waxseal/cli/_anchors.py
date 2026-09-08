@@ -98,7 +98,9 @@ _RECEIPTS_LIMIT_NOTE: Final = (
 )
 
 
-def _receipts_check(log: AuditLog, trail: Path | None) -> _Check:
+def _receipts_check(
+    log: AuditLog, trail: Path | None, hashes: list[str] | None = None
+) -> _Check:
     """Reconcile the `.receipts` sidecar against the trail as it stands now.
 
     A receipt is a second authority's write-time acknowledgment that entry
@@ -130,12 +132,13 @@ def _receipts_check(log: AuditLog, trail: Path | None) -> _Check:
         return _Check(_RECEIPTS_NOT_RECORDED, _RECEIPTS_ABSENT_LINE)
 
     # entry_hashes() materializes the whole trail, so it is only paid for when
-    # there is at least one readable record to compare against.
-    hashes = (
-        log.entry_hashes()
-        if any(isinstance(line, ReceiptRecord) for line in sidecar.lines)
-        else []
-    )
+    # there is at least one readable record to compare against. A caller that
+    # already has the hashes from `_verify_and_entries` passes them in.
+    if any(isinstance(line, ReceiptRecord) for line in sidecar.lines):
+        if hashes is None:
+            hashes = log.entry_hashes()
+    else:
+        hashes = []
     result = reconcile_receipts(hashes, sidecar)
     notes: list[str] = []
     if result.unreadable_versions:
@@ -175,7 +178,13 @@ def _receipts_check(log: AuditLog, trail: Path | None) -> _Check:
     )
 
 
-def _anchor_check(log: AuditLog, trail: Path, *, tsa_ca_file: Path | None = None) -> _Check:
+def _anchor_check(
+    log: AuditLog,
+    trail: Path,
+    *,
+    tsa_ca_file: Path | None = None,
+    hashes: list[str] | None = None,
+) -> _Check:
     """Check the `.anchors` sidecar against the trail as it stands now.
 
     ``tsa_ca_file`` turns on the OPTIONAL signature dimension
@@ -212,7 +221,8 @@ def _anchor_check(log: AuditLog, trail: Path, *, tsa_ca_file: Path | None = None
             "no anchors found (anchor coverage unmeasured)",
         )
 
-    hashes = log.entry_hashes()
+    if hashes is None:
+        hashes = log.entry_hashes()
     for record in records:
         cp = record.checkpoint
         reason = verify_checkpoint(hashes, cp)
@@ -515,7 +525,9 @@ def _receipt_verdict(record: AnchorRecord) -> _ReceiptVerdict:
     )
 
 
-def _witness_verdicts(log: AuditLog, urls: list[str]) -> list[WitnessVerdict]:
+def _witness_verdicts(
+    log: AuditLog, urls: list[str], hashes: list[str] | None = None
+) -> list[WitnessVerdict]:
     """Ask every configured witness what it saw and compare.
 
     An unreachable or unusable witness becomes an ``unreachable`` verdict
@@ -526,7 +538,8 @@ def _witness_verdicts(log: AuditLog, urls: list[str]) -> list[WitnessVerdict]:
     from waxseal.adapters.witness import HTTPWitness
     from waxseal.domain.witnessing import check_witnessed, unreachable_witness
 
-    hashes = log.entry_hashes()
+    if hashes is None:
+        hashes = log.entry_hashes()
     verdicts: list[WitnessVerdict] = []
     for url in urls:
         witness = HTTPWitness(url, api_key=_witness_api_key())

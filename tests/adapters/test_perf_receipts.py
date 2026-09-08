@@ -63,8 +63,12 @@ from typing import Any
 
 import pytest
 
+from waxseal.adapters.anchors import FileAnchorSink
 from waxseal.adapters.jsonl import JSONLBackend, JSONLCorruptionError
-from waxseal.cli import _report, _tail
+from waxseal.adapters.receipts import append_receipt
+from waxseal.cli import _report, _tail, _verify
+from waxseal.cli._anchors import _anchor_check, _receipts_check, _witness_verdicts
+from waxseal.cli.pin import _pin_check
 from waxseal.domain.fingerprint import fingerprint
 from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
@@ -409,6 +413,74 @@ class TestReportReadsOnce:
         lines[2] = lines[2][:-5]
         path.write_bytes(b"\n".join(lines))
 
-        with pytest.raises(JSONLCorruptionError) as exc_info:
+        with pytest.raises(JSONLCorruptionError) as extra_info:
             backend._integrity_scan()
-        assert exc_info.value.line_no == 3
+        assert extra_info.value.line_no == 3
+
+
+class TestVerifyReadsHashesOnce:
+    """P1: `verify --anchors --pin --witness` used to rematerialize the
+    trail for each dimension. Receipt counts bytes read of the trail file
+    only. RED (before the hashes argument) was k times the size; GREEN is
+    one pass.
+    """
+
+    def test_verify_with_anchors_pin_and_witness_reads_the_trail_once(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        log = AuditLog.open(path, anchor_sink=FileAnchorSink(path))
+        for i in range(40):
+            log.append(payload={"i": i}, payload_type=PAYLOAD_TYPE)
+        log.anchor()
+        size = path.stat().st_size
+
+        sink: list[int] = []
+        _count_reads_of(path, monkeypatch, sink)
+        code = _verify(
+            log,
+            path,
+            check_anchors=True,
+            pin_path=tmp_path / "pin.json",
+            target=str(path),
+            witnesses=["http://127.0.0.1:1"],
+        )
+        monkeypatch.undo()
+        capsys.readouterr()
+
+        assert code in (0, 2)
+        assert sum(sink) == size, (
+            f"verify --anchors --pin --witness read {sum(sink)} bytes off a "
+            f"{size}-byte trail ({sum(sink) / size:.1f}x) — each dimension is "
+            "calling entry_hashes() on its own pass"
+        )
+
+    def test_omitted_hashes_still_materializes_the_trail(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        log = AuditLog.open(path, anchor_sink=FileAnchorSink(path))
+        entry = log.append(payload={"i": 0}, payload_type=PAYLOAD_TYPE)
+        log.anchor()
+        append_receipt(
+            path,
+            seq=0,
+            entry_hash=entry.entry_hash,
+            receipt_seq=0,
+            receipt_head=entry.entry_hash,
+            source="https://ledger.example",
+            ts="2026-09-01T00:00:00+00:00",
+        )
+
+        assert _anchor_check(log, path).summary.ok
+        assert _receipts_check(log, path).summary.ok
+        assert _witness_verdicts(log, ["http://127.0.0.1:1"])
+        check, _pending = _pin_check(
+            log, tmp_path / "pin.json", target=str(path), chain_id=None
+        )
+        capsys.readouterr()
+        assert check.summary.ok
+
