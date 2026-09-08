@@ -77,6 +77,10 @@ tháng 8/2026, và [DESIGN.md](DESIGN.md) có nền tảng học thuật cho t�
 | Forward-secure seal (HMAC key-evolving, thuần stdlib) + chữ ký Ed25519 inject | ✅ | ❌ | ❌ |
 | Aggregate tag FssAgg đóng lỗ hổng truncation kể cả khi keyfile bị lộ | ✅ | ❌ | ❌ |
 | Remote backend HTTP là backend ngang hàng đầy đủ với storage local, trust model ghi rõ | ✅ | hiếm, trust model không ghi rõ | ❌ |
+| Ledger ternary: live / delinquent / unreachable (`waxseal ledger-status`) | ✅ | ❌ | ❌ |
+| WORM có phạm vi cho segment đã seal (S3 Object Lock; không bao giờ là live tail) | ✅ | ❌ | ❌ |
+| Segment đã seal + ràng buộc rotation (`waxseal segments`) | ✅ | ❌ | ❌ |
+| Nhịp anchor tối ưu chi phí (`waxseal cadence`; không mở trail) | ✅ | ❌ | ❌ |
 
 Hai dòng đầu chính là lớp lỗi từ hai sự cố kể trên; xem [DESIGN.md](DESIGN.md) cho
 nền tảng học thuật của từng dòng.
@@ -251,6 +255,10 @@ waxseal anchor trail.jsonl     # append 1 checkpoint vào sidecar .anchors cục
 waxseal verify --anchors trail.jsonl  # kiểm cả lịch sử trail so với .anchors
 waxseal preflight trail.jsonl  # cấu hình này chặn được nấc năng lực nào của attacker; luôn exit 0 (exit 3: không có trail)
 waxseal segments trail-dir/    # verify mọi segment đã seal + ràng buộc rotation trong một thư mục; chỉ đọc
+waxseal cadence --lam RATE --c COST --w HARM --rho RATE --delta SEC --t-max SEC  # N* tối ưu chi phí; không mở trail
+waxseal reconcile-tickets trail.jsonl --issuer NAME --lease-size L [--issued SPEC]
+waxseal receipt trail.jsonl --out DIR   # trích RFC 3161 / OTS receipt đã lưu; chỉ ghi dưới --out
+waxseal verify --tsa-ca-file bundle.pem trail.jsonl  # kiểm CMS/X.509 native (waxseal[rfc3161])
 
 # Mọi lệnh trên trừ `anchor` đều nhận được URL của một remote chain server:
 waxseal verify http://chain.example.com/v1/chains/default
@@ -259,6 +267,7 @@ waxseal verify http://chain.example.com/v1/chains/default
 waxseal ledger-status trail.jsonl --liveness 0xADDR --rpc https://rpc1 --rpc https://rpc2
 waxseal registry publish --descriptor-of FINGERPRINT --registry 0xADDR --rpc https://rpc1 --rpc https://rpc2
 waxseal bond deposit --bond 0xADDR --amount-wei 1000000000000000000 --rpc https://rpc1 --rpc https://rpc2
+waxseal bond prove proof.json --bond 0xADDR --rpc https://rpc1 --rpc https://rpc2
 ```
 
 ## Storage backends
@@ -493,14 +502,14 @@ waxseal anchor trail.jsonl --witness https://witness.example/anchor
 waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https://witness.example/anchor
 ```
 
-- **RFC 3161** biến `ts` từ chỗ tự khai thành được chứng thực. waxseal kiểm tra reply
-  *về mặt cấu trúc* (status, message imprint, nonce, thuật toán digest) và nói rõ điều đó
-  trong mọi dòng nó in ra. Mặc định nó **không** verify chữ ký CMS/X.509; việc đó được
-  ủy quyền cho `openssl ts -verify`, công thức nằm trong docs. Receipt mà nó không đọc
-  được là *unverifiable* (exit 2); chỉ receipt chứng thực cho bytes khác mới là *gãy*
-  (exit 1). Nếu đã cài extra `rfc3161` và bạn nêu tên một CA bundle
-  (`--tsa-ca-file`), chiều chữ ký cũng được kiểm - và token không kiểm được là exit 2
-  kèm nhãn nói rõ, không bao giờ là một lần lọt im lặng.
+- **RFC 3161** biến `ts` từ chỗ tự khai thành được chứng thực. Đường native là
+  `waxseal[rfc3161]` cộng `--tsa-ca-file`: waxseal tự kiểm chữ ký CMS/X.509, và
+  token không kiểm được là exit 2 kèm nhãn, không bao giờ là một lần lọt im lặng.
+  Không extra hoặc không cờ thì receipt vẫn được kiểm *về mặt cấu trúc* (status,
+  message imprint, nonce, thuật toán digest) và bước chữ ký để `openssl ts
+  -verify` làm fallback (công thức trong docs). Receipt không đọc được là
+  *unverifiable* (exit 2); chỉ receipt chứng thực cho bytes khác mới là *gãy*
+  (exit 1).
 - **OpenTimestamps** lưu một proof Bitcoin ở trạng thái *pending*, mờ đục và có chủ ý. Hoàn
   tất nó về sau bằng `ots upgrade` / `ots verify`.
 - Hai cái này **có thể dùng cùng nhau trong một lần chạy `anchor`**, publish cùng một
@@ -529,10 +538,12 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 
   `verify`/`report --pin` giờ nhận `--expect-anchor-binding` (một cờ), `--max-anchor-age-s
   SECONDS`, và `--declare-topology SPEC` (đủ 4 thành phần của `SeparationTopology` cùng lúc,
-  ví dụ `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`) để ghi ba khai báo
-  này. Mỗi cờ cần có `--pin` đi kèm, chỉ có tác dụng trên một lượt chạy thực sự advance pin,
-  và `--declare-topology` khai một phần trong 4 thành phần là lỗi sử dụng CLI chứ không tự
-  điền mặc định. Một lần pin advance không kèm cờ nào giữ nguyên những gì đã khai từ trước.
+  ví dụ `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`, cộng thêm
+  `ledger=true`/`ledger=false` tùy chọn) để ghi các khai báo này. Mỗi cờ cần có `--pin`
+  đi kèm, chỉ có tác dụng trên một lượt chạy thực sự advance pin, và `--declare-topology`
+  khai một phần trong 4 thành phần bắt buộc là lỗi sử dụng CLI chứ không tự điền mặc định.
+  Bỏ `ledger=` đọc là `ledger=None` ("chưa hỏi"), không phải declared-false. Một lần pin
+  advance không kèm cờ nào giữ nguyên những gì đã khai từ trước.
   Bạn vẫn có thể tự sửa tay file JSON pin state; format vẫn là SPEC section 13.1. `waxseal
   verify` và `waxseal report` in ra τ, tức bậc tách biệt mà `declared_topology` mô tả, trên mọi
   lượt chạy, xem [docs/paper/conformance.vi.md](docs/paper/conformance.vi.md), khoảng trống
@@ -551,8 +562,9 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
   được là không thể phát hiện gì trước một chain server Byzantine, và cách trích dẫn output
   của waxseal mà không nói quá.
 - [docs/paper/conformance.vi.md](docs/paper/conformance.vi.md) ghi lại một bài phân tích
-  hình thức độc lập về thư viện này đòi những gì, 0.1.4 giao được những gì, và từng dòng
-  kèm bằng chứng, những gì chưa, gồm cả những phần chưa release note nào khai báo.
+  hình thức độc lập về thư viện này đòi những gì. 0.1.5 đóng lớp contract (liveness, bond,
+  fingerprint registry), cadence tối ưu chi phí, và WORM có phạm vi; phần thân vẫn là
+  sổ evidence từng dòng đã ship và khoảng trống nào còn mở.
 
 ## Chữ ký & forward-secure seal
 
@@ -690,6 +702,10 @@ trực tiếp, ví dụ
 | hermes-agent | plugin + gateway hook | [integrations/hermes/](integrations/hermes/) |
 | OpenClaw | exporter đọc audit ledger (`openclaw audit --json`, không hook) | [integrations/openclaw/](integrations/openclaw/) |
 | Microsoft AGT | AuditSink Protocol (gắn vào `AuditLog` riêng của AGT) | [`waxseal.integrations.agt`](src/waxseal/integrations/agt.py) |
+
+Claude Code, Codex và Cursor mở trail qua `open_segmented` (SPEC mục 20): file đang
+ghi cuốn thành segment đã seal khi quá 16 MiB, và `waxseal segments <dir>` verify mọi
+segment kèm ràng buộc rotation.
 
 Ghi chú phạm vi cho nhóm coding tool: các hook này cho bạn một bản ghi
 song song, tamper-evident, **không chứa secret** của mọi hành động. Chúng không (và

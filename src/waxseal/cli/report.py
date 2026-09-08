@@ -158,7 +158,7 @@ def _report(
         receipts=receipts,
         declared_topology=declared_topology,
     )
-    # domain/report.py's AuditReport has no ledger field (F4 owns cli.py
+    # domain/report.py's AuditReport has no ledger field (F4 owns cli/ledger.py
     # only, not domain/**), so the ledger dimension is layered on at this
     # boundary instead: an extra top-level JSON key, additive and never
     # overwriting anything build_report already produced, and an extra

@@ -3,6 +3,10 @@
 An independent arXiv-style re-analysis of waxseal (written against v0.1.3) proved a set of
 results about this library, proposed a set of constructions, prescribed an eight-item
 evaluation protocol, and reported two findings. Release 0.1.4 acted on some of it.
+Release 0.1.5 closed the contract layer (anchoring liveness, bonded checkpoints,
+on-chain fingerprint registry), cost-optimal cadence, and scoped WORM for sealed
+segments. The body below is still the evidence ledger: which row shipped, and which
+gap stayed open.
 
 This document says which parts, and - the part that is easy to leave out - which parts not.
 It exists because the 0.1.4 changelog's own "Not implemented in this release" section names
@@ -107,7 +111,7 @@ All eight are done.
 [`domain/separation.py`](../../src/waxseal/domain/separation.py) defines
 `separation_degree()`, `render_separation_degree()`, and (added closing this gap)
 `counted_authorities()`/`render_counted_authorities()`. All four are fully tested and are
-now called from `domain/report.py` and `cli.py`.
+now called from `domain/report.py` and `cli/verify.py` / `cli/report.py`.
 
 What's checkable now:
 

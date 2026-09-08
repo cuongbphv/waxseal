@@ -73,7 +73,7 @@ class FileDropRecorder:
 
         Counts lines, not parsed records: a malformed line is still evidence
         that SOMETHING was appended here, and this method's contract is a
-        measured minimum, not a validated total (cli.py's drop-reporting
+        measured minimum, not a validated total (cli/verify.py's drop-reporting
         path is where malformed lines get surfaced/counted separately).
         """
         if not self._path.exists():

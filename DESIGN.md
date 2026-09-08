@@ -400,7 +400,7 @@ What buys scoped proof, and the scope each buys:
 | Mechanism | Scope of the "proof" claim |
 |---|---|
 | finalized-ledger anchoring + bonded checkpoints (contract layer, Workstream F) | the anchored prefix: acknowledged history cannot be re-told without producing a slashable equivocation proof |
-| WORM object storage for sealed segments (S3 Object Lock) | archived segments: the storage refuses the overwrite - prevention, not detection. [Unverified - lock-mode semantics to be confirmed against AWS documentation when that work starts] |
+| WORM object storage for sealed segments (S3 Object Lock) | archived segments: the storage refuses the overwrite - prevention, not detection. Lock-mode semantics (COMPLIANCE vs GOVERNANCE) confirmed against AWS Object Lock documentation 31/08/2026. [Unverified - the exact S3 error code for "no Object Lock configuration"; `_NOT_CONFIGURED_CODES` is a best-effort allowlist, and a miss degrades to UNKNOWN, never a false lock] |
 | per-append receipts (SPEC §19, REMOTE.md §10) | acknowledged entries: the rewrite window shrinks from anchor cadence N to one entry |
 | segment archival at rotation | availability: destruction becomes recoverable, not merely detectable - a hash proves a thing existed; only a copy brings it back |
 

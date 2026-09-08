@@ -1,12 +1,14 @@
 """Anchoring-liveness ternary: live / delinquent / unreachable (pure; no I/O).
 
-The Anchoring Liveness Contract is one of the three constructions the paper
-describes as "designed and analysed, not implemented". What it buys is
-narrow and worth stating before the code: a contract that records when a
-writer last submitted a signed checkpoint turns "this trail stopped being
-anchored" from something only a diligent auditor would notice into something
-anyone can read off a public ledger. It does NOT attest that any individual
-entry is honest, and it does not close coverage.
+The Anchoring Liveness Contract is the pure half of a shipped construction:
+`domain/liveness.py` classifies a reading, `AnchoringLiveness.sol` records
+when a writer last submitted a signed checkpoint, and `waxseal ledger-status
+--liveness` prints the result. What it buys is narrow and worth stating
+before the code: a contract that records when a writer last submitted a
+signed checkpoint turns "this trail stopped being anchored" from something
+only a diligent auditor would notice into something anyone can read off a
+public ledger. It does NOT attest that any individual entry is honest, and
+it does not close coverage.
 
 The third value is the whole design. An RPC endpoint that did not answer has
 measured nothing about the writer's punctuality: reading that silence as

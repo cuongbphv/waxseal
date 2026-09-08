@@ -27,10 +27,11 @@ subfields required together" rule is enforced) lives in ``domain/pinning.py``.
 This module only computes the degree from a topology however it was
 constructed in memory.
 
-Reachability, stated because it is not what a reader assumes: ``cli.py``'s
+Reachability, stated because it is not what a reader assumes: ``cli/pin.py``'s
 ``--declare-topology`` (waxseal-ekd) is the CLI writer for a
-``declared_topology``, taking all four subfields together in one spec string
-(an operator can still write the pin state file's JSON by hand instead, and
+``declared_topology``, taking all four required subfields together in one spec
+string, plus an optional fifth ``ledger=`` token.
+An operator can still write the pin state file's JSON by hand instead, and
 either route produces the same shape SPEC section 13.1 specifies (that gap
 was tracked as G2 in docs/paper/conformance.md; it is closed as of
 waxseal-ekd). ``SeparationTopology``, ``separation_degree``, and ``Verdict``
@@ -148,7 +149,7 @@ def ledger_shortfall(declared: SeparationTopology, *, observed_ledger_ok: bool) 
     shortfall here, exactly like an explicitly declared-false one — neither
     claims a ledger authority exists, so neither has anything to fall short
     of. ``observed_ledger_ok`` itself is never ``None`` at this boundary:
-    the caller (``cli.py``'s ``_pin_check``) is the one place that decides
+    the caller (``cli/pin.py``'s ``_pin_check``) is the one place that decides
     whether this run measured the ledger dimension AT ALL, and skips
     calling this function entirely when it did not — the same "gate before
     the call, not inside it" shape ``anchor_staleness`` already uses for its
@@ -164,7 +165,7 @@ def render_separation_degree(degree: int | None) -> str:
     reuse rather than reinvent.
 
     Called from ``domain/report.py`` (``waxseal report``, both renderings)
-    and ``cli.py`` (``waxseal verify --pin``) as of waxseal-mfi, which closed
+    and ``cli/verify.py`` (``waxseal verify --pin``) as of waxseal-mfi, which closed
     conformance.md gap G1: a report now states τ, alongside the enumeration
     ``render_counted_authorities`` below prints, rather than computing it and
     never printing it.

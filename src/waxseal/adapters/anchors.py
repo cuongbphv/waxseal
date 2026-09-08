@@ -254,7 +254,7 @@ class MultiAnchorSink:
     A sink raising must not cost the others their record (CLAUDE.md rule 6:
     fail-open must be labelled, never silent), caught per sink and collected
     in ``.failures`` as ``(name, reason)`` for the caller to print, exactly
-    the way `cli.py`'s single-sink path already labels a raised exception
+    the way `cli/anchor.py`'s single-sink path already labels a raised exception
     rather than swallowing it. Only when EVERY sink fails does this itself
     raise, because at that point nothing published at all and the existing
     "nothing recorded" handling on the caller's side already covers it.

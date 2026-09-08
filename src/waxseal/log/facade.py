@@ -115,6 +115,13 @@ class AuditLog:
         timeout: float = 10.0,
         receipts_trail: Path | str | None = None,
     ) -> AuditLog:
+        """Open a trail at ``path``.
+
+        Dispatches on the scheme and suffix: a URL is the remote backend, a
+        ``.db``/``.sqlite``/``.sqlite3`` suffix is SQLite, everything else
+        is JSONL. ``record_drops=True`` attaches a sidecar counter;
+        ``dropped_writes is None`` still means the count was never measured.
+        """
         opened = open_backend(
             path,
             record_drops=record_drops,
@@ -135,6 +142,11 @@ class AuditLog:
         )
 
     def append(self, *, payload: dict[str, Any] | bytes, payload_type: str) -> Entry:
+        """Append one entry. A dict is redacted (if a redactor is configured)
+        then hashed; bytes plus a configured redactor are refused, because
+        the Redactor port only sees dicts and "redacted" would otherwise be
+        a claim nothing checked.
+        """
         if payload_type in _REJECTED_PAYLOAD_TYPES:
             raise ValueError(
                 f"payload_type must be application-specific, not {payload_type!r} "
@@ -366,6 +378,10 @@ class AuditLog:
         )
 
     def verify(self, *, measure_drops: bool = True) -> VerifyResult:
+        """Report chain integrity. Never repairs. Unknown fingerprints are
+        unverifiable by name, never tampered. ``dropped_writes is None``
+        means completeness was not measured, never the same as ``0``.
+        """
         result = verify_chain(self._backend.entries(), self._registry)
         if not measure_drops:
             return result

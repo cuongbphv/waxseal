@@ -4,7 +4,10 @@
 
 Một bài phân tích độc lập kiểu arXiv về waxseal (viết trên v0.1.3) đã chứng minh một tập kết
 quả về thư viện này, đề xuất một tập construction, kê một quy trình đánh giá tám mục, và báo
-hai finding. Bản 0.1.4 đã xử lý một phần.
+hai finding. Bản 0.1.4 đã xử lý một phần. Bản 0.1.5 đóng lớp contract (anchoring
+liveness, bonded checkpoints, fingerprint registry on-chain), cadence tối ưu chi
+phí, và WORM có phạm vi cho segment đã seal. Phần thân dưới đây vẫn là sổ evidence:
+dòng nào đã ship, khoảng trống nào còn mở.
 
 Tài liệu này nói phần nào đã làm, và - phần dễ bị bỏ qua nhất - phần nào chưa. Nó tồn tại vì
 mục "Not implemented in this release" của changelog 0.1.4 chỉ nêu ba mục, mà ba không phải là
@@ -108,7 +111,7 @@ Bài luận nêu tám mục và nói thẳng rằng nửa thực nghiệm chưa 
 [`domain/separation.py`](../../src/waxseal/domain/separation.py) định nghĩa
 `separation_degree()`, `render_separation_degree()`, và (thêm mới để đóng gap này)
 `counted_authorities()`/`render_counted_authorities()`. Cả bốn đều được test đầy đủ và
-giờ được gọi từ `domain/report.py` và `cli.py`.
+giờ được gọi từ `domain/report.py` và `cli/verify.py` / `cli/report.py`.
 
 Kiểm được ngay bây giờ:
 

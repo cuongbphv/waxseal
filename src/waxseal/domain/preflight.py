@@ -96,7 +96,7 @@ class Observed:
 class PreflightObservation:
     """Everything a run saw, one field per mechanism the ladder names.
 
-    Path knowledge stays in `cli.py`, which fills each ``detail`` in: this
+    Path knowledge stays in `cli/preflight.py`, which fills each ``detail`` in: this
     module must not learn where a sidecar lives (the layer DAG forbids the
     domain any filesystem knowledge at all).
 

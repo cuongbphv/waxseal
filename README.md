@@ -78,6 +78,10 @@ most of them do not do. It comes from a survey of Python audit-log libraries in 
 | Forward-secure seals (key-evolving HMAC, stdlib only) + injected Ed25519 signatures | ✅ | ❌ | ❌ |
 | FssAgg aggregate tag closing the truncation gap even if the keyfile leaks | ✅ | ❌ | ❌ |
 | Remote HTTP backend as a full peer to local storage, with an explicit trust model | ✅ | rare, undocumented trust model | ❌ |
+| Ledger ternary: live / delinquent / unreachable (`waxseal ledger-status`) | ✅ | ❌ | ❌ |
+| Scoped WORM for sealed segments (S3 Object Lock; never the live tail) | ✅ | ❌ | ❌ |
+| Sealed segments + rotation bindings (`waxseal segments`) | ✅ | ❌ | ❌ |
+| Cost-optimal anchoring cadence (`waxseal cadence`; opens no trail) | ✅ | ❌ | ❌ |
 
 The first two rows are the failure class from the two incidents above.
 
@@ -252,6 +256,10 @@ waxseal anchor trail.jsonl     # append a checkpoint to the local .anchors sidec
 waxseal verify --anchors trail.jsonl  # also check trail history against .anchors
 waxseal preflight trail.jsonl  # which attacker-capability rung this config stops; always exit 0 (exit 3: no such trail)
 waxseal segments trail-dir/    # verify every sealed segment + rotation binding in a directory; read-only
+waxseal cadence --lam RATE --c COST --w HARM --rho RATE --delta SEC --t-max SEC  # cost-optimal N*; opens no trail
+waxseal reconcile-tickets trail.jsonl --issuer NAME --lease-size L [--issued SPEC]
+waxseal receipt trail.jsonl --out DIR   # extract stored RFC 3161 / OTS receipts; writes only under --out
+waxseal verify --tsa-ca-file bundle.pem trail.jsonl  # native CMS/X.509 check (waxseal[rfc3161])
 
 # Any of the above except `anchor` also accepts a remote chain server URL:
 waxseal verify http://chain.example.com/v1/chains/default
@@ -260,6 +268,7 @@ waxseal verify http://chain.example.com/v1/chains/default
 waxseal ledger-status trail.jsonl --liveness 0xADDR --rpc https://rpc1 --rpc https://rpc2
 waxseal registry publish --descriptor-of FINGERPRINT --registry 0xADDR --rpc https://rpc1 --rpc https://rpc2
 waxseal bond deposit --bond 0xADDR --amount-wei 1000000000000000000 --rpc https://rpc1 --rpc https://rpc2
+waxseal bond prove proof.json --bond 0xADDR --rpc https://rpc1 --rpc https://rpc2
 ```
 
 ## Storage backends
@@ -492,14 +501,14 @@ waxseal anchor trail.jsonl --witness https://witness.example/anchor
 waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https://witness.example/anchor
 ```
 
-- **RFC 3161** makes `ts` attested rather than asserted. waxseal checks the reply
-  *structurally* (status, message imprint, nonce, digest algorithm) and says so in every
-  line it prints. By default it does **not** verify the CMS/X.509 signature; that is
-  delegated to `openssl ts -verify` and the recipe is in the docs. A receipt it cannot
-  read is *unverifiable* (exit 2); only one that attests different bytes is *broken*
-  (exit 1). With the `rfc3161` extra installed and a CA bundle you name
-  (`--tsa-ca-file`), the signature dimension is checked too - and a token it could not
-  check is exit 2 with a label, never a silent pass.
+- **RFC 3161** makes `ts` attested rather than asserted. The native path is
+  `waxseal[rfc3161]` plus `--tsa-ca-file`: waxseal checks the CMS/X.509 signature
+  itself, and a token it could not check is exit 2 with a label, never a silent
+  pass. Without the extra or the flag, receipts are checked *structurally*
+  (status, message imprint, nonce, digest algorithm) and the signature step is
+  left to `openssl ts -verify` as a fallback (recipe in the docs). A receipt it
+  cannot read is *unverifiable* (exit 2); only one that attests different bytes
+  is *broken* (exit 1).
 - **OpenTimestamps** stores a *pending* Bitcoin proof, opaquely and on purpose. Finish it
   later with `ots upgrade` / `ots verify`.
 - The two can be given **together on one `anchor` run**, publishing the same checkpoint to
@@ -530,11 +539,12 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 
   `verify`/`report --pin` accept `--expect-anchor-binding` (a flag), `--max-anchor-age-s
   SECONDS`, and `--declare-topology SPEC` (all four `SeparationTopology` subfields together,
-  e.g. `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`) to write these three
-  declarations. Each of them requires `--pin`, each only lands on a run that actually
-  advances the pin, and a `--declare-topology` naming some but not all four subfields is a
-  CLI usage error
-  rather than a silent default. A pin advance with none of these flags preserves whatever
+  e.g. `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`, plus an optional
+  fifth `ledger=true`/`ledger=false`) to write these declarations. Each of them requires
+  `--pin`, each only lands on a run that actually advances the pin, and a
+  `--declare-topology` naming some but not all four required subfields is a CLI usage error
+  rather than a silent default. Omitting `ledger=` parses as `ledger=None` ("never asked"),
+  not as declared-false. A pin advance with none of these flags preserves whatever
   was already declared. You can still hand-edit the pin state JSON directly; the format is
   SPEC section 13.1. `waxseal verify`/`waxseal report` print the separation degree τ that
   `declared_topology` describes on every run; see
@@ -553,8 +563,10 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
   detect against a Byzantine chain server, and how to cite waxseal output without
   overclaiming.
 - [docs/paper/conformance.md](docs/paper/conformance.md) records what an independent
-  formal re-analysis of this library asked for, what 0.1.4 delivered, and, row by row
-  with evidence, what it did not, including the parts no release note had declared.
+  formal re-analysis of this library asked for. 0.1.5 closed the contract layer
+  (liveness, bond, fingerprint registry), cost-optimal cadence, and scoped WORM;
+  the body is still the evidence ledger of which row shipped and which gap stayed
+  open.
 
 ## Signatures & forward-secure seals
 
@@ -695,6 +707,10 @@ import WaxsealCallbackHandler`.
 | hermes-agent | plugin + gateway hook | [integrations/hermes/](integrations/hermes/) |
 | OpenClaw | audit-ledger exporter (`openclaw audit --json`, no hook) | [integrations/openclaw/](integrations/openclaw/) |
 | Microsoft AGT | `AuditSink` Protocol (attach to AGT's own `AuditLog`) | [`waxseal.integrations.agt`](src/waxseal/integrations/agt.py) |
+
+Claude Code, Codex, and Cursor open trails through `open_segmented` (SPEC section 20):
+the active file rolls into a sealed segment past 16 MiB, and `waxseal segments <dir>`
+verifies every segment plus its rotation binding.
 
 Scope note for the coding tools: these hooks give you a parallel,
 tamper-evident, **secret-free** record of every action. They do not (and cannot)

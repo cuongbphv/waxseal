@@ -119,6 +119,10 @@ v53"*。唯一能绕过它的办法，是一个把安全检查彻底关掉的环
 | 前向安全封印（密钥演进 HMAC，纯标准库）+ 注入式 Ed25519 签名 | ✅ | ❌ | ❌ |
 | FssAgg 聚合标签，即便密钥文件泄露也能堵住截断漏洞 | ✅ | ❌ | ❌ |
 | 远程 HTTP 后端与本地存储完全对等，信任模型写得明明白白 | ✅ | 少见，信任模型不写明 | ❌ |
+| Ledger 三值：live / delinquent / unreachable（`waxseal ledger-status`） | ✅ | ❌ | ❌ |
+| 有范围的 WORM（密封段上的 S3 Object Lock；从不覆盖 live tail） | ✅ | ❌ | ❌ |
+| 密封段 + 轮转绑定（`waxseal segments`） | ✅ | ❌ | ❌ |
+| 成本最优锚定节奏（`waxseal cadence`；不打开 trail） | ✅ | ❌ | ❌ |
 
 前两行正是上文两起事故所属的故障类；每一行背后的文献见 [DESIGN.md](DESIGN.md)。
 
@@ -281,6 +285,10 @@ waxseal anchor trail.jsonl     # 把一个 checkpoint 追加到本地 .anchors �
 waxseal verify --anchors trail.jsonl  # 额外用 .anchors 校验 trail 历史
 waxseal preflight trail.jsonl  # 当前配置挡住攻击者能力的哪一档；恒为退出码 0（3：路径不存在）
 waxseal segments trail-dir/    # 校验目录内每个已封存段与轮转绑定；只读
+waxseal cadence --lam RATE --c COST --w HARM --rho RATE --delta SEC --t-max SEC  # 成本最优 N*；不打开 trail
+waxseal reconcile-tickets trail.jsonl --issuer NAME --lease-size L [--issued SPEC]
+waxseal receipt trail.jsonl --out DIR   # 导出已存 RFC 3161 / OTS 回执；只写入 --out
+waxseal verify --tsa-ca-file bundle.pem trail.jsonl  # 原生 CMS/X.509 校验（waxseal[rfc3161]）
 
 # 除 `anchor` 外，以上命令都可以接受一个远程 chain server 的 URL：
 waxseal verify http://chain.example.com/v1/chains/default
@@ -289,6 +297,7 @@ waxseal verify http://chain.example.com/v1/chains/default
 waxseal ledger-status trail.jsonl --liveness 0xADDR --rpc https://rpc1 --rpc https://rpc2
 waxseal registry publish --descriptor-of FINGERPRINT --registry 0xADDR --rpc https://rpc1 --rpc https://rpc2
 waxseal bond deposit --bond 0xADDR --amount-wei 1000000000000000000 --rpc https://rpc1 --rpc https://rpc2
+waxseal bond prove proof.json --bond 0xADDR --rpc https://rpc1 --rpc https://rpc2
 ```
 
 ## 存储后端
@@ -507,12 +516,12 @@ waxseal anchor trail.jsonl --witness https://witness.example/anchor
 waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https://witness.example/anchor
 ```
 
-- **RFC 3161** 让 `ts` 从"自己声称"变成"有外部作证"。waxseal 只对回执做*结构性*检查
-  —— status、message imprint、nonce、digest 算法 —— 并且在它打印的每一行里都写明这一点。
-  它默认**不**验证 CMS/X.509 签名；那一步被委托给 `openssl ts -verify`，具体做法见文档。
-  它读不懂的回执算*不可验证*（exit 2）；只有为不同字节作证的回执才算*断链*（exit 1）。
-  装上 `rfc3161` extra 并用 `--tsa-ca-file` 指名一份 CA bundle 之后，签名这一维也会被
-  校验 —— 而校验不成的 token 是 exit 2 并附标签，绝不会是一次沉默的放行。
+- **RFC 3161** 让 `ts` 从"自己声称"变成"有外部作证"。原生路径是 `waxseal[rfc3161]`
+  加上 `--tsa-ca-file`：waxseal 自己校验 CMS/X.509 签名，校验不成的 token 是
+  exit 2 并附标签，绝不会是一次沉默的放行。没有 extra 或没有该标志时，只对回执做
+  *结构性*检查（status、message imprint、nonce、digest 算法），签名一步留给
+  `openssl ts -verify` 作为回退（具体做法见文档）。读不懂的回执算*不可验证*
+  （exit 2）；只有为不同字节作证的回执才算*断链*（exit 1）。
 - **OpenTimestamps** 存的是一份*待定（pending）*的比特币证明，不透明是有意为之。
   日后用 `ots upgrade` / `ots verify` 把它补完。
 - 这两者**可以在同一次 `anchor` 运行中一起使用**，把同一个 checkpoint 同时发布到两边
@@ -539,10 +548,12 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
   `verify`/`report --pin` 现在接受 `--expect-anchor-binding`（一个开关）、
   `--max-anchor-age-s SECONDS`，以及 `--declare-topology SPEC`（一次性给出
   `SeparationTopology` 的全部四个子字段，例如
-  `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`）来写入这三项声明 ——
+  `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`，外加可选的
+  `ledger=true`/`ledger=false`）来写入这些声明 ——
   每一个都必须搭配 `--pin`，只在真正推进 pin 的那次运行才会生效，而
-  `--declare-topology` 只给出四个子字段中的一部分会被当作 CLI 用法错误，绝不会被
-  静默地补上默认值。不带这些参数的一次 pin 前进会原样保留此前已声明的内容。你仍然可以
+  `--declare-topology` 只给出四个必填子字段中的一部分会被当作 CLI 用法错误，绝不会被
+  静默地补上默认值。省略 `ledger=` 解析为 `ledger=None`（"从未询问"），不是声明为假。
+  不带这些参数的一次 pin 前进会原样保留此前已声明的内容。你仍然可以
   直接手改 pin 状态的 JSON，格式仍是 SPEC section 13.1。`waxseal verify`/`waxseal report`
   在每次运行时都会打印 `declared_topology` 所描述的分离度 τ —— 见
   [docs/paper/conformance.md](docs/paper/conformance.md) 的 G2（已完成）。
@@ -558,8 +569,8 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
   tamper-*proof*、面对拜占庭式的链服务器客户端能检测到什么、又可证明地检测不到什么，
   以及如何在不夸大的前提下引用 waxseal 的输出
 - [docs/paper/conformance.md](docs/paper/conformance.md) —— 一份对本库的独立形式化再分析
-  提出了什么要求、0.1.4 交付了什么，以及逐行附证据地说明还有什么没做。包括此前任何
-  release note 都未曾声明的那部分
+  提出了什么要求。0.1.5 已关闭合约层（liveness、bond、fingerprint registry）、成本最优
+  cadence，以及有范围的 WORM；正文仍是逐行证据账本，记录哪一行已交付、哪一个缺口仍开着。
 
 ## 签名与前向安全封印
 
@@ -687,6 +698,9 @@ waxseal install hermes        # 或 claude-code / codex / cursor / hermes-gatewa
 | hermes-agent | plugin + gateway hook | [integrations/hermes/](integrations/hermes/) |
 | OpenClaw | 审计账本导出器（`openclaw audit --json`，非 hook） | [integrations/openclaw/](integrations/openclaw/) |
 | Microsoft AGT | AuditSink Protocol（挂接到 AGT 自己的 `AuditLog`） | [`waxseal.integrations.agt`](src/waxseal/integrations/agt.py) |
+
+Claude Code、Codex 与 Cursor 通过 `open_segmented` 打开 trail（SPEC 第 20 节）：
+活动文件超过 16 MiB 后滚入密封段，`waxseal segments <dir>` 校验每个段及其轮转绑定。
 
 对编码工具类集成的范围说明：这些 hook 给你一份并行的、篡改可检测（tamper-evident）的、**不含密钥**的
 行动记录。它们不会（也无法）改写工具自身的 transcript 文件 —— 如果密钥已经落入

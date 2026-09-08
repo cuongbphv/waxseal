@@ -1,6 +1,6 @@
 """Verdict join-semilattice (pure; no I/O).
 
-CLAUDE.md's ``cli.py::_combine()`` composes verify checks by exit code
+CLAUDE.md's ``cli/_common.py::_combine()`` composes verify checks by exit code
 (0/1/2) and gets it right today only via a comment ("Deliberately not
 ``max``") plus writer discipline: 2 (unverifiable) is the numerically larger
 exit code but the *weaker* finding, so ``max()`` over exit codes would let an

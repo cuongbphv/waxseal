@@ -242,6 +242,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deep links from `docs/compliance/mapping{,.vi}.md`, whose section anchors are
   unchanged. `TestDocumentationLinks` is what caught the stragglers.
 
+- **0.1.6 hygiene pass.** POST write bodies over 1 MiB return 413 with the
+  existing `{error, detail}` JSON shape. JSONL `entry_hashes()` skips payload
+  decode. Shared integration sanitizer. Hard-500 architecture test with an
+  exact-path allowlist. README CLI surface names `cadence`,
+  `reconcile-tickets`, `receipt`, `bond prove`, and `verify --tsa-ca-file`.
+
 ## [0.1.5] - 2026-09-01
 
 ### Added

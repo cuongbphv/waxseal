@@ -1,14 +1,11 @@
 """Cost-optimal anchoring cadence (domain/cadence.py).
 
-An operator picking ``anchor_every`` today has no number to pick it from —
-docs/paper/conformance.md records this exact gap ("Cost-optimal anchoring...
-[Not built]: an operator picking anchor_every has no number to pick it
-from"). This closed form replaces that guess with an arithmetic answer, and
-these tests are the falsifiable claims the paper makes about it: the balance
-property at N*, the flatness bound's concrete numbers (factor-of-2 off costs
-~25% more, factor-of-3 off costs ~67% more), the labelled infeasible state
-when the anchor technology itself cannot meet the operator's tolerated
-detection window, and the monotone fleet dividend.
+`waxseal cadence` prints N* from operator-supplied measurements. These tests
+are the falsifiable claims the paper makes about that closed form: the
+balance property at N*, the flatness bound's concrete numbers (factor-of-2
+off costs ~25% more, factor-of-3 off costs ~67% more), the labelled
+infeasible state when the anchor technology itself cannot meet the
+operator's tolerated detection window, and the monotone fleet dividend.
 """
 
 from __future__ import annotations

@@ -346,7 +346,7 @@ class RemoteBackend:
         # portal, a proxy error page, a truncated response) is not a
         # protocol-defined outcome any more than a bad status code is. It
         # must become the same RemoteError a 5xx would, never an uncaught
-        # JSONDecodeError/KeyError escaping through the CLI (cli.py's own
+        # JSONDecodeError/KeyError escaping through the CLI (cli/_main.py's own
         # try/except only catches OSError/RemoteError).
         try:
             page = json.loads(body)

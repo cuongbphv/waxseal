@@ -1,13 +1,11 @@
 """Cost-optimal anchoring cadence: how often *should* this trail anchor.
 
 Every prior module in this package answers "is the chain intact" after the
-fact. This one answers a question no CLI command has ever had a number for:
-docs/paper/conformance.md records the gap by name: "Nothing in `src/`
-computes a cadence... an operator picking `anchor_every` has no number to
-pick it from", meaning the value has always been a guess, picked the way
-`hash_version` was once a hand-typed string before `fingerprint.py` made that
-unrepresentable. This module is the same move applied to a cost, not a
-schema: replace a guess with arithmetic.
+fact. This one answers how often the trail should anchor. `waxseal cadence`
+prints the number; the closed form below is where it comes from. The paper
+recorded the gap by name ("Nothing in `src/` computes a cadence"); this
+module is that gap closed, the same move `fingerprint.py` made for a
+hand-typed `hash_version`.
 
 The trade-off it closes: anchor too rarely and the unattested tail of the
 trail is long, and an attacker who compromises the writer gets a wide window to

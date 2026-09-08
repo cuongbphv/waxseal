@@ -120,7 +120,7 @@ class TicketScan:
 def scan_tickets(entries: Iterable[Entry], *, issuer: str) -> TicketScan:
     """Which ticket numbers for ``issuer`` are actually present on the
     trail. Pure over already-read ``Entry`` values, so no I/O happens here;
-    the caller (``cli.py``) is the one reading the trail."""
+    the caller (``cli/tickets.py``) is the one reading the trail."""
     present: set[int] = set()
     unreadable: list[int] = []
     for entry in entries:

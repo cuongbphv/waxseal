@@ -161,7 +161,7 @@ def _ledger_status(
     """`waxseal ledger-status` (F4, Phase 4).
 
     Exit codes reuse ``Verdict.to_exit_code()``, the SAME convention
-    ``_reconcile_tickets`` above already establishes (``cli.py:3003``):
+    ``_reconcile_tickets`` above already establishes (``cli/tickets.py``):
     0 = every configured dimension came back clean (live, and registry
     agrees if ``--registry`` was given, and bonded if ``--bond`` was given);
     1 = a POSITIVELY DETECTED finding — delinquent, slashed, or unbonded —

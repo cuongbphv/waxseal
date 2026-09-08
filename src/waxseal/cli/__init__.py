@@ -2,7 +2,9 @@
 
 The console script and zipapp still call `waxseal.cli:main`. This file
 re-exports the names tests and tools already import; it does not grow new
-behaviour.
+behaviour. Ledger writes (`registry publish`, `bond deposit`, `bond prove`)
+go to the chain, never to the audit trail - the CLI still never appends
+chain entries.
 """
 
 from __future__ import annotations
