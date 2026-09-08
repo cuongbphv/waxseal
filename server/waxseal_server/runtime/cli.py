@@ -27,8 +27,11 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import Final
 
 from waxseal import Verdict
@@ -65,12 +68,85 @@ READ_ONLY_COMMANDS: Final[frozenset[str]] = frozenset(
 )
 
 _CHOICES_RE: Final = re.compile(r"\{([a-z0-9,\-]+)\}")
+_OUTCOME_CACHE_MAX: Final = 128
+# Sidecars `verify`/`report` read next to a trail even when the path is not
+# on argv. A stamp that only watched argv files would serve a stale "ok"
+# after `.anchors` changed.
+_TRAIL_SIDECAR_SUFFIXES: Final = (
+    ".anchors",
+    ".attest",
+    ".drops",
+    ".receipts",
+    ".sealagg",
+)
 
 STATUS_BY_VERDICT: Final = {
     Verdict.OK: "ok",
     Verdict.BROKEN: "broken",
     Verdict.UNVERIFIABLE: "unverifiable",
 }
+
+_OutcomeKey = tuple[str, tuple[str, ...], tuple[tuple[str, int, int], ...]]
+
+
+def _stat_stamp(path: Path) -> tuple[str, int, int] | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (str(path.resolve()), st.st_mtime_ns, st.st_size)
+
+
+def _directory_children(path: Path) -> list[Path]:
+    try:
+        children = list(path.iterdir())
+    except OSError:
+        return []
+    out: list[Path] = []
+    for child in children:
+        try:
+            if child.is_file() or child.is_dir():
+                out.append(child)
+        except OSError:
+            continue
+    return out
+
+
+def _input_stamp(args: tuple[str, ...]) -> tuple[tuple[str, int, int], ...]:
+    """mtime/size of every argv path that exists, plus trail sidecars.
+
+    Missing paths are omitted: `verify` of an absent trail still runs the
+    CLI (exit 3). Creating the file later is a different stamp, so a cached
+    "absent" cannot mask a trail that now exists.
+    """
+    stamps: list[tuple[str, int, int]] = []
+    seen: set[str] = set()
+    for arg in args:
+        path = Path(arg)
+        try:
+            is_dir = path.is_dir()
+            is_file = path.is_file()
+        except OSError:
+            continue
+        if is_dir:
+            # Directory mtime does not move when a child is edited (APFS,
+            # ext4). `segments <dir>` would serve a stale ok if we only
+            # stamped the directory inode.
+            candidates = [path, *_directory_children(path)]
+        elif is_file:
+            candidates = [path]
+            candidates.extend(
+                path.with_name(path.name + suffix) for suffix in _TRAIL_SIDECAR_SUFFIXES
+            )
+        else:
+            candidates = []
+        for candidate in candidates:
+            stamp = _stat_stamp(candidate)
+            if stamp is None or stamp[0] in seen:
+                continue
+            stamps.append(stamp)
+            seen.add(stamp[0])
+    return tuple(stamps)
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,9 +169,20 @@ class CliOutcome:
 
 
 class WaxsealCli:
-    def __init__(self, *, python: str | None = None, timeout: float = 60.0) -> None:
+    def __init__(
+        self,
+        *,
+        python: str | None = None,
+        timeout: float = 60.0,
+        outcome_cache_size: int = _OUTCOME_CACHE_MAX,
+    ) -> None:
         self._python = python or sys.executable
         self._timeout = timeout
+        self._outcome_cache_size = outcome_cache_size
+        # Cached CliOutcome only. A miss still shells out — this is not a
+        # second verifier (the CLI remains the sole verdict authority).
+        self._outcomes: OrderedDict[_OutcomeKey, CliOutcome] = OrderedDict()
+        self._outcome_lock = threading.Lock()
 
     @lru_cache(maxsize=1)  # noqa: B019 - one instance per app; the CLI cannot change under it
     def available(self) -> frozenset[str]:
@@ -133,13 +220,27 @@ class WaxsealCli:
                 stdout="",
                 stderr=f"this waxseal build has no {command!r} subcommand",
             )
+        key: _OutcomeKey = (command, args, _input_stamp(args))
+        with self._outcome_lock:
+            cached = self._outcomes.get(key)
+            if cached is not None:
+                self._outcomes.move_to_end(key)
+                return cached
         completed = subprocess.run(  # noqa: S603 - list argv, shell=False, allowlisted command
             list(argv),
             capture_output=True,
             text=True,
             timeout=self._timeout,
         )
-        return _classify(command, argv, completed.returncode, completed.stdout, completed.stderr)
+        outcome = _classify(
+            command, argv, completed.returncode, completed.stdout, completed.stderr
+        )
+        with self._outcome_lock:
+            self._outcomes[key] = outcome
+            self._outcomes.move_to_end(key)
+            while len(self._outcomes) > self._outcome_cache_size:
+                self._outcomes.popitem(last=False)
+        return outcome
 
 
 def _classify(

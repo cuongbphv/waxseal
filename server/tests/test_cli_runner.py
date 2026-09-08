@@ -239,3 +239,190 @@ class TestUnexpectedExitCode:
         assert outcome.status == "unexpected_exit"
         assert outcome.verdict is None
         assert outcome.exit_code == 42
+
+
+class TestReadCache:
+    """P4: the CLI remains the only verifier. A second identical read with
+    unchanged input files must not spawn again; a mtime/size change must.
+    """
+
+    def test_a_second_identical_verify_does_not_respawn(
+        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[object] = []
+        real = cli_module.subprocess.run
+
+        def counting(*args: object, **kwargs: object) -> object:
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(cli_module.subprocess, "run", counting)
+        first = cli.run("verify", str(trail))
+        n = len(calls)
+        second = cli.run("verify", str(trail))
+        assert len(calls) == n
+        assert second.exit_code == first.exit_code
+        assert second.stdout == first.stdout
+
+    def test_an_append_invalidates_the_cached_verify(
+        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[object] = []
+        real = cli_module.subprocess.run
+
+        def counting(*args: object, **kwargs: object) -> object:
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(cli_module.subprocess, "run", counting)
+        cli.run("verify", str(trail))
+        n = len(calls)
+        AuditLog.open(trail).append(payload={"i": 99}, payload_type=PAYLOAD_TYPE)
+        cli.run("verify", str(trail))
+        assert len(calls) > n
+
+    def test_cadence_with_the_same_argv_is_cached(
+        self, cli: WaxsealCli, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[object] = []
+        real = cli_module.subprocess.run
+
+        def counting(*args: object, **kwargs: object) -> object:
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(cli_module.subprocess, "run", counting)
+        argv = (
+            "--lam", "1", "--c", "1", "--w", "1", "--rho", "1",
+            "--delta", "1", "--t-max", "10",
+        )
+        cli.run("cadence", *argv)
+        n = len(calls)
+        cli.run("cadence", *argv)
+        assert len(calls) == n
+
+    def test_an_anchors_sidecar_change_invalidates_verify_with_anchors(
+        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[object] = []
+        real = cli_module.subprocess.run
+
+        def counting(*args: object, **kwargs: object) -> object:
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(cli_module.subprocess, "run", counting)
+        cli.run("verify", str(trail), "--anchors")
+        n = len(calls)
+        trail.with_name(trail.name + ".anchors").write_text("{}\n")
+        cli.run("verify", str(trail), "--anchors")
+        assert len(calls) > n
+
+    def test_the_oldest_cached_outcome_is_evicted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cli = WaxsealCli(outcome_cache_size=1)
+        calls: list[object] = []
+        real = cli_module.subprocess.run
+
+        def counting(*args: object, **kwargs: object) -> object:
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(cli_module.subprocess, "run", counting)
+        first = (
+            "--lam", "1", "--c", "1", "--w", "1", "--rho", "1",
+            "--delta", "1", "--t-max", "10",
+        )
+        second = (
+            "--lam", "2", "--c", "1", "--w", "1", "--rho", "1",
+            "--delta", "1", "--t-max", "10",
+        )
+        cli.run("cadence", *first)
+        cli.run("cadence", *second)
+        n = len(calls)
+        cli.run("cadence", *first)
+        assert len(calls) > n
+
+
+class TestInputStamp:
+    def test_a_directory_argument_is_stamped(self, tmp_path: Path) -> None:
+        from waxseal_server.runtime.cli import _input_stamp
+
+        stamps = _input_stamp((str(tmp_path),))
+        assert len(stamps) == 1
+        assert stamps[0][1] == tmp_path.stat().st_mtime_ns
+        assert stamps[0][2] == tmp_path.stat().st_size
+
+    def test_the_same_path_twice_is_stamped_once(self, trail: Path) -> None:
+        from waxseal_server.runtime.cli import _input_stamp
+
+        stamps = _input_stamp((str(trail), str(trail)))
+        assert len(stamps) == 1
+
+    def test_a_path_probe_that_raises_is_omitted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from waxseal_server.runtime.cli import _input_stamp
+
+        def boom(self: Path) -> bool:
+            raise OSError("unreadable")
+
+        monkeypatch.setattr(Path, "is_dir", boom)
+        monkeypatch.setattr(Path, "is_file", boom)
+        assert _input_stamp((str(tmp_path / "x"),)) == ()
+
+    def test_editing_a_file_inside_a_directory_changes_the_stamp(
+        self, tmp_path: Path
+    ) -> None:
+        from waxseal_server.runtime.cli import _input_stamp
+
+        child = tmp_path / "segment.jsonl"
+        child.write_text("a\n")
+        first = _input_stamp((str(tmp_path),))
+        child.write_text("b\n")
+        assert _input_stamp((str(tmp_path),)) != first
+
+    def test_an_unreadable_directory_still_stamps_the_directory_inode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from waxseal_server.runtime.cli import _directory_children, _input_stamp
+
+        def boom(self: Path) -> list[Path]:
+            raise OSError("unreadable")
+
+        monkeypatch.setattr(Path, "iterdir", boom)
+        assert _directory_children(tmp_path) == []
+        stamps = _input_stamp((str(tmp_path),))
+        assert len(stamps) == 1
+
+    def test_a_broken_symlink_in_a_directory_is_not_stamped(
+        self, tmp_path: Path
+    ) -> None:
+        from waxseal_server.runtime.cli import _directory_children
+
+        (tmp_path / "dangling").symlink_to(tmp_path / "missing")
+        assert _directory_children(tmp_path) == []
+
+    def test_an_unreadable_child_is_omitted_from_the_directory_stamp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from waxseal_server.runtime.cli import _directory_children
+
+        (tmp_path / "ok").write_text("x")
+        real_is_file = Path.is_file
+        real_is_dir = Path.is_dir
+
+        def flaky_file(self: Path) -> bool:
+            if self.name == "ok":
+                raise OSError("unreadable")
+            return real_is_file(self)
+
+        def flaky_dir(self: Path) -> bool:
+            if self.name == "ok":
+                raise OSError("unreadable")
+            return real_is_dir(self)
+
+        monkeypatch.setattr(Path, "is_file", flaky_file)
+        monkeypatch.setattr(Path, "is_dir", flaky_dir)
+        assert _directory_children(tmp_path) == []

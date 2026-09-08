@@ -248,6 +248,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exact-path allowlist. README CLI surface names `cadence`,
   `reconcile-tickets`, `receipt`, `bond prove`, and `verify --tsa-ca-file`.
 
+- **Incremental RFC 6962 Merkle on the live trail.** `AuditLog.append`
+  grows a peak forest; `anchor()` writes that root instead of walking
+  `batch_root` over the whole prefix on every `anchor_every=N` tick.
+  The rooted value is still the golden RFC 6962 vectors
+  (`tests/domain/test_anchoring.py`); `verify_checkpoint` still
+  recomputes independently. Membership and consistency proofs still
+  walk the leaf list — those need every leaf again.
+
+- **Chain-server CLI read cache.** `WaxsealCli.run` keeps a bounded
+  `CliOutcome` map keyed on command, argv, and mtime/size of every
+  argv path plus trail sidecars and directory children. A miss still
+  shells out: the CLI remains the only verifier. A trail, `.anchors`,
+  or in-directory edit is a different stamp, never a stale `ok`.
+
 ## [0.1.5] - 2026-09-01
 
 ### Added
