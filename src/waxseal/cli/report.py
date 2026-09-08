@@ -7,21 +7,13 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from waxseal.adapters.anchors import AnchorRecord
 from waxseal.cli._anchors import (
-    _anchor_check,
-    _observed_anchor_records,
-    _observed_anchor_sinks,
-    _observed_anchor_unreadable,
-    _observed_ledger_ok,
-    _observed_witness_consistent,
     _receipts_check,
     _witness_exit_code,
-    _witness_verdicts,
 )
 from waxseal.cli._common import _Check, _combine, _default_now
-from waxseal.cli.ledger import _ledger_check
-from waxseal.cli.pin import _pin_check, _save_pin
+from waxseal.cli._dimensions import _observe
+from waxseal.cli.pin import _save_pin
 from waxseal.cli.segments import _is_hex
 from waxseal.domain.pinning import PinState
 from waxseal.domain.report import (
@@ -71,57 +63,38 @@ def _report(
     # OBSERVED to compare against a declared_topology (waxseal-7tk.3.2).
     # build_report renders everything in one pass at the end, so, unlike
     # _verify, there is no per-check print order to preserve here.
-    anchors: CheckSummary | None = None
-    observed_anchor_sinks: int | None = None
-    observed_anchor_records: tuple[AnchorRecord, ...] | None = None
-    observed_anchor_unreadable: bool | None = None
-    if check_anchors and trail is not None:
-        anchors = _anchor_check(log, trail, tsa_ca_file=tsa_ca_file, hashes=hashes).summary
-        observed_anchor_sinks = _observed_anchor_sinks(trail)
-        observed_anchor_records = _observed_anchor_records(trail)
-        observed_anchor_unreadable = _observed_anchor_unreadable(trail)
-
-    witness_verdicts: tuple[WitnessVerdict, ...] | None = None
-    observed_witness_consistent: bool | None = None
-    if witnesses:
-        witness_verdicts = tuple(_witness_verdicts(log, witnesses, hashes=hashes))
-        observed_witness_consistent = _observed_witness_consistent(list(witness_verdicts))
-
-    # Ledger (waxseal-fg4.45), measured here — before the pin check, same
-    # reorder as _verify's and for the same reason: _pin_check needs THIS
-    # run's ledger result to compare against a declared_topology.ledger.
-    ledger_check: _Check | None = None
-    observed_ledger_ok: bool | None = None
-    if ledger_liveness is not None or ledger_registry is not None:
-        assert ledger_trail_id is not None  # main() always fills this in
-        ledger_check = _ledger_check(
-            entries,
-            rpc_urls=ledger_rpc_urls,
-            liveness=ledger_liveness,
-            registry=ledger_registry,
-            trail_id=ledger_trail_id,
-            now_fn=now_fn,
-        )
-        observed_ledger_ok = _observed_ledger_ok(ledger_check)
+    observed = _observe(
+        log,
+        trail,
+        entries,
+        hashes,
+        check_anchors=check_anchors,
+        tsa_ca_file=tsa_ca_file,
+        witnesses=witnesses,
+        ledger_rpc_urls=ledger_rpc_urls,
+        ledger_liveness=ledger_liveness,
+        ledger_registry=ledger_registry,
+        ledger_trail_id=ledger_trail_id,
+        now_fn=now_fn,
+    )
+    anchors = observed.anchor_check.summary if observed.anchor_check is not None else None
+    witness_verdicts: tuple[WitnessVerdict, ...] | None = (
+        tuple(observed.witness_verdicts) if observed.witness_verdicts is not None else None
+    )
+    ledger_check = observed.ledger_check
 
     pin: CheckSummary | None = None
     pending_pin: PinState | None = None
     if pin_path is not None:
-        assert target is not None  # main() always passes both together
-        pin_check, pending_pin = _pin_check(
+        pin_check, pending_pin = observed.pin_check(
             log,
             pin_path,
             target=target,
             chain_id=chain_id,
             now_fn=now_fn,
-            observed_anchor_sinks=observed_anchor_sinks,
-            observed_witness_consistent=observed_witness_consistent,
-            observed_anchor_records=observed_anchor_records,
-            observed_anchor_unreadable=observed_anchor_unreadable,
             declare_expect_anchor_binding=declare_expect_anchor_binding,
             declare_max_anchor_age_s=declare_max_anchor_age_s,
             declare_topology=declare_topology,
-            observed_ledger_ok=observed_ledger_ok,
             hashes=hashes,
         )
         pin = pin_check.summary

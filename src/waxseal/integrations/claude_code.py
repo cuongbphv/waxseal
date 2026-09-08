@@ -42,7 +42,6 @@ this hook cannot and does not rewrite.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
@@ -52,13 +51,9 @@ from typing import Any
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
 from waxseal.integrations import _sanitize as _sanitize_impl
-from waxseal.integrations._archive import archive_destination
+from waxseal.integrations._stdin_hook import run_stdin_hook
 from waxseal.integrations._trail import env_trail, home_base, resolve_trail, routed_trail
-from waxseal.sources.rotation import (
-    DEFAULT_MAX_SEGMENT_BYTES,
-    active_segment,
-    open_segmented,
-)
+from waxseal.sources.rotation import DEFAULT_MAX_SEGMENT_BYTES
 
 MAX_FIELD_CHARS = _sanitize_impl.MAX_FIELD_CHARS
 _sanitize = _sanitize_impl.sanitize
@@ -155,64 +150,24 @@ def build_payload(event: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _open_remote(target: str, event: dict[str, Any]) -> AuditLog:
+    # A drop record is a sidecar file NEXT TO the trail, and a URL has
+    # no next-to; AuditLog.open rejects the combination outright.
+    return AuditLog.open(target, redactor=RegexRedactor(), chain_id=_chain_id(event))
+
+
 def main() -> int:
     # Every failure path returns 0: any other exit code is at best noise and
     # at worst (exit 2) a veto over the user's tool call or prompt.
-    try:
-        event = json.loads(sys.stdin.read())
-        if not isinstance(event, dict):
-            raise ValueError("hook event must be a JSON object")
-    except Exception as e:
-        print(f"[waxseal-audit] unreadable hook event (entry dropped): {e}", file=sys.stderr)
-        return 0
-    target = _trail_target(event)
-    remote = isinstance(target, str)
-    try:
-        if remote:
-            # A drop record is a sidecar file NEXT TO the trail, and a URL has
-            # no next-to; AuditLog.open rejects the combination outright.
-            log = AuditLog.open(
-                target, redactor=RegexRedactor(), chain_id=_chain_id(event)
-            )
-        else:
-            # The hook passes the built-in constant; the rotation notice says
-            # so, so nobody reads 16777216 as something they configured.
-            log = open_segmented(
-                target,
-                max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES,
-                # J3's off-box copy, opt-in through `WAXSEAL_ARCHIVE`. `None` (the
-                # unconfigured case) is passed through deliberately: rotation renders
-                # it as `archive_not_attempted`, which is the line an operator who
-                # believes they configured one needs to see.
-                archive=archive_destination(),
-                redactor=RegexRedactor(),
-                record_drops=True,
-            )
-    except Exception as e:
-        print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
-        if remote:
-            # Nowhere to record it: the loss is labelled on stderr and nothing
-            # else, which is still better than inventing a sidecar location.
-            return 0
-        # No AuditLog to route this through, so record it directly. Best-effort
-        # (FileDropRecorder.record() never raises): a trail we cannot even
-        # open must not become a second failure on top of the first.
-        from waxseal.adapters.drops import FileDropRecorder
-
-        # Beside the segment actually in play, not beside the logical base:
-        # a `.drops` file in the wrong directory is a loss nobody finds.
-        FileDropRecorder(active_segment(target)).record(
-            reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-        )
-        return 0
-    if not log.try_append(payload=build_payload(event), payload_type=PAYLOAD_TYPE):
-        # Labelled fail-open (chain integrity ≠ trail completeness): the loss
-        # is visible in the hook notice, never silent.
-        print(
-            f"[waxseal-audit] dropped write for {event.get('hook_event_name')!r}",
-            file=sys.stderr,
-        )
-    return 0
+    return run_stdin_hook(
+        payload_type=PAYLOAD_TYPE,
+        build_payload=build_payload,
+        resolve_target=_trail_target,
+        # The hook passes the built-in constant; the rotation notice says
+        # so, so nobody reads 16777216 as something they configured.
+        max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES,
+        open_remote=_open_remote,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - measured via in-process tests

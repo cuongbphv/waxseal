@@ -4,29 +4,20 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from waxseal.adapters.anchors import AnchorRecord
 from waxseal.cli._anchors import (
-    _anchor_check,
-    _observed_anchor_records,
-    _observed_anchor_sinks,
-    _observed_anchor_unreadable,
-    _observed_ledger_ok,
-    _observed_witness_consistent,
     _print_drop_count,
     _receipts_check,
     _tau_line,
     _witness_exit_code,
     _witness_line,
-    _witness_verdicts,
 )
-from waxseal.cli._common import _Check, _combine, _default_now
-from waxseal.cli.ledger import _ledger_check
-from waxseal.cli.pin import _pin_check, _save_pin
+from waxseal.cli._common import _combine, _default_now
+from waxseal.cli._dimensions import _observe
+from waxseal.cli.pin import _save_pin
 from waxseal.domain.pinning import PinState
 from waxseal.domain.separation import (
     SeparationTopology,
 )
-from waxseal.domain.witnessing import WitnessVerdict
 from waxseal.log import AuditLog
 
 
@@ -93,88 +84,55 @@ def _verify(
     # actually observed (waxseal-7tk.3.2). Each dimension's own line still
     # PRINTS in the original order (pin, then anchors, then witnesses), so
     # only the underlying computation moved earlier, not the output.
-    anchor_check: _Check | None = None
-    observed_anchor_sinks: int | None = None
-    observed_anchor_records: tuple[AnchorRecord, ...] | None = None
-    observed_anchor_unreadable: bool | None = None
-    # trail is None only for a URL target, and main() already forces
-    # check_anchors False in that case (no local sidecar to check), and this
-    # guard just makes that invariant visible to mypy, not a new behavior.
-    if check_anchors and trail is not None:
-        anchor_check = _anchor_check(log, trail, tsa_ca_file=tsa_ca_file, hashes=hashes)
-        observed_anchor_sinks = _observed_anchor_sinks(trail)
-        observed_anchor_records = _observed_anchor_records(trail)
-        observed_anchor_unreadable = _observed_anchor_unreadable(trail)
-
-    witness_verdicts: list[WitnessVerdict] | None = None
-    observed_witness_consistent: bool | None = None
-    if witnesses:
-        witness_verdicts = _witness_verdicts(log, witnesses, hashes=hashes)
-        observed_witness_consistent = _observed_witness_consistent(witness_verdicts)
-
-    # Ledger (waxseal-fg4.45), measured here for the same reason anchors and
-    # witnesses already are above: `_pin_check` needs THIS run's ledger
-    # result to compare against a declared_topology.ledger, and can only do
-    # that if the check has already run by the time `_pin_check` is called.
-    # F4 originally computed this AFTER `_pin_check` (still true in the
-    # `report` builder below at the time of writing) — printing was
-    # unaffected either way, since `_ledger_check` is idempotent, but the
-    # comparison inside `_pin_check` was structurally unreachable: nothing
-    # had been measured yet for it to read.
-    ledger_check: _Check | None = None
-    observed_ledger_ok: bool | None = None
-    if ledger_liveness is not None or ledger_registry is not None:
-        assert ledger_trail_id is not None  # main() always fills this in
-        ledger_check = _ledger_check(
-            iter(entries),
-            rpc_urls=ledger_rpc_urls,
-            liveness=ledger_liveness,
-            registry=ledger_registry,
-            trail_id=ledger_trail_id,
-            now_fn=now_fn,
-        )
-        observed_ledger_ok = _observed_ledger_ok(ledger_check)
+    observed = _observe(
+        log,
+        trail,
+        entries,
+        hashes,
+        check_anchors=check_anchors,
+        tsa_ca_file=tsa_ca_file,
+        witnesses=witnesses,
+        ledger_rpc_urls=ledger_rpc_urls,
+        ledger_liveness=ledger_liveness,
+        ledger_registry=ledger_registry,
+        ledger_trail_id=ledger_trail_id,
+        now_fn=now_fn,
+    )
 
     pending_pin: PinState | None = None
     if pin_path is not None:
-        assert target is not None  # main() always passes both together
-        check, pending_pin = _pin_check(
+        check, pending_pin = observed.pin_check(
             log,
             pin_path,
             target=target,
             chain_id=chain_id,
             now_fn=now_fn,
-            observed_anchor_sinks=observed_anchor_sinks,
-            observed_witness_consistent=observed_witness_consistent,
-            observed_anchor_records=observed_anchor_records,
-            observed_anchor_unreadable=observed_anchor_unreadable,
             declare_expect_anchor_binding=declare_expect_anchor_binding,
             declare_max_anchor_age_s=declare_max_anchor_age_s,
             declare_topology=declare_topology,
-            observed_ledger_ok=observed_ledger_ok,
             hashes=hashes,
         )
         print(check.line)
         codes.append(check.exit_code)
 
-    if anchor_check is not None:
-        print(anchor_check.line)
+    if observed.anchor_check is not None:
+        print(observed.anchor_check.line)
         # Anchor breakage escalates to 1 regardless of the chain's own exit
         # code: it is still "broken", just a different dimension of it.
-        codes.append(anchor_check.exit_code)
+        codes.append(observed.anchor_check.exit_code)
 
-    if witness_verdicts is not None:
-        for verdict in witness_verdicts:
+    if observed.witness_verdicts is not None:
+        for verdict in observed.witness_verdicts:
             print(_witness_line(verdict))
-        codes.append(_witness_exit_code(witness_verdicts))
+        codes.append(_witness_exit_code(observed.witness_verdicts))
 
-    if ledger_check is not None:
+    if observed.ledger_check is not None:
         # Printed here, in the ORIGINAL position, even though it was
         # computed earlier above: only the computation moved, matching the
         # anchor_check/witness_verdicts precedent this function already
         # follows for the same reason.
-        print(ledger_check.line)
-        codes.append(ledger_check.exit_code)
+        print(observed.ledger_check.line)
+        codes.append(observed.ledger_check.exit_code)
 
     receipts_check = _receipts_check(log, trail, hashes=hashes)
     print(receipts_check.line)
