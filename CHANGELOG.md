@@ -390,6 +390,19 @@ of these shipped in a release):
 - **`_read_last_line` alias removed** (see Added). The typographic
   ellipsis inside the quoted EU AI Act passage in both
   `docs/architecture/deployment*.md` is ASCII `...` like the rest.
+- **First CI run of the release PR, three fixes.** (1) Windows: five
+  architecture tests read src/ with `Path.read_text()` and no encoding;
+  cp1252 cannot decode the "Đ" in the Vietnamese legal citations four
+  domain modules gained in 0.1.6, so every Windows matrix job failed
+  where Linux passed. Every `read_text`/`write_text` in the repository
+  now names UTF-8 (363 calls), `tests/architecture/test_text_encoding.py`
+  refuses a new one, and ruff's PLW1514 does the same for `open()`
+  (preview rule, enabled alone via `explicit-preview-rules`). (2) The
+  server job's new `ruff` step could not spawn ruff: only the root
+  project carried it; it is in the server dev extra now. (3) shellcheck:
+  `install.sh` used `ls` to pick the artifact (SC2012, now `find`), and
+  `server/scripts/*.sh` had unguarded `cd`s, `A && B || C` notices and
+  unfollowed `source` lines; CI runs shellcheck with `-x -P SCRIPTDIR`.
 
 ### Security
 
