@@ -549,7 +549,6 @@ class TestBatchRootHashInvocations:
     ) -> None:
         import hashlib
 
-        from waxseal.domain import anchoring
         from waxseal.domain.anchoring import batch_root
 
         hashes = [hashlib.sha256(f"leaf-{i}".encode()).hexdigest() for i in range(n)]
@@ -560,7 +559,7 @@ class TestBatchRootHashInvocations:
             sink.append(1)
             return real(data)
 
-        monkeypatch.setattr(anchoring.hashlib, "sha256", counting)
+        monkeypatch.setattr("waxseal.domain.anchoring.hashlib.sha256", counting)
         batch_root(hashes)
         assert sum(sink) == 2 * n - 1, (
             f"batch_root of {n} leaves hashed {sum(sink)} times; "
