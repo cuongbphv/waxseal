@@ -9,7 +9,8 @@ a bare, unscoped claim and drift past review unnoticed.
 
 Scope of the check, and why it stops where it does: this walks waxseal's own
 shipped ENGLISH surface — `src/**/*.py`, `examples/**/*.py`, and the
-top-level and `docs/` Markdown files — and deliberately excludes one class
+top-level, `docs/`, `deploy/`, `server/`, `tools/`, `examples/` and
+`integrations/` Markdown files — and deliberately excludes one class
 of file. A `*.xx.md` translation (`README.vi.md`, `threat-model.zh.md`, ...) is a
 separate maintenance concern this bead does not own — keeping every
 translation in lockstep with an English wording change is real work, and
@@ -43,7 +44,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _TRANSLATION_SUFFIX = re.compile(r"\.[a-z]{2}\.md$")
 
-_EXCLUDED_DIR_NAMES = frozenset({".venv", "node_modules", ".git", "tests"})
+# `.pytest_cache` for the same reason its sibling ratchets exclude it: pytest
+# writes its own README there the first time it runs under `server/`, a real
+# file on disk that is not a waxseal claim and exists only on machines that
+# have run that suite locally.
+_EXCLUDED_DIR_NAMES = frozenset({".venv", "node_modules", ".git", "tests", ".pytest_cache"})
 
 _SCOPE_MARKERS = (
     "tamper-evident",  # the "X is tamper-evident, not tamper-proof" pattern
@@ -85,7 +90,18 @@ def candidate_files() -> list[Path]:
         # an operator reads before standing anything up, and prose about what a
         # deployment does and does not prove is exactly where an unscoped claim
         # would do the most damage.
-        is_top_level_or_docs = len(rel) == 1 or rel[0] in ("docs", "deploy")
+        # `server/`, `tools/`, `examples/` and `integrations/` joined 08/09/2026
+        # for the same reason: the server deployment guide is the one document
+        # that says what a hosted chain does and does not prove, and it sat
+        # outside this scan until a pre-release review noticed.
+        is_top_level_or_docs = len(rel) == 1 or rel[0] in (
+            "docs",
+            "deploy",
+            "server",
+            "tools",
+            "examples",
+            "integrations",
+        )
         is_english_md = (
             path.suffix == ".md"
             and is_top_level_or_docs
@@ -199,3 +215,18 @@ class TestFileSelection:
         assert REPO_ROOT / "deploy" / "systemd" / "README.md" in found
         assert (REPO_ROOT / "deploy" / "README.vi.md").is_file()
         assert REPO_ROOT / "deploy" / "README.vi.md" not in found
+
+    def test_it_includes_the_server_tools_examples_and_integrations_trees(
+        self,
+    ) -> None:
+        # Found outside every glob in the 0.1.6 pre-release review. The server
+        # deployment guide is the one document that says what a hosted chain
+        # does and does not prove, so it is where an unscoped claim would do
+        # the most damage; its translation stays out, like every other one.
+        found = candidate_files()
+        assert REPO_ROOT / "server" / "docs" / "deployment.md" in found
+        assert REPO_ROOT / "tools" / "pm" / "guide.md" in found
+        assert REPO_ROOT / "examples" / "risk-poc" / "README.md" in found
+        assert REPO_ROOT / "integrations" / "claude-code" / "README.md" in found
+        assert (REPO_ROOT / "server" / "docs" / "deployment.vi.md").is_file()
+        assert REPO_ROOT / "server" / "docs" / "deployment.vi.md" not in found

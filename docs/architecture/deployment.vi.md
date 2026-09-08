@@ -91,6 +91,12 @@ Hai quy tắc trong `CLAUDE.md` chi phối đường ghi này và không phải 
   `BEGIN IMMEDIATE` cho SQLite, `pg_advisory_xact_lock` cho Postgres, conditional PUT cho
   S3, và compare-and-swap phía server trên `(seq, prev_hash)` cho `RemoteBackend`.
 
+**Giới hạn body POST.** Chain server từ chối một body ghi vượt 1 MiB với HTTP 413 và
+`{error: payload_too_large}` (REMOTE.md mục 4). Nó đếm số byte đã stream, nên một POST
+chunked bỏ qua `Content-Length` không né được điểm dừng đó. Một `proxy-body-size` ở ingress
+(bản mẫu Helm đặt 8m) là một nắp ngoài thô hơn trên cùng đường đi, không phải thứ thay thế
+và không phải hợp đồng mà client nên rẽ nhánh theo.
+
 ### Agent nhiều replica
 
 Các replica agent không phối hợp với nhau. Tất cả cùng append vào một chuỗi, và việc tuần

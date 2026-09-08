@@ -14,8 +14,8 @@ SRC = REPO / "src" / "waxseal"
 
 
 def cli_python_files() -> list[Path]:
-    """cli.py today, cli/*.py after the package split, both during the
-    transition so later split beads do not all have to retouch this file."""
+    """Every module of the cli/ package (0.1.6 split a 4 402-line cli.py).
+    A stray cli.py is still picked up so a half-reverted split cannot hide."""
     files: list[Path] = []
     if (SRC / "cli.py").is_file():
         files.append(SRC / "cli.py")
@@ -410,10 +410,16 @@ class TestDocumentationLinks:
     # the other trees supply, which is exactly how `docs/` went unchecked.
     DOC_GLOBS = (
         "*.md",
+        # deploy/ and tools/ joined 08/09/2026, mirroring
+        # test_epistemic_tags.DOC_GLOBS: a pre-release review found the two
+        # trees outside this glob, so a link from a deploy guide to a moved
+        # file was a 404 nobody could grep for.
+        "deploy/**/*.md",
         "docs/**/*.md",
         "integrations/*/README*.md",
         "examples/**/*.md",
         "server/**/*.md",
+        "tools/**/*.md",
     )
 
     # Path segments whose subtree is not hand-written prose: gitignored
