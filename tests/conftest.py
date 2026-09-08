@@ -17,7 +17,19 @@ was not established and what would establish it.
 
 from __future__ import annotations
 
+import os
 from typing import Any
+
+# Every subprocess this suite spawns is decoded as UTF-8 (the encoding rule
+# tests/architecture/test_text_encoding.py enforces), so every child has to
+# WRITE UTF-8. A child Python inherits the platform default instead: cp1252
+# on the Windows runner, where `waxseal --help` prints an em dash as 0x97 and
+# the parent's reader thread died decoding it - nine tests saw a None stdout
+# on the third CI run of the 0.1.6 release PR while Linux stayed green.
+# PYTHONIOENCODING is read by the child at startup and wins over its locale,
+# so the two sides agree on every platform. Set, not setdefault: a developer
+# shell that exports a different value would reintroduce the mismatch here.
+os.environ["PYTHONIOENCODING"] = "utf-8"
 
 # Any test module may opt a skip into this reporting by putting the word in
 # its skip reason. Matching on the reason, not on a module path, so the line

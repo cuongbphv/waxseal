@@ -24,6 +24,7 @@ repository owner's machine (plan, Workstream D1).
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -91,6 +92,13 @@ _UNCACHED_COMMANDS: Final = frozenset({"ledger-status"})
 # do, a file stamp must not stand in for an RPC or witness reply. The set is
 # the ledger module's own, so it cannot drift from what that module emits.
 _NETWORK_FLAGS: Final = LEDGER_FLAGS
+
+# Both spawns decode the child's output as UTF-8, so the child must write it:
+# a child Python defaults to the platform locale (cp1252 on Windows), and the
+# em dash in `waxseal --help` is a byte utf-8 decoding refuses - the parent
+# would see None where it expected a verdict. Read by the child at startup,
+# this wins over its locale on every platform.
+_CHILD_ENV: Final = {**os.environ, "PYTHONIOENCODING": "utf-8"}
 
 STATUS_BY_VERDICT: Final = {
     Verdict.OK: "ok",
@@ -234,6 +242,7 @@ class WaxsealCli:
             text=True,
             timeout=self._timeout,
             encoding="utf-8",
+            env=_CHILD_ENV,
         )
         match = _CHOICES_RE.search(completed.stdout)
         if match is None:  # pragma: no cover - argparse always prints the metavar
@@ -270,7 +279,12 @@ class WaxsealCli:
                         return outcome
                     del self._outcomes[key]
         completed = subprocess.run(  # noqa: S603 - list argv, shell=False, allowlisted command
-            list(argv), capture_output=True, text=True, timeout=self._timeout, encoding="utf-8"
+            list(argv),
+            capture_output=True,
+            text=True,
+            timeout=self._timeout,
+            encoding="utf-8",
+            env=_CHILD_ENV,
         )
         outcome = _classify(command, argv, completed.returncode, completed.stdout, completed.stderr)
         if key is not None:

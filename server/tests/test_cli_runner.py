@@ -10,6 +10,7 @@ without collapsing any of them into another.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -546,3 +547,31 @@ class TestReadCacheThreatModel:
         clock["t"] += 31.0
         cli.run("verify", str(trail))
         assert len(spawn_calls) > n
+
+
+class TestTheChildWritesWhatTheParentDecodes:
+    """Both spawns decode the CLI's output as UTF-8, so the child must write
+    UTF-8. A child Python defaults to the platform locale (cp1252 on Windows),
+    and the em dash in `waxseal --help` is a byte that decoding would refuse:
+    the parent would then see a None stdout, never a verdict. PYTHONIOENCODING
+    in the child's environment is what pins the child's side."""
+
+    def test_every_spawn_pins_the_child_stdio_encoding(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        seen: list[dict[str, object]] = []
+        real = cli_module.subprocess.run
+
+        def recording(*args: object, **kwargs: object) -> object:
+            seen.append(dict(kwargs))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(cli_module.subprocess, "run", recording)
+        cli = cli_module.WaxsealCli(python=sys.executable)
+        cli.available()
+        cli.run("verify", str(tmp_path / "absent.jsonl"))
+        assert len(seen) == 2
+        for kwargs in seen:
+            assert kwargs["encoding"] == "utf-8"
+            env = kwargs["env"]
+            assert isinstance(env, dict) and env["PYTHONIOENCODING"] == "utf-8"

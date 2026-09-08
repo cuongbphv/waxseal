@@ -416,6 +416,14 @@ of these shipped in a release):
   `examples/` are held to the same rule by the encoding guard test, and
   the whole suite passes with `-X warn_default_encoding -W
   error::EncodingWarning`, the closest a POSIX machine gets to cp1252.
+  The third run then showed the other half of the same mismatch: a
+  child Python writes its stdout in the platform locale, so nine tests
+  that spawn `waxseal` decoded cp1252 bytes as UTF-8 and read a None
+  stdout. `tests/conftest.py` sets `PYTHONIOENCODING=utf-8` for every
+  child the suite spawns, and the server's CLI runner passes the same
+  variable to the CLI it shells out to, with a test that every spawn
+  carries it. Reproduced and re-checked locally under
+  `PYTHONIOENCODING=cp1252`.
 
 ### Security
 
