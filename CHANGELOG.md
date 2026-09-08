@@ -11,9 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`jsonl.read_last_line`**, with the compatibility alias the rotation and
-  server callers already used, so a tail read is one named function rather
-  than a private helper copied at each call site.
+- **`jsonl.read_last_line`**: a tail read is one named function rather than
+  a private helper copied at each call site. The `_read_last_line` alias
+  that bridged the rename did not outlive the release; no caller in src/,
+  server/ or tests/ used it.
 - **CI `audit` job**: `pip-audit` on the library and the server, `npm audit`
   on the web console, labelled advisory (`continue-on-error`). `trivy image
   waxseal:ci` runs in the `image` job, where the image actually exists, and
@@ -369,6 +370,26 @@ of these shipped in a release):
   drop-record locations are byte-identical; the hermes, openai-agents,
   langchain, crewai and openclaw integrations have different contracts
   and were left as they are.
+- **Every GitHub Action is pinned to a commit SHA**, with the version as
+  a trailing comment, across all four workflows; the release path no
+  longer follows the moving `pypa/gh-action-pypi-publish@release/v1`
+  branch. `.github/dependabot.yml` moves the pins (actions, uv, npm,
+  docker) so they do not rot.
+- **`ruff format --check .` is a CI gate** (library and server jobs,
+  `make lint`, CONTRIBUTING, the PR template). 208 files had drifted
+  with nothing to say so; they are formatted in one commit. ruff also
+  formats Python fences in Markdown, so `[tool.ruff.format] exclude`
+  names the frozen paths as a guard, though none was unformatted.
+- **Helm `image.digest`** on both charts (and the anchor CronJob image).
+  When set, the rendered reference is `repository@sha256:...` and the tag
+  only names the release; `validate.yaml` had told operators to "pin a
+  release tag or a digest" while the schema refused a digest. Two value
+  sets exercise it. The snapshots under `deploy/helm/tests/` are real
+  `helm template` output for the first time (Helm v4.2.4); they had been
+  hand-written. Chart `version` stays 0.1.0: no chart release exists yet.
+- **`_read_last_line` alias removed** (see Added). The typographic
+  ellipsis inside the quoted EU AI Act passage in both
+  `docs/architecture/deployment*.md` is ASCII `...` like the rest.
 
 ### Security
 
