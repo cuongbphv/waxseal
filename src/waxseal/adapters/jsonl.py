@@ -92,12 +92,6 @@ def read_last_line(path: Path) -> bytes | None:
                 return trimmed or None
 
 
-# One-release compatibility alias: rotation and the server imported the
-# private name. Keep it bound to the same function so a leftover import
-# does not become an AttributeError while those callers are updated.
-_read_last_line = read_last_line
-
-
 class JSONLBackend:
     def __init__(self, path: Path | str, *, integrity_scan_every: int | None = 1000) -> None:
         self._path = Path(path).expanduser()

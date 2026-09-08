@@ -215,7 +215,7 @@ Hãy nói rõ những điều này với người review trước khi họ tự 
 
 **Thời hạn lưu trữ.** Theo Quy định (EU) 2024/1689, nhà cung cấp hệ thống AI rủi ro cao
 phải giữ các log tự động sinh nằm dưới quyền kiểm soát của mình "trong khoảng thời gian phù
-hợp với mục đích sử dụng dự kiến … ít nhất là sáu tháng, trừ khi pháp luật Liên minh hoặc
+hợp với mục đích sử dụng dự kiến ... ít nhất là sáu tháng, trừ khi pháp luật Liên minh hoặc
 quốc gia áp dụng quy định khác" (Điều 19), và bên triển khai (deployer) có nghĩa vụ song
 song ít nhất sáu tháng đối với các log dưới quyền kiểm soát của mình (Điều 26(6)). Điều 19
 còn quy định rằng nhà cung cấp là tổ chức tài chính thuộc diện các yêu cầu về quản trị nội

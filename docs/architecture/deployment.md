@@ -216,7 +216,7 @@ State these to reviewers before they infer something stronger.
 
 **Retention.** Under Regulation (EU) 2024/1689, providers of high-risk AI systems must
 keep the automatically generated logs under their control "for a period appropriate to the
-intended purpose … of at least six months, unless provided otherwise in the applicable
+intended purpose ... of at least six months, unless provided otherwise in the applicable
 Union or national law" (Art. 19), and deployers carry a parallel at-least-six-months duty
 for logs under their control (Art. 26(6)). Art. 19 further provides that providers that
 are financial institutions subject to internal-governance requirements under Union

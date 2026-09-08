@@ -47,9 +47,7 @@ class TestHead:
         last = envelopes[-1]
         assert store.head("default") == (last["header"]["seq"], last["entry_hash"])
 
-    def test_head_survives_a_restart(
-        self, tmp_path: Path, envelopes: list[dict[str, Any]]
-    ) -> None:
+    def test_head_survives_a_restart(self, tmp_path: Path, envelopes: list[dict[str, Any]]) -> None:
         root = tmp_path / "chains"
         ChainStore(root).append("default", envelopes[0])
         assert ChainStore(root).head("default") == (0, envelopes[0]["entry_hash"])
@@ -292,9 +290,7 @@ class TestReceiptChain:
         restarted = ChainStore(root)
         assert restarted.append("default", envelopes[1]).receipt_seq == 1
 
-    def test_receipt_chains_are_per_chain_id(
-        self, tmp_path: Path, store: ChainStore
-    ) -> None:
+    def test_receipt_chains_are_per_chain_id(self, tmp_path: Path, store: ChainStore) -> None:
         store.append("alpha", build_envelopes(tmp_path / "l", 1)[0])
         assert store.receipt_head("beta") is None
 
@@ -390,9 +386,7 @@ class TestVerifyReceiptLog:
             "".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in records)
         )
 
-    def test_an_absent_log_is_not_recorded_never_zero_checked(
-        self, store: ChainStore
-    ) -> None:
+    def test_an_absent_log_is_not_recorded_never_zero_checked(self, store: ChainStore) -> None:
         # CLAUDE.md rule 5: "no log" is not "a log with nothing wrong in it".
         report = store.verify_receipt_log("default")
         assert report.verdict is Verdict.OK
@@ -490,7 +484,7 @@ class TestVerifyReceiptLog:
 class TestBlankLinesAreNotEntries:
     """A trailing newline is not a record.
 
-    `_read_last_line` already trims blank tails; the readers here have to agree
+    `read_last_line` already trims blank tails; the readers here have to agree
     with it, or a file the writer considers finished reads as one entry longer.
     """
 
