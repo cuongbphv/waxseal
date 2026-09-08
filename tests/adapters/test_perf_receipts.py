@@ -523,3 +523,51 @@ class TestEntryHashesSkipPayloadDecode:
         )
 
 
+class TestBatchRootHashInvocations:
+    """P3 measure-only. `batch_root` walks a full RFC 6962 tree on every
+    call, so with `anchor_every=N` the cumulative SHA-256 count is
+    O(n^2/N). Incremental Merkle would not change the rooted value
+    (golden vectors stay byte-for-byte) but is an algorithm change next
+    to frozen vectors -- owner must approve before any implementation.
+
+    P4 is not a hash count: every server GET read/verify shells out
+    (`server/waxseal_server/runtime/cli.py` `WaxsealCli.run`) because the
+    CLI is the sole verdict authority. That is a design decision, not a
+    leftover. Finding + proposal live in the b13c RE-MEASURE note.
+    """
+
+    def test_batch_root_still_matches_rfc6962_golden_vectors(self) -> None:
+        from tests.domain.test_anchoring import RFC_LEAVES, RFC_ROOTS
+        from waxseal.domain.anchoring import batch_root
+
+        for size, expected in enumerate(RFC_ROOTS):
+            assert batch_root(RFC_LEAVES[:size]) == expected
+
+    @pytest.mark.parametrize("n", (1, 8, 32, 256))
+    def test_one_full_tree_of_n_leaves_is_2n_minus_1_sha256_calls(
+        self, n: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+
+        from waxseal.domain import anchoring
+        from waxseal.domain.anchoring import batch_root
+
+        hashes = [hashlib.sha256(f"leaf-{i}".encode()).hexdigest() for i in range(n)]
+        sink: list[int] = []
+        real = hashlib.sha256
+
+        def counting(data: bytes = b"", usedforsecurity: bool = True) -> hashlib._Hash:
+            sink.append(1)
+            return real(data)
+
+        monkeypatch.setattr(anchoring.hashlib, "sha256", counting)
+        batch_root(hashes)
+        assert sum(sink) == 2 * n - 1, (
+            f"batch_root of {n} leaves hashed {sum(sink)} times; "
+            "the current recursive tree is 2n-1 (n leaves + n-1 nodes). "
+            "Cumulative under anchor_every=N at sizes N,2N,...,mN is "
+            "N*m*(m+1)-m (n=1000 N=10 -> 100900), which is the O(n^2/N) "
+            "the plan named."
+        )
+
+
