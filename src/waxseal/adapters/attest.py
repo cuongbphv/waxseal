@@ -28,6 +28,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from waxseal.adapters.atomic import atomic_write_bytes
+from waxseal.adapters.mode_notice import notice_if_group_or_world_readable
 from waxseal.domain.sealing import (
     AGG_GENESIS,
     FS_HMAC_AGG_SCHEME,
@@ -72,6 +73,8 @@ class FileAttestor:
         self._scheme = scheme
         if initial_key is not None and not self._key_path.exists():
             self._write_key(0, initial_key)
+        elif self._key_path.exists():
+            notice_if_group_or_world_readable(self._key_path)
 
     # -- called by AuditLog after a successful append --------------------------
     def attest(self, seq: int, entry_hash: str) -> Attestation:
@@ -197,6 +200,7 @@ class FileAttestor:
 
     # -- key file ---------------------------------------------------------------
     def _read_key(self) -> tuple[int, bytes]:
+        notice_if_group_or_world_readable(self._key_path)
         obj = json.loads(self._key_path.read_text(encoding="utf-8"))
         return int(obj["epoch"]), bytes.fromhex(obj["key"])
 

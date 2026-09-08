@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from waxseal.adapters.jsonl import JSONLBackend
+from waxseal.adapters.mode_notice import notice_if_group_or_world_readable
 from waxseal.ports.drops import DropRecorder
 
 _SQLITE_SUFFIXES = frozenset({".db", ".sqlite", ".sqlite3"})
@@ -74,6 +75,8 @@ def open_backend(
             "local backend issues none"
         )
     p = Path(path).expanduser()
+    if p.exists():
+        notice_if_group_or_world_readable(p)
     if p.suffix == ".jsonl":
         backend: Any = JSONLBackend(p)
     elif p.suffix in _SQLITE_SUFFIXES:
