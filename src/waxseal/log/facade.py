@@ -315,6 +315,9 @@ class AuditLog:
         forward pass over entries have `_verify_and_entries` / `entries()`
         instead — do not "optimize" this one into a generator.
         """
+        reader = getattr(self._backend, "entry_hashes", None)
+        if callable(reader):
+            return list(reader())
         return [entry.entry_hash for entry in self.entries()]
 
     def anchor(self) -> Checkpoint:

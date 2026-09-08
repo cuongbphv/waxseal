@@ -180,6 +180,23 @@ class JSONLBackend:
                 if line.strip():
                     yield from_obj(json.loads(line))
 
+    def entry_hashes(self) -> list[str]:
+        """The trail's hashes without reconstructing payload bytes.
+
+        `from_obj` base64-decodes every `payload_b64` even when the caller
+        only needs `entry_hash` (anchor, consistency, pin, witness). The
+        payload is stored so `entries()` can return it; a hashes-only pass
+        must not pay that decode (P2 / test_perf_receipts).
+        """
+        if not self._path.exists():
+            return []
+        hashes: list[str] = []
+        with open(self._path, encoding="utf-8", newline="") as f:
+            for line in f:
+                if line.strip():
+                    hashes.append(str(json.loads(line)["entry_hash"]))
+        return hashes
+
     def _tail_locked(self) -> tuple[int, str]:
         last_line = read_last_line(self._path)
         if last_line is None:

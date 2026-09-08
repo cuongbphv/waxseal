@@ -484,3 +484,42 @@ class TestVerifyReadsHashesOnce:
         capsys.readouterr()
         assert check.summary.ok
 
+
+class TestEntryHashesSkipPayloadDecode:
+    """P2: `entry_hashes()` used to reconstruct every Entry, base64-decoding
+    payload bytes that no hash check reads. Receipt counts `b64decode` calls
+    during one `entry_hashes()` pass. RED = one decode per row; GREEN = 0.
+    """
+
+    def test_entry_hashes_does_not_decode_payload_b64(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        log = AuditLog.open(path)
+        n = 40
+        for i in range(n):
+            log.append(payload={"i": i, "blob": "x" * 200}, payload_type=PAYLOAD_TYPE)
+        expected = [e.entry_hash for e in log.entries()]
+
+        import base64
+
+        sink: list[int] = []
+        real = base64.b64decode
+
+        def counting(
+            data: str | bytes, altchars: bytes | None = None, validate: bool = False
+        ) -> bytes:
+            sink.append(1)
+            return real(data, altchars, validate)
+
+        monkeypatch.setattr("waxseal.adapters._envelope.base64.b64decode", counting)
+        hashes = log.entry_hashes()
+        monkeypatch.undo()
+
+        assert hashes == expected
+        assert sum(sink) == 0, (
+            f"entry_hashes() decoded payload_b64 {sum(sink)} times on a "
+            f"{n}-row trail — hashes-only callers do not need the payload"
+        )
+
+
