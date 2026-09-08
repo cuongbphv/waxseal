@@ -45,9 +45,9 @@ def duplicate_anchor_record(trail: Path, *, sink: str) -> None:
     trick for manufacturing a distinct external sink without standing up a
     real RFC 3161 responder."""
     anchors = Path(str(trail) + ".anchors")
-    record = json.loads(anchors.read_text().splitlines()[-1])
+    record = json.loads(anchors.read_text(encoding="utf-8").splitlines()[-1])
     record["sink"] = sink
-    with open(anchors, "a") as f:
+    with open(anchors, "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
 
 
@@ -57,11 +57,11 @@ def add_aggregate_binding(trail: Path) -> None:
     `_append_anchor_record`: the commitment's own value is not what preflight
     reports on (it holds no seal key to check it with), only its presence."""
     anchors = Path(str(trail) + ".anchors")
-    record = json.loads(anchors.read_text().splitlines()[-1])
+    record = json.loads(anchors.read_text(encoding="utf-8").splitlines()[-1])
     record["v"] = 2
     record["agg_commit"] = "ab" * 32
     record["agg_epoch"] = 3
-    with open(anchors, "a") as f:
+    with open(anchors, "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
 
 
@@ -74,7 +74,7 @@ def declare_topology(
     pin_separate: bool = True,
     ledger: bool | None = None,
 ) -> None:
-    state = json.loads(pin.read_text())
+    state = json.loads(pin.read_text(encoding="utf-8"))
     topology: dict[str, object] = {
         "seal_escrow": seal_escrow,
         "anchor_sinks": anchor_sinks,
@@ -86,7 +86,7 @@ def declare_topology(
         # domain/pinning.py's own omit-when-undeclared round-trip.
         topology["ledger"] = ledger
     state["declared_topology"] = topology
-    pin.write_text(json.dumps(state))
+    pin.write_text(json.dumps(state), encoding="utf-8")
 
 
 def write_pin(trail: Path, pin: Path) -> None:
@@ -133,7 +133,7 @@ class TestLowestRung:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         trail = tmp_path / "trail.jsonl"
-        trail.write_text("")
+        trail.write_text("", encoding="utf-8")
         _, out = preflight(capsys, str(trail))
         assert "0 recorded entries" in out
         assert "no head yet" in out
@@ -300,7 +300,7 @@ class TestNotMeasuredIsNeverZero:
     ) -> None:
         trail = tmp_path / "trail.jsonl"
         make_trail(trail, sealed=True)
-        Path(str(trail) + ".anchors").write_text("{not json at all\n")
+        Path(str(trail) + ".anchors").write_text("{not json at all\n", encoding="utf-8")
         code, out = preflight(capsys, str(trail))
         assert code == 0
         # Rule 5, in the single easiest place in this command to lie: a
@@ -314,7 +314,7 @@ class TestNotMeasuredIsNeverZero:
     ) -> None:
         trail = tmp_path / "trail.jsonl"
         make_trail(trail, sealed=True)
-        Path(str(trail) + ".anchors").write_text(json.dumps({"v": "99"}) + "\n")
+        Path(str(trail) + ".anchors").write_text(json.dumps({"v": "99"}) + "\n", encoding="utf-8")
         code, out = preflight(capsys, str(trail))
         assert code == 0
         assert "unverifiable by name" in out
@@ -349,7 +349,7 @@ class TestNotMeasuredIsNeverZero:
     ) -> None:
         trail = tmp_path / "trail.jsonl"
         make_trail(trail)
-        trail.write_text(trail.read_text() + "{torn line\n")
+        trail.write_text(trail.read_text(encoding="utf-8") + "{torn line\n", encoding="utf-8")
         code, out = preflight(capsys, str(trail))
         assert code == 0
         assert "entries: NOT READ" in out
@@ -373,7 +373,7 @@ class TestPinStates:
         trail = tmp_path / "trail.jsonl"
         make_trail(trail)
         pin = tmp_path / "pin.json"
-        pin.write_text("not a pin state")
+        pin.write_text("not a pin state", encoding="utf-8")
         code, out = preflight(capsys, str(trail), "--pin", str(pin))
         # Rule 6: the degradation is in the output. Still exit 0 — preflight
         # reports no verdict, and `waxseal verify --pin` is what calls this a
@@ -389,9 +389,9 @@ class TestPinStates:
         make_trail(trail)
         pin = tmp_path / "pin.json"
         write_pin(trail, pin)
-        state = json.loads(pin.read_text())
+        state = json.loads(pin.read_text(encoding="utf-8"))
         state["v"] = 99
-        pin.write_text(json.dumps(state))
+        pin.write_text(json.dumps(state), encoding="utf-8")
         capsys.readouterr()
         code, out = preflight(capsys, str(trail), "--pin", str(pin))
         assert code == 0
@@ -555,7 +555,7 @@ class TestImmutablePrefixLines:
         # carried a checkpoint, so the prefix line must not print NONE.
         trail = tmp_path / "trail.jsonl"
         make_trail(trail, sealed=True)
-        Path(str(trail) + ".anchors").write_text("{not json at all\n")
+        Path(str(trail) + ".anchors").write_text("{not json at all\n", encoding="utf-8")
         _, out = preflight(capsys, str(trail))
         assert "immutable prefix: up to checkpoint UNMEASURED" in out
         assert "the .anchors sidecar could not be read" in out

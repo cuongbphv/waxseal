@@ -30,7 +30,7 @@ class TestAutoAnchoring:
         log = open_anchored(tmp_path, anchor_every=2)
         for i in range(5):
             log.append(payload={"i": i}, payload_type=PT)
-        lines = (tmp_path / "trail.jsonl.anchors").read_text().splitlines()
+        lines = (tmp_path / "trail.jsonl.anchors").read_text(encoding="utf-8").splitlines()
         # 5 appends, anchor_every=2 -> triggers when (seq+1) % 2 == 0: seq 1, 3.
         assert len(lines) == 2
         assert [json.loads(line)["seq"] for line in lines] == [1, 3]
@@ -59,7 +59,7 @@ class TestAutoAnchoring:
             log.append(payload={"i": i}, payload_type=PT)
         entries = list(log._backend.entries())
         hashes = [e.entry_hash for e in entries]
-        line = (tmp_path / "trail.jsonl.anchors").read_text().splitlines()[0]
+        line = (tmp_path / "trail.jsonl.anchors").read_text(encoding="utf-8").splitlines()[0]
         obj = json.loads(line)
         assert obj["seq"] == 2
         assert obj["entry_hash"] == hashes[-1]
@@ -75,7 +75,7 @@ class TestExplicitAnchor:
             log.append(payload={"i": i}, payload_type=PT)
         cp = log.anchor()
         assert cp.seq == 2
-        assert len((tmp_path / "trail.jsonl.anchors").read_text().splitlines()) == 1
+        assert len((tmp_path / "trail.jsonl.anchors").read_text(encoding="utf-8").splitlines()) == 1
 
     def test_anchor_on_empty_trail_raises(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
@@ -142,11 +142,11 @@ class TestExplicitAnchor:
         assert first.root == batch_root(written)
 
         trail = tmp_path / "trail.jsonl"
-        rows = trail.read_text().splitlines()
+        rows = trail.read_text(encoding="utf-8").splitlines()
         row = json.loads(rows[1])
         row["entry_hash"] = "f" * 64  # same length, different middle leaf
         rows[1] = json.dumps(row)
-        trail.write_text("\n".join(rows) + "\n")
+        trail.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
         on_disk = log.entry_hashes()
         assert on_disk[1] != written[1] and on_disk[-1] == written[-1]
@@ -409,7 +409,7 @@ class TestAnchorConcurrency:
         assert len(entries) == total
         assert log.verify().ok
 
-        lines = (tmp_path / "trail.jsonl.anchors").read_text().splitlines()
+        lines = (tmp_path / "trail.jsonl.anchors").read_text(encoding="utf-8").splitlines()
         # anchor_every=5 over `total` appends triggers at least total//5 times;
         # a race can duplicate a trigger but never skip or corrupt one.
         assert len(lines) >= total // 5

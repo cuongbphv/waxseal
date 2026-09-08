@@ -98,7 +98,7 @@ def stub(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.SimpleNamespace]:
 
 
 def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
-    line = trail.read_text().splitlines()[line_no]
+    line = trail.read_text(encoding="utf-8").splitlines()[line_no]
     result: dict[str, Any] = json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
     return result
 
@@ -261,7 +261,7 @@ class TestNeverBlocksTheCrew:
         # The bus would swallow a raise, but that swallow is silent — the
         # listener must label the drop itself.
         blocked = tmp_path / "blocked"
-        blocked.write_text("a file where the trail dir should be")
+        blocked.write_text("a file where the trail dir should be", encoding="utf-8")
         stub.module.WaxsealEventListener(blocked / "trail.jsonl")
         stub.bus.handlers[stub.events.ToolUsageStartedEvent]("crew", tool_started(stub.events))
         assert "dropped" in capsys.readouterr().err
@@ -287,4 +287,4 @@ class TestNeverBlocksTheCrew:
         assert "dropped" in capsys.readouterr().err
         drops = tmp_path / "trail.jsonl.drops"
         assert drops.exists()
-        assert len(drops.read_text().splitlines()) == 1
+        assert len(drops.read_text(encoding="utf-8").splitlines()) == 1

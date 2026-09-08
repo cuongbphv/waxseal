@@ -54,7 +54,7 @@ main()
 @pytest.fixture
 def signer_cmd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     script = tmp_path / "fake_signer.py"
-    script.write_text(FAKE_SIGNER)
+    script.write_text(FAKE_SIGNER, encoding="utf-8")
     cmd = f"{sys.executable} {script}"
     monkeypatch.setenv("WAXSEAL_EVM_SIGNER_CMD", cmd)
     return cmd
@@ -346,7 +346,7 @@ class TestBondProve:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         proof_path = tmp_path / "proof.json"
-        proof_path.write_text("{not json")
+        proof_path.write_text("{not json", encoding="utf-8")
         urls = two_write_nodes()
         code = main(
             [
@@ -373,7 +373,7 @@ class TestBondProve:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         proof_path = tmp_path / "proof.json"
-        proof_path.write_text('{"chain_id": "t"}')
+        proof_path.write_text('{"chain_id": "t"}', encoding="utf-8")
         urls = two_write_nodes()
         code = main(
             [
@@ -400,7 +400,7 @@ class TestBondProve:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         proof_path = tmp_path / "proof.json"
-        proof_path.write_text('{"kind": "equivocation", "chain_id": "t"}')
+        proof_path.write_text('{"kind": "equivocation", "chain_id": "t"}', encoding="utf-8")
         urls = two_write_nodes()
         code = main(
             [
@@ -442,7 +442,8 @@ class TestBondProve:
                     "checkpoint_b": cp,
                     "signature_b": "0x" + "22" * 65,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
@@ -482,7 +483,8 @@ class TestBondProve:
                     "checkpoint_b": self._checkpoint(5, "ef" * 32, "01" * 32),
                     "signature_b": "0x" + "22" * 65,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
@@ -528,7 +530,8 @@ class TestBondProve:
                         "proof": ["0xbb" + "bb" * 31],
                     },
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
@@ -580,7 +583,8 @@ class TestBondProve:
                     "in_older": leaf,
                     "in_newer": leaf,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
@@ -620,7 +624,8 @@ class TestBondProve:
                     "checkpoint_b": self._checkpoint(5, "ef" * 32, "01" * 32),
                     "signature_b": "0x" + "22" * 65,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
@@ -663,7 +668,8 @@ class TestBondProve:
                     "in_older": "not-an-object",
                     "in_newer": {"index": 3, "entry_hash": "cc" * 32, "proof": []},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
@@ -700,7 +706,8 @@ class TestBondProve:
                     "checkpoint_b": self._checkpoint(5, "ef" * 32, "01" * 32),
                     "signature_b": "0x" + "22" * 65,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         code = main(
             [
@@ -733,7 +740,8 @@ class TestBondProve:
                     "checkpoint_b": self._checkpoint(5, "ef" * 32, "01" * 32),
                     "signature_b": "0x" + "22" * 65,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         url_a, server_a = start_fake_node(write_node(estimate_gas_answer=rpc_revert()))
         url_b, server_b = start_fake_node(write_node(estimate_gas_answer=rpc_revert()))

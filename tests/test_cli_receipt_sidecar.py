@@ -70,16 +70,20 @@ def acknowledged_trail(tmp_path: Path, payloads: list[dict[str, object]] | None 
         "".join(
             json.dumps(to_obj(entry, backend="JSONL"), sort_keys=True, separators=(",", ":")) + "\n"
             for entry in remote.entries()
-        )
+        ),
+        encoding="utf-8",
     )
     return trail
 
 
 def rewrite_sidecar(trail: Path, edit: Callable[[list[dict[str, object]]], None]) -> None:
-    records = [json.loads(line) for line in receipts_path(trail).read_text().splitlines()]
+    records = [
+        json.loads(line) for line in receipts_path(trail).read_text(encoding="utf-8").splitlines()
+    ]
     edit(records)
     receipts_path(trail).write_text(
-        "".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in records)
+        "".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in records),
+        encoding="utf-8",
     )
 
 
@@ -92,7 +96,7 @@ class TestTheWindowIsOneEntry:
         trail = acknowledged_trail(tmp_path)
         forged = tmp_path / "forged.jsonl"
         write_trail(forged, [{"i": 0}, {"i": "tampered"}, {"i": 2}])
-        trail.write_text(forged.read_text())
+        trail.write_text(forged.read_text(encoding="utf-8"), encoding="utf-8")
 
         assert main(["verify", str(forged)]) == 0  # the rewrite itself is a clean chain
 
@@ -109,12 +113,12 @@ class TestTheWindowIsOneEntry:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         trail = acknowledged_trail(tmp_path)
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         entry = json.loads(lines[1])
         flipped = "0" if entry["entry_hash"][0] != "0" else "1"
         entry["entry_hash"] = flipped + entry["entry_hash"][1:]
         lines[1] = json.dumps(entry, sort_keys=True, separators=(",", ":"))
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         code = main(["verify", str(trail)])
         out = capsys.readouterr().out
@@ -137,8 +141,8 @@ class TestTheReasonTable:
     ) -> None:
         # Rollback: the trail no longer reaches an entry the server acknowledged.
         trail = acknowledged_trail(tmp_path)
-        lines = trail.read_text().splitlines()
-        trail.write_text("\n".join(lines[:-1]) + "\n")
+        lines = trail.read_text(encoding="utf-8").splitlines()
+        trail.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
 
         code = main(["verify", str(trail)])
         out = capsys.readouterr().out
@@ -227,7 +231,7 @@ class TestAbsentIsNeverAFailure:
         # recorded", and neither is a failure.
         trail = tmp_path / "trail.jsonl"
         write_trail(trail, PAYLOADS)
-        receipts_path(trail).write_text("")
+        receipts_path(trail).write_text("", encoding="utf-8")
         code = main(["verify", str(trail)])
         out = capsys.readouterr().out
         assert "receipts: not recorded" not in out
@@ -276,7 +280,7 @@ class TestHonestLimit:
         trail = acknowledged_trail(tmp_path)
         forged = tmp_path / "forged.jsonl"
         write_trail(forged, [{"i": 0}, {"i": "tampered"}, {"i": 2}])
-        trail.write_text(forged.read_text())
+        trail.write_text(forged.read_text(encoding="utf-8"), encoding="utf-8")
 
         def curate(records: list[dict[str, object]]) -> None:
             for record, entry in zip(records, AuditLog.open(forged).entries(), strict=True):

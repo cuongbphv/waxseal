@@ -58,7 +58,7 @@ def audit_entry(**overrides: object) -> SimpleNamespace:
 
 
 def read_line(trail: Path, line_no: int = 0) -> dict[str, Any]:
-    line = trail.read_text().splitlines()[line_no]
+    line = trail.read_text(encoding="utf-8").splitlines()[line_no]
     result: dict[str, Any] = json.loads(line)
     return result
 
@@ -221,13 +221,13 @@ class TestNeverVetoesAGT:
         assert "dropped" in capsys.readouterr().err
         drops = tmp_path / "trail.jsonl.drops"
         assert drops.exists()
-        assert len(drops.read_text().splitlines()) == 1
+        assert len(drops.read_text(encoding="utf-8").splitlines()) == 1
 
     def test_try_append_failure_never_raises_and_labels_the_drop(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         blocked = tmp_path / "blocked"
-        blocked.write_text("a file where the trail dir should be")
+        blocked.write_text("a file where the trail dir should be", encoding="utf-8")
         WaxsealAuditSink(blocked / "trail.jsonl").write(audit_entry())
         assert "dropped" in capsys.readouterr().err
 
@@ -250,7 +250,7 @@ class TestNeverVetoesAGT:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         blocked = tmp_path / "blocked"
-        blocked.write_text("a file where the trail dir should be")
+        blocked.write_text("a file where the trail dir should be", encoding="utf-8")
         sink = WaxsealAuditSink(blocked / "trail.jsonl")
         sink.write_batch([audit_entry(), audit_entry()])
         assert "dropped" in capsys.readouterr().err

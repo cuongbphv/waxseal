@@ -84,7 +84,7 @@ main()
 @pytest.fixture
 def signer_cmd(tmp_path: Path) -> str:
     script = tmp_path / "fake_signer.py"
-    script.write_text(FAKE_SIGNER)
+    script.write_text(FAKE_SIGNER, encoding="utf-8")
     return f"{sys.executable} {script}"
 
 

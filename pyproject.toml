@@ -260,4 +260,11 @@ target-version = "py311"
 exclude = ["SPEC.md", "CLAUDE.md", "LICENSE", "tests/vectors", "src/waxseal/domain/fingerprint.py"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+# PLW1514 (unspecified-encoding) is preview-only in ruff 0.16; explicit-preview-rules
+# turns on that one rule and nothing else. Windows CI read cp1252 where every
+# other runner read UTF-8 (0.1.6, first Windows run); pathlib's read_text/
+# write_text are covered by tests/architecture/test_text_encoding.py, open()
+# by this rule.
+preview = true
+explicit-preview-rules = true
+select = ["E", "F", "I", "UP", "B", "SIM", "PLW1514"]

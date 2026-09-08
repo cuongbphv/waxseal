@@ -254,7 +254,7 @@ class TestTheOlderCitedFigures:
         assert base.stat().st_size == before  # sealed, never rewritten (rule 4)
         assert rotated.stat().st_size == ROTATION_BINDING_BYTES
 
-        record = json.loads(rotated.read_text().splitlines()[0])
+        record = json.loads(rotated.read_text(encoding="utf-8").splitlines()[0])
         assert record["header"]["payload_type"] == ROTATION_PAYLOAD_TYPE
         # The directory name is IN the line, which is the point.
         binding = json.loads(base64.b64decode(record["payload_b64"]))
@@ -289,7 +289,7 @@ class TestSpecSection202CitesTheMeasurement:
     """
 
     def _by_count_paragraph(self) -> str:
-        spec = (Path(__file__).resolve().parents[1] / "SPEC.md").read_text()
+        spec = (Path(__file__).resolve().parents[1] / "SPEC.md").read_text(encoding="utf-8")
         marker = "By-count\ntriggering is not permitted"
         assert marker in spec, "SPEC section 20.2's by-count sentence moved or was reworded"
         start = spec.index(marker)

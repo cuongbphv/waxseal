@@ -88,7 +88,7 @@ def trail_path(tmp_path: Path) -> Path:
 
 
 def read_payload(tmp_path: Path, line_no: int = 0) -> dict[str, Any]:
-    line = trail_path(tmp_path).read_text().splitlines()[line_no]
+    line = trail_path(tmp_path).read_text(encoding="utf-8").splitlines()[line_no]
     result: dict[str, Any] = json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
     return result
 
@@ -221,7 +221,7 @@ class TestNeverBlocksThePipeline:
         # dropped write instead.
         home = tmp_path / "hermes-home"
         home.mkdir(parents=True)
-        (home / "audit").write_text("not a directory")
+        (home / "audit").write_text("not a directory", encoding="utf-8")
         ctx.hooks["post_tool_call"](**post_tool_call_kwargs())  # must not raise
         assert "dropped" in capsys.readouterr().out
 

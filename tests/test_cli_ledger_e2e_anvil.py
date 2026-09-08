@@ -365,7 +365,7 @@ main()
 @pytest.fixture(scope="module")
 def signer_script(tmp_path_factory: pytest.TempPathFactory) -> Path:
     path = tmp_path_factory.mktemp("e2e-signer") / "signer.py"
-    path.write_text(_SIGNER_SCRIPT)
+    path.write_text(_SIGNER_SCRIPT, encoding="utf-8")
     return path
 
 
@@ -899,7 +899,7 @@ class TestBondViaCli:
 
         with tempfile.TemporaryDirectory() as tmp:
             proof_path = Path(tmp) / "equivocation.json"
-            proof_path.write_text(json.dumps(proof))
+            proof_path.write_text(json.dumps(proof), encoding="utf-8")
             for url in chain.urls:
                 prove = _waxseal(
                     "bond",
@@ -1070,7 +1070,7 @@ class TestBondViaCli:
 
         with tempfile.TemporaryDirectory() as tmp:
             proof_path = Path(tmp) / "non-extension.json"
-            proof_path.write_text(json.dumps(proof))
+            proof_path.write_text(json.dumps(proof), encoding="utf-8")
             prove = _waxseal(
                 "bond",
                 "prove",
@@ -1152,7 +1152,7 @@ class TestBondViaCli:
 
         with tempfile.TemporaryDirectory() as tmp:
             proof_path = Path(tmp) / "agree.json"
-            proof_path.write_text(json.dumps(proof))
+            proof_path.write_text(json.dumps(proof), encoding="utf-8")
             prove = _waxseal(
                 "bond",
                 "prove",

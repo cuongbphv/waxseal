@@ -41,8 +41,10 @@ def trail_with_sidecar(tmp_path: Path, records: list[dict[str, object]]) -> Path
     # The command reads only the sidecar — the trail merely has to exist
     # (extraction is not verification; `verify --anchors` is the cross-check).
     trail = tmp_path / "trail.jsonl"
-    trail.write_text("")
-    Path(str(trail) + ".anchors").write_text("".join(json.dumps(r) + "\n" for r in records))
+    trail.write_text("", encoding="utf-8")
+    Path(str(trail) + ".anchors").write_text(
+        "".join(json.dumps(r) + "\n" for r in records), encoding="utf-8"
+    )
     return trail
 
 
@@ -69,7 +71,7 @@ class TestNothingReadNothingCreated:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         trail = tmp_path / "trail.jsonl"
-        trail.write_text("")
+        trail.write_text("", encoding="utf-8")
         out = tmp_path / "receipts"
         assert main(["receipt", str(trail), "--out", str(out)]) == 3
         assert not out.exists()
@@ -193,7 +195,7 @@ class TestMalformedSidecar:
     ) -> None:
         # Our format, our verdict — same asymmetry `verify --anchors` keeps.
         trail = tmp_path / "trail.jsonl"
-        trail.write_text("")
-        Path(str(trail) + ".anchors").write_text("{ not json\n")
+        trail.write_text("", encoding="utf-8")
+        Path(str(trail) + ".anchors").write_text("{ not json\n", encoding="utf-8")
         assert main(["receipt", str(trail), "--out", str(tmp_path / "r")]) == 1
         assert "malformed_anchor" in capsys.readouterr().err

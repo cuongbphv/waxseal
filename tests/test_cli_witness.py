@@ -222,7 +222,9 @@ class TestVerifyCrossChecks:
         make_trail(trail, 4)
         main(["anchor", str(trail), "--witness", url])
         capsys.readouterr()
-        trail.write_text("\n".join(trail.read_text().splitlines()[:2]) + "\n")
+        trail.write_text(
+            "\n".join(trail.read_text(encoding="utf-8").splitlines()[:2]) + "\n", encoding="utf-8"
+        )
 
         assert main(["verify", str(trail), "--witness", url]) == 1
         assert "anchor_beyond_head" in capsys.readouterr().out

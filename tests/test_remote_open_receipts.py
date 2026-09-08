@@ -175,5 +175,5 @@ def test_the_sidecar_is_json_lines_a_reader_can_parse_without_waxseal(
 ) -> None:
     trail = tmp_path / "trail.jsonl"
     append_two(AuditLog.open(live.url, receipts_trail=trail))
-    lines = receipts_path(trail).read_text().splitlines()
+    lines = receipts_path(trail).read_text(encoding="utf-8").splitlines()
     assert [json.loads(line)["seq"] for line in lines] == [0, 1]

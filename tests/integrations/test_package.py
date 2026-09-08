@@ -77,8 +77,10 @@ class TestPackageShape:
         from waxseal.integrations import hermes, hermes_gateway
 
         repo = Path(__file__).parent.parent.parent / "integrations" / "hermes"
-        assert (repo / "plugin" / "plugin.yaml").read_text() == hermes.PLUGIN_MANIFEST
-        assert (repo / "HOOK.yaml").read_text() == hermes_gateway.HOOK_MANIFEST
+        assert (repo / "plugin" / "plugin.yaml").read_text(
+            encoding="utf-8"
+        ) == hermes.PLUGIN_MANIFEST
+        assert (repo / "HOOK.yaml").read_text(encoding="utf-8") == hermes_gateway.HOOK_MANIFEST
 
     def test_hook_entry_points_exist(self) -> None:
         # The shims `waxseal install` writes call exactly these names.

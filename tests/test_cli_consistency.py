@@ -104,10 +104,10 @@ class TestInconsistent:
     ) -> None:
         path = trail_of(tmp_path, 3)
         old = checkpoint_output(path, capsys)
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
         first = json.loads(lines[0])
         first["entry_hash"] = "f" * 64
-        path.write_text("\n".join([json.dumps(first), *lines[1:]]) + "\n")
+        path.write_text("\n".join([json.dumps(first), *lines[1:]]) + "\n", encoding="utf-8")
 
         assert (
             main(
@@ -169,7 +169,7 @@ class TestUnverifiable:
         # No entries means no tree, so no state can be extended — but an
         # empty file is not a missing trail (that is exit 3).
         path = tmp_path / "trail.jsonl"
-        path.write_text("")
+        path.write_text("", encoding="utf-8")
         assert main(["consistency", str(path), "--old-seq", "0", "--old-root", "a" * 64]) == 2
         assert "empty trail" in capsys.readouterr().out
 

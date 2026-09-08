@@ -285,9 +285,9 @@ class TestPublicReadApi:
         _post(client, envelopes[0])
         _post(client, envelopes[1])
         log = tmp_path / "d" / "chains" / "default" / "receipts.jsonl"
-        lines = log.read_text().splitlines()
+        lines = log.read_text(encoding="utf-8").splitlines()
         tampered = lines[1].replace('"receipt_head":"', '"receipt_head":"a')[:-1]
-        log.write_text(lines[0] + "\n" + tampered + "\n")
+        log.write_text(lines[0] + "\n" + tampered + "\n", encoding="utf-8")
         body = client.get("/public/v1/chains/default/receipts/verify").json()
         assert body["verdict"] == "broken"
         assert body["exit_code"] == 1

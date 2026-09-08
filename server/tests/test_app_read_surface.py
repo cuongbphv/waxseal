@@ -156,11 +156,11 @@ class TestVerifyEndpoint:
 
     def test_a_tampered_chain_is_broken(self, stocked: TestClient, tmp_path: Path) -> None:
         trail = _trail(tmp_path)
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         record = json.loads(lines[2])
         record["header"]["ts"] = "2000-01-01T00:00:00+00:00"
         lines[2] = json.dumps(record, sort_keys=True, separators=(",", ":"))
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         body = stocked.get("/v1/chains/default/verify").json()
         assert body["status"] == "broken"
@@ -170,11 +170,11 @@ class TestVerifyEndpoint:
         self, stocked: TestClient, tmp_path: Path
     ) -> None:
         trail = _trail(tmp_path)
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         record = json.loads(lines[2])
         record["header"]["hash_version"] = "ff" * 32
         lines[2] = json.dumps(record, sort_keys=True, separators=(",", ":"))
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         body = stocked.get("/v1/chains/default/verify").json()
         assert body["status"] == "unverifiable"
@@ -506,12 +506,12 @@ class TestPublicReceiptCrossCheck:
         from waxseal.domain.header import header_from_obj
 
         trail = _trail(tmp_path)
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         record = json.loads(lines[0])
         record["header"]["ts"] = "2000-01-01T00:00:00+00:00"
         record["entry_hash"] = compute_entry_hash(header_from_obj(record["header"]))
         lines[0] = json.dumps(record, sort_keys=True, separators=(",", ":"))
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         body = stocked.get("/public/v1/chains/default/receipts/cross-check").json()
         assert body["verdict"] == "broken"
@@ -533,7 +533,9 @@ class TestADamagedReceiptLogIsReportedNotCrashed:
     ) -> None:
         # "I could not read the log" must not arrive as a 500, and must not
         # arrive as the 404 that means "there is no log".
-        (tmp_path / "data" / "chains" / "default" / "receipts.jsonl").write_text("{not json\n")
+        (tmp_path / "data" / "chains" / "default" / "receipts.jsonl").write_text(
+            "{not json\n", encoding="utf-8"
+        )
         resp = stocked.get("/public/v1/chains/default/receipts")
         assert resp.status_code == 422
         assert resp.json()["error"] == "damaged_receipt_log"
@@ -541,7 +543,9 @@ class TestADamagedReceiptLogIsReportedNotCrashed:
     def test_the_cross_check_reports_it_as_a_break(
         self, stocked: TestClient, tmp_path: Path
     ) -> None:
-        (tmp_path / "data" / "chains" / "default" / "receipts.jsonl").write_text("{not json\n")
+        (tmp_path / "data" / "chains" / "default" / "receipts.jsonl").write_text(
+            "{not json\n", encoding="utf-8"
+        )
         body = stocked.get("/public/v1/chains/default/receipts/cross-check").json()
         assert body["verdict"] == "broken"
         assert body["reason"] == "malformed_receipt_record"

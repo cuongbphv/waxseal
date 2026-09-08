@@ -37,7 +37,7 @@ def test_an_absent_sidecar_is_present_false_not_an_empty_one(tmp_path: Path) -> 
 
 def test_a_present_but_empty_sidecar_reports_present_true(tmp_path: Path) -> None:
     trail = tmp_path / "trail.jsonl"
-    receipts_path(trail).write_text("")
+    receipts_path(trail).write_text("", encoding="utf-8")
     sidecar = read_receipts(trail)
     assert sidecar.present is True
     assert sidecar.lines == ()
@@ -74,11 +74,11 @@ def test_appending_never_rewrites_an_existing_record(tmp_path: Path) -> None:
     append_receipt(
         trail, seq=0, entry_hash=H0, receipt_seq=0, receipt_head=HEAD, source="s", ts="t"
     )
-    first = receipts_path(trail).read_text()
+    first = receipts_path(trail).read_text(encoding="utf-8")
     append_receipt(
         trail, seq=1, entry_hash=H1, receipt_seq=1, receipt_head=HEAD, source="s", ts="t"
     )
-    assert receipts_path(trail).read_text().startswith(first)
+    assert receipts_path(trail).read_text(encoding="utf-8").startswith(first)
 
 
 def test_sidecar_is_created_0600(tmp_path: Path) -> None:
@@ -103,7 +103,7 @@ def test_a_record_is_exactly_spec_19s_json_object(tmp_path: Path) -> None:
         source="https://ledger.example",
         ts="2026-09-01T00:00:00+00:00",
     )
-    obj = json.loads(receipts_path(trail).read_text())
+    obj = json.loads(receipts_path(trail).read_text(encoding="utf-8"))
     assert obj == {
         "entry_hash": H0,
         # waxseal-fg4.9: derived, checked separately below (test_fingerprint.py's
@@ -121,7 +121,7 @@ def test_a_record_is_exactly_spec_19s_json_object(tmp_path: Path) -> None:
 def test_blank_lines_are_skipped_but_line_numbers_stay_physical(tmp_path: Path) -> None:
     # An operator asked to look at line N must find the record there.
     trail = tmp_path / "trail.jsonl"
-    receipts_path(trail).write_text("\n\n{not json\n")
+    receipts_path(trail).write_text("\n\n{not json\n", encoding="utf-8")
     lines = read_receipts(trail).lines
     assert isinstance(lines[0], MalformedRecord)
     assert lines == (MalformedRecord(line_no=3, detail=lines[0].detail),)
@@ -129,13 +129,13 @@ def test_blank_lines_are_skipped_but_line_numbers_stay_physical(tmp_path: Path) 
 
 def test_a_torn_line_is_read_as_a_malformed_record_not_a_crash(tmp_path: Path) -> None:
     trail = tmp_path / "trail.jsonl"
-    receipts_path(trail).write_text('{"seq": 0, "entry_h\n')
+    receipts_path(trail).write_text('{"seq": 0, "entry_h\n', encoding="utf-8")
     assert isinstance(read_receipts(trail).lines[0], MalformedRecord)
 
 
 def test_a_newer_record_version_survives_reading(tmp_path: Path) -> None:
     trail = tmp_path / "trail.jsonl"
-    receipts_path(trail).write_text(json.dumps({"v": 7, "seq": 0}) + "\n")
+    receipts_path(trail).write_text(json.dumps({"v": 7, "seq": 0}) + "\n", encoding="utf-8")
     assert read_receipts(trail).lines == (UnreadableRecord(line_no=1, version="7"),)
 
 
@@ -171,7 +171,8 @@ def test_a_record_declaring_an_alien_receipt_frame_survives_reading(tmp_path: Pa
                 "v": 1,
             }
         )
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     assert read_receipts(trail).lines == (
         UnrecognizedReceiptFrame(line_no=1, fingerprint="f" * 64),

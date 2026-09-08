@@ -553,7 +553,7 @@ def _bond_prove(
     from waxseal.ports.ledger import LedgerError
 
     try:
-        raw = json.loads(proof_path.read_text())
+        raw = json.loads(proof_path.read_text(encoding="utf-8"))
     except OSError as e:
         print(f"error: cannot read {proof_path}: {e}", file=sys.stderr)
         return 1

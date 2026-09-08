@@ -145,11 +145,11 @@ class TestVerdictMapping:
         assert outcome.status == "ok"
 
     def test_a_tampered_trail_is_exit_1_and_broken(self, cli: WaxsealCli, trail: Path) -> None:
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         record = json.loads(lines[1])
         record["header"]["ts"] = "2000-01-01T00:00:00+00:00"
         lines[1] = json.dumps(record, sort_keys=True, separators=(",", ":"))
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         outcome = cli.run("verify", str(trail))
         assert outcome.exit_code == 1
@@ -161,11 +161,11 @@ class TestVerdictMapping:
     ) -> None:
         # The founding rule: a row signed under a fingerprint this build cannot
         # reproduce is unverifiable by name. Never "tampered".
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         record = json.loads(lines[1])
         record["header"]["hash_version"] = "ff" * 32
         lines[1] = json.dumps(record, sort_keys=True, separators=(",", ":"))
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         outcome = cli.run("verify", str(trail))
         assert outcome.exit_code == 2
@@ -227,7 +227,7 @@ class TestReadCommands:
         self, cli: WaxsealCli, trail: Path, tmp_path: Path
     ) -> None:
         bundle = tmp_path / "bundle.json"
-        bundle.write_text(cli.run("export-proof", str(trail), "1").stdout)
+        bundle.write_text(cli.run("export-proof", str(trail), "1").stdout, encoding="utf-8")
         assert cli.run("verify-proof", str(bundle)).verdict is Verdict.OK
 
 
@@ -311,7 +311,7 @@ class TestReadCache:
     ) -> None:
         cli.run("verify", str(trail), "--anchors")
         n = len(spawn_calls)
-        trail.with_name(trail.name + ".anchors").write_text("{}\n")
+        trail.with_name(trail.name + ".anchors").write_text("{}\n", encoding="utf-8")
         cli.run("verify", str(trail), "--anchors")
         assert len(spawn_calls) > n
 
@@ -383,9 +383,9 @@ class TestInputStamp:
         from waxseal_server.runtime.cli import _input_stamp
 
         child = tmp_path / "segment.jsonl"
-        child.write_text("a\n")
+        child.write_text("a\n", encoding="utf-8")
         first = _input_stamp((str(tmp_path),))
-        child.write_text("b\n")
+        child.write_text("b\n", encoding="utf-8")
         assert _input_stamp((str(tmp_path),)) != first
 
     def test_an_unreadable_directory_still_stamps_the_directory_inode(
@@ -412,7 +412,7 @@ class TestInputStamp:
     ) -> None:
         from waxseal_server.runtime.cli import _directory_children
 
-        (tmp_path / "ok").write_text("x")
+        (tmp_path / "ok").write_text("x", encoding="utf-8")
         real_is_file = Path.is_file
         real_is_dir = Path.is_dir
 
@@ -434,7 +434,7 @@ class TestInputStamp:
         from waxseal_server.runtime.cli import _stat_stamp
 
         path = tmp_path / "trail.jsonl"
-        path.write_text("x\n")
+        path.write_text("x\n", encoding="utf-8")
         st = path.stat()
         stamp = _stat_stamp(path)
         assert stamp is not None

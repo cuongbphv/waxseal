@@ -142,7 +142,7 @@ def _anchor_sink(
         trail_id = evm_trail_id if evm_trail_id is not None else str(trail.resolve())
         proof: tuple[str, ...] = ()
         if evm_consistency_proof_file is not None:
-            proof = tuple(json.loads(evm_consistency_proof_file.read_text()))
+            proof = tuple(json.loads(evm_consistency_proof_file.read_text(encoding="utf-8")))
         ledger_sink, digest_signer = _evm_write_sink(
             evm_rpc, EvmContracts(liveness=evm_liveness), evm_write_rpc
         )

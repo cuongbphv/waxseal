@@ -40,7 +40,7 @@ class TestHermesPlugin:
     ) -> None:
         assert main(["install", "hermes", "--home", str(tmp_path)]) == 0
         plugin_dir = tmp_path / "plugins" / "waxseal-audit"
-        assert (plugin_dir / "plugin.yaml").read_text() == PLUGIN_MANIFEST
+        assert (plugin_dir / "plugin.yaml").read_text(encoding="utf-8") == PLUGIN_MANIFEST
         shim = load_by_path(plugin_dir / "__init__.py", "hermes_shim_test")
         # The shim must delegate, not duplicate: pip upgrades the behavior.
         from waxseal.integrations import hermes
@@ -60,19 +60,19 @@ class TestHermesPlugin:
         # reports and stops, exactly like verify reports and never repairs.
         main(["install", "hermes", "--home", str(tmp_path)])
         shim = tmp_path / "plugins" / "waxseal-audit" / "__init__.py"
-        shim.write_text("# locally patched\n")
+        shim.write_text("# locally patched\n", encoding="utf-8")
         assert main(["install", "hermes", "--home", str(tmp_path)]) == 1
-        assert shim.read_text() == "# locally patched\n"
+        assert shim.read_text(encoding="utf-8") == "# locally patched\n"
         assert "--force" in capsys.readouterr().out
         assert main(["install", "hermes", "--home", str(tmp_path), "--force"]) == 0
-        assert "waxseal.integrations.hermes" in shim.read_text()
+        assert "waxseal.integrations.hermes" in shim.read_text(encoding="utf-8")
 
 
 class TestHermesGateway:
     def test_writes_hook_manifest_and_shim(self, tmp_path: Path) -> None:
         assert main(["install", "hermes-gateway", "--home", str(tmp_path)]) == 0
         hook_dir = tmp_path / "hooks" / "waxseal-audit"
-        assert (hook_dir / "HOOK.yaml").read_text() == HOOK_MANIFEST
+        assert (hook_dir / "HOOK.yaml").read_text(encoding="utf-8") == HOOK_MANIFEST
         shim = load_by_path(hook_dir / "handler.py", "hermes_gateway_shim_test")
         from waxseal.integrations import hermes_gateway
 

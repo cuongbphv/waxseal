@@ -33,7 +33,7 @@ def source_files() -> list[Path]:
 class TestZeroDependencies:
     def test_pyproject_declares_no_runtime_dependencies(self) -> None:
         # CLAUDE.md rule 1: dependencies stays [].
-        data = tomllib.loads((REPO / "pyproject.toml").read_text())
+        data = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
         assert data["project"]["dependencies"] == []
 
     # Sole carve-out from the stdlib-only import scan: integration modules
@@ -56,7 +56,9 @@ class TestZeroDependencies:
         for path in source_files():
             in_integrations = (SRC / "integrations") in path.parents
             for match in re.finditer(
-                r"^(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)", path.read_text(), re.M
+                r"^(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)",
+                path.read_text(encoding="utf-8"),
+                re.M,
             ):
                 root = match.group(1)
                 if root in stdlib or root == "waxseal":
@@ -74,7 +76,9 @@ class TestDomainPurity:
         offenders = []
         for path in sorted((SRC / "domain").rglob("*.py")):
             for match in re.finditer(
-                r"^(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)", path.read_text(), re.M
+                r"^(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)",
+                path.read_text(encoding="utf-8"),
+                re.M,
             ):
                 if match.group(1) in forbidden:
                     offenders.append(f"{path.name}: {match.group(1)}")
@@ -83,7 +87,7 @@ class TestDomainPurity:
     def test_domain_does_not_import_ports_or_adapters(self) -> None:
         offenders = []
         for path in sorted((SRC / "domain").rglob("*.py")):
-            text = path.read_text()
+            text = path.read_text(encoding="utf-8")
             if "waxseal.ports" in text or "waxseal.adapters" in text:
                 offenders.append(path.name)
         assert offenders == []
@@ -94,7 +98,7 @@ class TestSingleOwner:
         offenders = [
             str(path.relative_to(REPO))
             for path in source_files()
-            if "os.replace" in path.read_text() and path.name != "atomic.py"
+            if "os.replace" in path.read_text(encoding="utf-8") and path.name != "atomic.py"
         ]
         assert offenders == []
 
@@ -108,7 +112,7 @@ class TestVerdictComposition:
     # fix, just a shape the source must never regain.
     def test_max_does_not_appear_in_cli(self) -> None:
         for path in cli_python_files():
-            assert "max(" not in path.read_text(), path
+            assert "max(" not in path.read_text(encoding="utf-8"), path
 
 
 class TestPublicApiFrozen:
@@ -265,7 +269,9 @@ class TestVersionIsStatedOnce:
         # Three hand-edited copies of one number. A release that ships
         # __version__ = "0.1.2" inside a 0.1.3 wheel makes every bug report
         # name the wrong build.
-        declared = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["version"]
+        declared = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+            "version"
+        ]
         import waxseal
 
         assert waxseal.__version__ == declared
@@ -292,7 +298,7 @@ class TestCoverageFloorIsStatedOnce:
     )
 
     def test_every_documented_floor_matches_pyproject(self) -> None:
-        config = tomllib.loads((REPO / "pyproject.toml").read_text())
+        config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
         floor = str(config["tool"]["coverage"]["report"]["fail_under"])
         quoted = re.compile(r"(?i)coverage[^\n]*?(\d{2,3})\s*%")
         stale = []
@@ -512,6 +518,7 @@ class TestDocumentationLinks:
             [git, "check-ignore", "--no-index", *targets],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=REPO,
         )
         if proc.returncode not in (0, 1):  # pragma: no cover - not a git checkout
@@ -713,6 +720,6 @@ class TestSelectorsAreFrozenInOnePlace:
         offenders = sorted(
             str(path.relative_to(REPO))
             for path in source_files()
-            if path != SRC / "domain" / "abi.py" and frozen.search(path.read_text())
+            if path != SRC / "domain" / "abi.py" and frozen.search(path.read_text(encoding="utf-8"))
         )
         assert offenders == []

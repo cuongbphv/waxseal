@@ -85,7 +85,7 @@ def trail_with_receipt(tmp_path: Path, receipt: str | None, *, nonce: str | None
     }
     if nonce is not None:
         record["nonce"] = nonce
-    Path(str(path) + ".anchors").write_text(json.dumps(record) + "\n")
+    Path(str(path) + ".anchors").write_text(json.dumps(record) + "\n", encoding="utf-8")
     return path
 
 
@@ -297,15 +297,15 @@ class TestUnchangedBehaviour:
         # Our format, our verdict: garbage here is a break, not a foreign
         # format this build happens not to read.
         path = trail_with_receipt(tmp_path, None)
-        Path(str(path) + ".anchors").write_text("{ not json\n")
+        Path(str(path) + ".anchors").write_text("{ not json\n", encoding="utf-8")
         assert main(["verify", str(path), "--anchors"]) == 1
 
     def test_a_broken_chain_shape_still_beats_a_receipt_verdict(self, tmp_path: Path) -> None:
         path = trail_with_receipt(tmp_path, rfc3161_receipt(granted_response(b"other")))
         anchors = Path(str(path) + ".anchors")
-        record = json.loads(anchors.read_text())
+        record = json.loads(anchors.read_text(encoding="utf-8"))
         record["entry_hash"] = "f" * 64
-        anchors.write_text(json.dumps(record) + "\n")
+        anchors.write_text(json.dumps(record) + "\n", encoding="utf-8")
         assert main(["verify", str(path), "--anchors"]) == 1
 
 

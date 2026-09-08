@@ -1108,7 +1108,7 @@ class TestSelectorsMatchTheCompiler:
     @staticmethod
     def frozen() -> dict[str, dict[str, str]]:
         result: dict[str, dict[str, str]] = json.loads(
-            (REPO / "contracts" / "abi" / "selectors.json").read_text()
+            (REPO / "contracts" / "abi" / "selectors.json").read_text(encoding="utf-8")
         )
         return result
 
@@ -1189,6 +1189,6 @@ class TestTheCoreDoesNotImportTheExtra:
     def test_the_evm_extra_pulls_no_dependency(self) -> None:
         import tomllib
 
-        data = tomllib.loads((REPO / "pyproject.toml").read_text())
+        data = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
         assert data["project"]["optional-dependencies"]["evm"] == []
         assert data["project"]["dependencies"] == []

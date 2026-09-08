@@ -45,7 +45,7 @@ main()
 @pytest.fixture
 def signer_cmd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     script = tmp_path / "fake_signer.py"
-    script.write_text(FAKE_SIGNER)
+    script.write_text(FAKE_SIGNER, encoding="utf-8")
     cmd = f"{sys.executable} {script}"
     monkeypatch.setenv("WAXSEAL_EVM_SIGNER_CMD", cmd)
     return cmd
@@ -100,7 +100,9 @@ class TestEvmAnchor:
         record = json.loads(out.splitlines()[0])
         assert "seq" in record and "entry_hash" in record
 
-        sidecar = json.loads((path.parent / (path.name + ".anchors")).read_text().splitlines()[0])
+        sidecar = json.loads(
+            (path.parent / (path.name + ".anchors")).read_text(encoding="utf-8").splitlines()[0]
+        )
         assert sidecar["receipt"] == f"evm:31337:1:{TX_HASH}"
 
     def test_verify_anchors_sees_the_evm_receipt_as_structurally_ok_but_unverifiable_by_name(
@@ -225,7 +227,7 @@ class TestEvmAnchor:
         path = tmp_path / "t.jsonl"
         make_trail(path)
         proof_path = tmp_path / "proof.json"
-        proof_path.write_text(json.dumps(["ab" * 32, "cd" * 32]))
+        proof_path.write_text(json.dumps(["ab" * 32, "cd" * 32]), encoding="utf-8")
         urls = two_write_nodes()
         code = main(
             [

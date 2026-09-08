@@ -25,11 +25,11 @@ class TestHermesGatewayRefusal:
     ) -> None:
         assert install("hermes-gateway", tmp_path, force=False) == 0
         handler = tmp_path / "hooks" / "waxseal-audit" / "handler.py"
-        handler.write_text("# locally patched\n")
+        handler.write_text("# locally patched\n", encoding="utf-8")
         capsys.readouterr()
 
         assert install("hermes-gateway", tmp_path, force=False) == 1
-        assert handler.read_text() == "# locally patched\n"
+        assert handler.read_text(encoding="utf-8") == "# locally patched\n"
         out = capsys.readouterr().out
         assert "--force" in out
         assert "next startup" not in out
@@ -41,11 +41,11 @@ class TestHermesGatewayRefusal:
     ) -> None:
         install("hermes-gateway", tmp_path, force=False)
         handler = tmp_path / "hooks" / "waxseal-audit" / "handler.py"
-        handler.write_text("# locally patched\n")
+        handler.write_text("# locally patched\n", encoding="utf-8")
         capsys.readouterr()
 
         assert install("hermes-gateway", tmp_path, force=True) == 0
-        assert "waxseal.integrations.hermes_gateway" in handler.read_text()
+        assert "waxseal.integrations.hermes_gateway" in handler.read_text(encoding="utf-8")
         assert "next startup" in capsys.readouterr().out
 
 
@@ -56,11 +56,11 @@ class TestStdinHookShimRefusal:
     ) -> None:
         assert install(target, tmp_path, force=False) == 0
         shim = tmp_path / "hooks" / "waxseal_hook.py"
-        shim.write_text("# locally patched\n")
+        shim.write_text("# locally patched\n", encoding="utf-8")
         capsys.readouterr()
 
         assert install(target, tmp_path, force=False) == 1
-        assert shim.read_text() == "# locally patched\n"
+        assert shim.read_text(encoding="utf-8") == "# locally patched\n"
         out = capsys.readouterr().out
         assert "--force" in out
         # The snippet names the shim path the host should run; printing it

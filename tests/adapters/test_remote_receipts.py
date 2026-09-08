@@ -66,7 +66,10 @@ class TestReceiptsAreRecorded:
         log.append(payload={"i": 0}, payload_type=PT)
         log.append(payload={"i": 1}, payload_type=PT)
 
-        heads = [json.loads(line) for line in receipts_path(trail).read_text().splitlines()]
+        heads = [
+            json.loads(line)
+            for line in receipts_path(trail).read_text(encoding="utf-8").splitlines()
+        ]
         assert [h["receipt_seq"] for h in heads] == [0, 1]
         assert [h["receipt_head"] for h in heads] == server.receipt_heads
 
@@ -74,14 +77,17 @@ class TestReceiptsAreRecorded:
         trail = tmp_path / "trail.jsonl"
         log = make_log(FakeChainServer(issue_receipts=True), receipts_trail=trail)
         log.append(payload={"i": 0}, payload_type=PT)
-        assert json.loads(receipts_path(trail).read_text())["source"] == "https://ledger.example"
+        assert (
+            json.loads(receipts_path(trail).read_text(encoding="utf-8"))["source"]
+            == "https://ledger.example"
+        )
 
     def test_the_timestamp_is_injectable(self, tmp_path: Path) -> None:
         # Rule 8: tests never sleep to pin a time.
         trail = tmp_path / "trail.jsonl"
         log = make_log(FakeChainServer(issue_receipts=True), receipts_trail=trail, ts="T")
         log.append(payload={"i": 0}, payload_type=PT)
-        assert json.loads(receipts_path(trail).read_text())["ts"] == "T"
+        assert json.loads(receipts_path(trail).read_text(encoding="utf-8"))["ts"] == "T"
 
     def test_the_default_clock_stamps_a_tz_aware_iso_timestamp(self, tmp_path: Path) -> None:
         # The injectable clock has a default, and a record whose `ts` no reader
@@ -93,7 +99,9 @@ class TestReceiptsAreRecorded:
             receipts_trail=trail,
         )
         AuditLog(backend).append(payload={"i": 0}, payload_type=PT)
-        stamped = datetime.fromisoformat(json.loads(receipts_path(trail).read_text())["ts"])
+        stamped = datetime.fromisoformat(
+            json.loads(receipts_path(trail).read_text(encoding="utf-8"))["ts"]
+        )
         assert stamped.tzinfo is not None
 
     def test_a_record_never_carries_payload_content(self, tmp_path: Path) -> None:
@@ -102,7 +110,7 @@ class TestReceiptsAreRecorded:
         trail = tmp_path / "trail.jsonl"
         log = make_log(FakeChainServer(issue_receipts=True), receipts_trail=trail)
         log.append(payload={"secret": "hunter2"}, payload_type=PT)
-        assert "hunter2" not in receipts_path(trail).read_text()
+        assert "hunter2" not in receipts_path(trail).read_text(encoding="utf-8")
 
 
 class TestNothingToRecordIsNotAnError:

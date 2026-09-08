@@ -120,7 +120,7 @@ class TestOpenFailureStillLeavesADropRecord:
         assert "dropped" in capsys.readouterr().out
         drops = tmp_path / "audit" / "trail.jsonl.drops"
         assert drops.exists()
-        assert len(drops.read_text().splitlines()) == 1
+        assert len(drops.read_text(encoding="utf-8").splitlines()) == 1
         sys.modules.pop("waxseal.integrations.hermes", None)
 
     def test_hermes_gateway(
@@ -142,7 +142,7 @@ class TestOpenFailureStillLeavesADropRecord:
         assert "dropped" in capsys.readouterr().out
         drops = tmp_path / "audit" / "trail.jsonl.drops"
         assert drops.exists()
-        assert len(drops.read_text().splitlines()) == 1
+        assert len(drops.read_text(encoding="utf-8").splitlines()) == 1
         sys.modules.pop("waxseal.integrations.hermes_gateway", None)
 
 

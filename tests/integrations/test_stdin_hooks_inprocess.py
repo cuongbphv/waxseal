@@ -111,7 +111,7 @@ def test_unopenable_trail_exits_zero_with_labelled_drop(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     blocker = tmp_path / "blocker"
-    blocker.write_text("a file where the trail dir should be")
+    blocker.write_text("a file where the trail dir should be", encoding="utf-8")
     event = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}
     assert run_main(monkeypatch, hook, json.dumps(event), blocker / "trail.jsonl") == 0
     assert "dropped" in capsys.readouterr().err
@@ -143,7 +143,7 @@ def test_open_failure_still_leaves_a_drop_record(
 
     drops = trail.parent / (trail.name + ".drops")
     assert drops.exists()
-    assert len(drops.read_text().splitlines()) == 1
+    assert len(drops.read_text(encoding="utf-8").splitlines()) == 1
 
 
 class TestToolResultFieldNaming:

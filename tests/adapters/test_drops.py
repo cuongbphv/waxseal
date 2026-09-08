@@ -18,7 +18,7 @@ class TestRecord:
         trail = tmp_path / "trail.jsonl"
         recorder = FileDropRecorder(trail, now_fn=lambda: "2026-08-22T00:00:00+00:00")
         recorder.record(reason="ValueError", payload_type="application/vnd.test+json")
-        lines = (tmp_path / "trail.jsonl.drops").read_text().splitlines()
+        lines = (tmp_path / "trail.jsonl.drops").read_text(encoding="utf-8").splitlines()
         assert len(lines) == 1
         obj = json.loads(lines[0])
         assert set(obj) == {"payload_type", "reason", "source", "ts", "v"}
@@ -31,14 +31,18 @@ class TestRecord:
         trail = tmp_path / "trail.jsonl"
         recorder = FileDropRecorder(trail, now_fn=lambda: "2026-08-22T00:00:00+00:00")
         recorder.record(reason="TypeError")
-        obj = json.loads((tmp_path / "trail.jsonl.drops").read_text().splitlines()[0])
+        obj = json.loads(
+            (tmp_path / "trail.jsonl.drops").read_text(encoding="utf-8").splitlines()[0]
+        )
         assert obj["payload_type"] is None
 
     def test_source_is_overridable(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
         recorder = FileDropRecorder(trail, source="claude_code_hook")
         recorder.record(reason="OSError")
-        obj = json.loads((tmp_path / "trail.jsonl.drops").read_text().splitlines()[0])
+        obj = json.loads(
+            (tmp_path / "trail.jsonl.drops").read_text(encoding="utf-8").splitlines()[0]
+        )
         assert obj["source"] == "claude_code_hook"
 
     def test_never_contains_payload_content(self, tmp_path: Path) -> None:
@@ -48,7 +52,9 @@ class TestRecord:
         trail = tmp_path / "trail.jsonl"
         recorder = FileDropRecorder(trail)
         recorder.record(reason="ValueError", payload_type="application/vnd.test+json")
-        obj = json.loads((tmp_path / "trail.jsonl.drops").read_text().splitlines()[0])
+        obj = json.loads(
+            (tmp_path / "trail.jsonl.drops").read_text(encoding="utf-8").splitlines()[0]
+        )
         assert "payload" not in obj
 
     def test_multiple_records_append_in_order(self, tmp_path: Path) -> None:
@@ -56,7 +62,7 @@ class TestRecord:
         recorder = FileDropRecorder(trail)
         for reason in ("ValueError", "TypeError", "OSError"):
             recorder.record(reason=reason)
-        lines = (tmp_path / "trail.jsonl.drops").read_text().splitlines()
+        lines = (tmp_path / "trail.jsonl.drops").read_text(encoding="utf-8").splitlines()
         assert [json.loads(line)["reason"] for line in lines] == [
             "ValueError",
             "TypeError",

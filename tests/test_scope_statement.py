@@ -124,11 +124,11 @@ class TestVerifyOutput:
         # one, so the caveat has to travel with it too.
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
         obj = json.loads(lines[1])
         obj["header"]["ts"] = "2027-01-01T00:00:00+00:00"
         lines[1] = json.dumps(obj)
-        path.write_text("\n".join(lines) + "\n")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         assert main(["verify", str(path)]) == 1
         assert "scope:" in capsys.readouterr().out
@@ -141,12 +141,12 @@ class TestVerifyOutput:
 
         path = tmp_path / "trail.jsonl"
         make_trail(path, 2)
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
         obj = json.loads(lines[1])
         obj["header"]["hash_version"] = "e" * 64
         obj["entry_hash"] = compute_entry_hash(EntryHeader(**obj["header"]))
         lines[1] = json.dumps(obj)
-        path.write_text("\n".join(lines) + "\n")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         assert main(["verify", str(path)]) == 2
         assert "scope:" in capsys.readouterr().out

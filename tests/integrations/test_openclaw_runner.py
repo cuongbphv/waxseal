@@ -59,7 +59,9 @@ def stub_openclaw(bin_dir: Path, body: str, *, exit_code: int = 0) -> None:
         )
     else:
         launcher = bin_dir / "openclaw"
-        launcher.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n')
+        launcher.write_text(
+            f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8"
+        )
         launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
 
 

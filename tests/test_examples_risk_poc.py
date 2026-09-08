@@ -123,7 +123,7 @@ class TestSimulate:
                     json.loads(__import__("base64").b64decode(json.loads(line)["payload_b64"]))[
                         "outcome"
                     ]
-                    for line in (out / "decisions.jsonl").read_text().splitlines()
+                    for line in (out / "decisions.jsonl").read_text(encoding="utf-8").splitlines()
                 ]
             )
         assert outcomes[0] == outcomes[1]
@@ -140,7 +140,7 @@ class TestSimulate:
         def payloads(d: Path) -> list[str]:
             return [
                 json.loads(line)["payload_b64"]
-                for line in (d / "decisions.jsonl").read_text().splitlines()
+                for line in (d / "decisions.jsonl").read_text(encoding="utf-8").splitlines()
             ]
 
         assert payloads(plain) == payloads(fancy)

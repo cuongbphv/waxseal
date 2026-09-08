@@ -19,9 +19,9 @@ REPO = Path(__file__).parent.parent.parent
 
 
 def test_web_package_version_matches_server_pyproject() -> None:
-    server = tomllib.loads((REPO / "server" / "pyproject.toml").read_text())
-    package = json.loads((REPO / "server" / "web" / "package.json").read_text())
-    lock = json.loads((REPO / "server" / "web" / "package-lock.json").read_text())
+    server = tomllib.loads((REPO / "server" / "pyproject.toml").read_text(encoding="utf-8"))
+    package = json.loads((REPO / "server" / "web" / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((REPO / "server" / "web" / "package-lock.json").read_text(encoding="utf-8"))
     declared = server["project"]["version"]
     assert package["version"] == declared
     assert lock["version"] == declared

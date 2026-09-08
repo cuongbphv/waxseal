@@ -56,6 +56,7 @@ def test_every_module_imports_when_loaded_first() -> None:
         [sys.executable, "-c", _PROBE, *module_names()],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     assert result.stdout.strip() == "", result.stdout

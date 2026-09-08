@@ -67,11 +67,13 @@ def envelope_for(scratch: Path, seq: int, prev_hash: str, payload: bytes) -> dic
     scratch.parent.mkdir(parents=True, exist_ok=True)
     scratch.unlink(missing_ok=True)
     JSONLBackend(scratch).append(lambda *_: build_entry(seq, prev_hash, payload))
-    return cast(dict[str, Any], json.loads(scratch.read_text().splitlines()[-1]))
+    return cast(dict[str, Any], json.loads(scratch.read_text(encoding="utf-8").splitlines()[-1]))
 
 
 def stored(path: Path) -> list[dict[str, Any]]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
 def genesis_binding(segment: Path) -> dict[str, Any]:
@@ -267,7 +269,8 @@ class TestReceiptsSurviveRotation:
         records = stored(sealed)
         records[0]["entry_hash"] = "ff" * 32
         sealed.write_text(
-            "".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in records)
+            "".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in records),
+            encoding="utf-8",
         )
         report = store.cross_check_receipts("default")
         assert report.reason == "receipt_mismatch"

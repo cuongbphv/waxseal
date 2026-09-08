@@ -230,7 +230,7 @@ class TestRecordingAnchorSink:
         RecordingAnchorSink(trail, Quiet()).anchor(CP)
         sidecar = Path(str(trail) + ".anchors")
         assert sidecar.exists()
-        assert json.loads(sidecar.read_text())["sink"] == "quiet"
+        assert json.loads(sidecar.read_text(encoding="utf-8"))["sink"] == "quiet"
 
     def test_a_sink_without_a_name_still_files_its_receipt(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
@@ -373,7 +373,7 @@ class TestNoncePersistence:
         # A 64-bit nonce as a bare JSON number is lossy in readers that parse
         # numbers as doubles; the sidecar stores it as a decimal string.
         trail, _ = self.filed_record(tmp_path, 2**63 + 1)
-        obj = json.loads(Path(str(trail) + ".anchors").read_text())
+        obj = json.loads(Path(str(trail) + ".anchors").read_text(encoding="utf-8"))
         assert obj["nonce"] == str(2**63 + 1)
 
     def test_the_optional_field_does_not_bump_the_record_version(self, tmp_path: Path) -> None:
@@ -387,7 +387,7 @@ class TestNoncePersistence:
         # never a value (CLAUDE.md rule 5).
         trail, record = self.filed_record(tmp_path, None)
         assert record.nonce is None
-        assert "nonce" not in json.loads(Path(str(trail) + ".anchors").read_text())
+        assert "nonce" not in json.loads(Path(str(trail) + ".anchors").read_text(encoding="utf-8"))
 
     def test_a_legacy_record_without_the_field_reads_as_nonce_none(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
@@ -403,6 +403,7 @@ class TestNoncePersistence:
                     "v": 1,
                 }
             )
-            + "\n"
+            + "\n",
+            encoding="utf-8",
         )
         assert read_anchor_records(trail).records[0].nonce is None

@@ -454,7 +454,7 @@ class TestHermesPrecedence:
         # drop filed next to the host default would be invisible to anyone
         # looking where they pointed the writer (rule 6).
         blocked = tmp_path / "blocked"
-        blocked.write_text("a file where the trail directory should be")
+        blocked.write_text("a file where the trail directory should be", encoding="utf-8")
         monkeypatch.setenv("WAXSEAL_TRAIL", str(blocked / "trail.jsonl"))
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
         if hasattr(hermes_module, "handle"):
@@ -560,7 +560,7 @@ class TestEveryIntegrationHonoursTheVariable:
         offenders = [
             path.name
             for path in sorted(src.glob("*.py"))
-            if path.name != "_trail.py" and '"WAXSEAL_TRAIL"' in path.read_text()
+            if path.name != "_trail.py" and '"WAXSEAL_TRAIL"' in path.read_text(encoding="utf-8")
         ]
         assert offenders == []
 

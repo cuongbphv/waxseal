@@ -72,7 +72,7 @@ class TestAttestations:
         attestor = FileAttestor(path, initial_key=KEY)
         attestor.attest(0, "a" * 64)
         sidecar = Path(str(path) + ".attest")
-        sidecar.write_text("\n" + sidecar.read_text() + "\n\n", encoding="utf-8")
+        sidecar.write_text("\n" + sidecar.read_text(encoding="utf-8") + "\n\n", encoding="utf-8")
         assert len(list(attestor.attestations())) == 1
 
 
@@ -107,5 +107,5 @@ class TestContinuity:
         assert attestor.check_continuity(KEY, 1) is None
         # Falsifiability receipt for the test above: the stored key really is
         # the evolved one, so "key_mismatch" was not passing by accident.
-        stored = json.loads(Path(str(path) + ".sealkey").read_text())
+        stored = json.loads(Path(str(path) + ".sealkey").read_text(encoding="utf-8"))
         assert stored["key"] == evolve_key(KEY).hex()

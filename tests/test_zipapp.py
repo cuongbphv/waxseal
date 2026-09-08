@@ -96,11 +96,11 @@ def test_a_broken_trail_exits_1(pyz: Path, tmp_path: Path) -> None:
     """
     trail = tmp_path / "trail.jsonl"
     _make_trail(trail)
-    lines = trail.read_text().splitlines()
+    lines = trail.read_text(encoding="utf-8").splitlines()
     obj = json.loads(lines[1])
     obj["header"]["ts"] = "2027-01-01T00:00:00+00:00"
     lines[1] = json.dumps(obj)
-    trail.write_text("\n".join(lines) + "\n")
+    trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     proc = _run(pyz, "verify", str(trail))
     assert proc.returncode == 1, proc.stdout + proc.stderr
@@ -121,12 +121,12 @@ def test_an_unknown_fingerprint_exits_2_not_1(pyz: Path, tmp_path: Path) -> None
 
     trail = tmp_path / "trail.jsonl"
     _make_trail(trail)
-    lines = trail.read_text().splitlines()
+    lines = trail.read_text(encoding="utf-8").splitlines()
     obj = json.loads(lines[-1])
     obj["header"]["hash_version"] = "e" * 64
     obj["entry_hash"] = compute_entry_hash(EntryHeader(**obj["header"]))
     lines[-1] = json.dumps(obj)
-    trail.write_text("\n".join(lines) + "\n")
+    trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     proc = _run(pyz, "verify", str(trail))
     assert proc.returncode == 2, proc.stdout + proc.stderr

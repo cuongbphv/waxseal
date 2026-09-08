@@ -67,7 +67,9 @@ def run_cmd(argv: list[str]) -> int:
 
 
 def load(trail: Path) -> list[dict]:
-    return [json.loads(line) for line in trail.read_text().splitlines() if line.strip()]
+    return [
+        json.loads(line) for line in trail.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
 def save(trail: Path, rows: list[dict]) -> None:

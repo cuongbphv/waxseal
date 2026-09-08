@@ -77,7 +77,7 @@ TOOL = SimpleNamespace(name="get_weather")
 
 
 def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
-    line = trail.read_text().splitlines()[line_no]
+    line = trail.read_text(encoding="utf-8").splitlines()[line_no]
     result: dict[str, Any] = json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
     return result
 
@@ -173,7 +173,7 @@ class TestNeverAbortsTheRun:
         # Hooks are awaited inline by the SDK — a raise here aborts the
         # user's run. It must degrade to a labelled drop instead.
         blocked = tmp_path / "blocked"
-        blocked.write_text("a file where the trail dir should be")
+        blocked.write_text("a file where the trail dir should be", encoding="utf-8")
         h = make_hooks(blocked / "trail.jsonl")
         asyncio.run(h.on_tool_start(tool_context(), AGENT, TOOL))  # must not raise
         assert "dropped" in capsys.readouterr().err
@@ -199,4 +199,4 @@ class TestNeverAbortsTheRun:
         assert "dropped" in capsys.readouterr().err
         drops = tmp_path / "trail.jsonl.drops"
         assert drops.exists()
-        assert len(drops.read_text().splitlines()) == 1
+        assert len(drops.read_text(encoding="utf-8").splitlines()) == 1
