@@ -37,11 +37,70 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # rather than narrowed to the tags this repository happens to use today: the
 # next one to bite will be whichever one somebody writes next.
 BLOCK_TAGS = frozenset(
-    """address article aside base basefont blockquote body caption center col
-    colgroup dd details dialog dir div dl dt fieldset figcaption figure footer
-    form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li
-    link main menu menuitem nav noframes ol optgroup option p param section
-    source summary table tbody td tfoot th thead title tr track ul""".split()
+    [
+        "address",
+        "article",
+        "aside",
+        "base",
+        "basefont",
+        "blockquote",
+        "body",
+        "caption",
+        "center",
+        "col",
+        "colgroup",
+        "dd",
+        "details",
+        "dialog",
+        "dir",
+        "div",
+        "dl",
+        "dt",
+        "fieldset",
+        "figcaption",
+        "figure",
+        "footer",
+        "form",
+        "frame",
+        "frameset",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "head",
+        "header",
+        "hr",
+        "html",
+        "iframe",
+        "legend",
+        "li",
+        "link",
+        "main",
+        "menu",
+        "menuitem",
+        "nav",
+        "noframes",
+        "ol",
+        "optgroup",
+        "option",
+        "p",
+        "param",
+        "section",
+        "source",
+        "summary",
+        "table",
+        "tbody",
+        "td",
+        "tfoot",
+        "th",
+        "thead",
+        "title",
+        "tr",
+        "track",
+        "ul",
+    ]
 )
 
 _OPENS_A_BLOCK = re.compile(
@@ -114,7 +173,12 @@ class TestFalsifiability:
         ) == [2]
 
     def test_a_deliberate_html_block_after_a_blank_line_is_allowed(self) -> None:
-        assert interrupted_paragraphs("Some prose.\n\n<table>\n<tr><td>x</td></tr>\n</table>\n") == []
+        assert (
+            interrupted_paragraphs(
+                "Some prose.\n\n<table>\n<tr><td>x</td></tr>\n</table>\n"
+            )
+            == []
+        )
 
     def test_a_tag_inside_a_fence_is_not_prose(self) -> None:
         assert interrupted_paragraphs("Prose.\n```html\n<div>\n```\n") == []

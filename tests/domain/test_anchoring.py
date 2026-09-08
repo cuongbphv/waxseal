@@ -315,3 +315,13 @@ class TestIncrementalMerkle:
 
         hashes = entry_hashes(size) if size else []
         assert IncrementalMerkle.from_hashes(hashes).root() == batch_root(hashes)
+
+    def test_last_leaf_is_the_hash_just_pushed(self) -> None:
+        from waxseal.domain.anchoring import IncrementalMerkle
+
+        tree = IncrementalMerkle()
+        assert tree.last_leaf is None
+        tree.push(RFC_LEAVES[0])
+        assert tree.last_leaf == RFC_LEAVES[0]
+        tree.push(RFC_LEAVES[1])
+        assert tree.last_leaf == RFC_LEAVES[1]

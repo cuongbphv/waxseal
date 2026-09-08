@@ -2,7 +2,7 @@
 # waxseal installer. POSIX sh — no bashisms, no arrays, no `local`.
 #
 #   curl -fsSL https://raw.githubusercontent.com/cuongbphv/waxseal/main/deploy/install.sh | sh
-#   sh install.sh --version 0.1.5 --method pyz
+#   sh install.sh --version 0.1.6 --method pyz
 #   sh install.sh --method pyz --from-dir dist --prefix /opt/waxseal   # offline
 #   sh install.sh --dry-run                                            # print, do nothing
 #

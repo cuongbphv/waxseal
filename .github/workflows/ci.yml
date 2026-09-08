@@ -152,6 +152,10 @@ jobs:
           node-version: "24"
       - run: npm ci || npm install
         working-directory: server/web
+      - run: npm run test
+        working-directory: server/web
+      - run: npm run lint
+        working-directory: server/web
       - run: npx vue-tsc --noEmit
         working-directory: server/web
       - run: npm run build
@@ -196,6 +200,13 @@ jobs:
           build-args: |
             VERSION=ci
             REVISION=${{ github.sha }}
+
+      - name: trivy image waxseal:ci (advisory)
+        uses: aquasecurity/trivy-action@0.32.0
+        with:
+          image-ref: waxseal:ci
+          exit-code: "0"
+          format: table
 
       # The library, on the runner, only to WRITE the fixtures. The verdicts
       # below all come from the image.
@@ -505,16 +516,18 @@ jobs:
         run: |
           npm ci || npm install
           npm audit --audit-level=high
-      # The image job builds waxseal:ci; this job does not. A scanner with
-      # nothing to scan is UNMEASURED, not a pass (CLAUDE.md rule 5).
-      - name: optional trivy on waxseal:ci
+      # The image that can actually be scanned is built in job `image`,
+      # which runs `trivy image waxseal:ci`. This job does not have that
+      # image. A scanner with nothing to scan is UNMEASURED, not a pass
+      # (CLAUDE.md rule 5).
+      - uses: aquasecurity/setup-trivy@v0.2.4
+        with:
+          version: v0.67.2
+          cache: true
+      - name: trivy image waxseal:ci
         run: |
-          if ! command -v trivy >/dev/null 2>&1; then
-            echo "trivy not on PATH — UNMEASURED"
-            exit 0
-          fi
           if ! docker image inspect waxseal:ci >/dev/null 2>&1; then
-            echo "waxseal:ci not present in this job — UNMEASURED"
+            echo "waxseal:ci not present in this job — UNMEASURED (see job image)"
             exit 0
           fi
           trivy image --exit-code 0 waxseal:ci

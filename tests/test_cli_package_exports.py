@@ -57,5 +57,6 @@ def test_python_m_waxseal_cli_help_exits_0() -> None:
 
 def test_the_main_module_rebinds_main() -> None:
     import waxseal.cli.__main__ as cli_main
+    from waxseal.cli import main
 
-    assert callable(cli_main.main)
+    assert cli_main.main is main

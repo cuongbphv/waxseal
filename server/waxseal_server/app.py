@@ -22,6 +22,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from waxseal_server._version import API_VERSION
 from waxseal_server.api import admin as admin_api
 from waxseal_server.api import chains as chains_api
 from waxseal_server.api import imports as imports_api
@@ -43,8 +44,6 @@ from waxseal_server.storage.operators_postgres import PostgresOperatorStore
 from waxseal_server.storage.settings_memory import InMemorySettingsStore
 from waxseal_server.storage.settings_postgres import PostgresSettingsStore
 from waxseal_server.storage.witness import WitnessStore
-
-API_VERSION = "0.1.5"
 
 
 def build_operator_store(settings: Settings) -> OperatorStore:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Header
 from fastapi.responses import JSONResponse
 
+from waxseal_server._version import API_VERSION
 from waxseal_server.api.deps import Authorizer, Services, error_for, outcome_json
 from waxseal_server.domain.errors import InvalidIdentifier
 from waxseal_server.domain.operators import SCOPE_VERIFY_RUN
@@ -113,7 +114,7 @@ def router(services: Services, authz: Authorizer) -> APIRouter:
         # 6: the degradation is in the output, never swallowed.
         return JSONResponse(
             {
-                "version": "0.1.5",
+                "version": API_VERSION,
                 "write_auth": "bearer_required" if authz.locked() else "open",
                 "witness_auth": "bearer_required" if settings.witness_api_key else "open",
                 "public_read": "/public/v1",

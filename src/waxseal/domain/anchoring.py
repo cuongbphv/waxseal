@@ -69,15 +69,20 @@ class IncrementalMerkle:
     ``_tree_hash`` over the leaf list — those need every leaf again.
     """
 
-    __slots__ = ("_peaks", "_size")
+    __slots__ = ("_last_leaf", "_peaks", "_size")
 
     def __init__(self) -> None:
         self._peaks: list[tuple[int, bytes]] = []
         self._size = 0
+        self._last_leaf: str | None = None
 
     @property
     def size(self) -> int:
         return self._size
+
+    @property
+    def last_leaf(self) -> str | None:
+        return self._last_leaf
 
     @classmethod
     def from_hashes(cls, entry_hashes: Sequence[str]) -> IncrementalMerkle:
@@ -94,6 +99,7 @@ class IncrementalMerkle:
             node = _pair_hash(left, node)
             height += 1
         self._peaks.append((height, node))
+        self._last_leaf = entry_hash
         self._size += 1
 
     def root(self) -> str:

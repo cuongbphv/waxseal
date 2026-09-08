@@ -8,7 +8,7 @@ metadata:
     helm.sh/chart: waxseal-server-0.1.0
     app.kubernetes.io/name: waxseal-server
     app.kubernetes.io/instance: waxseal-server
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: chain
@@ -37,7 +37,7 @@ metadata:
     helm.sh/chart: waxseal-server-0.1.0
     app.kubernetes.io/name: waxseal-server
     app.kubernetes.io/instance: waxseal-server
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: chain
@@ -52,7 +52,7 @@ metadata:
     helm.sh/chart: waxseal-server-0.1.0
     app.kubernetes.io/name: waxseal-server
     app.kubernetes.io/instance: waxseal-server
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: chain
@@ -71,7 +71,7 @@ metadata:
     helm.sh/chart: waxseal-server-0.1.0
     app.kubernetes.io/name: waxseal-server
     app.kubernetes.io/instance: waxseal-server
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: chain
@@ -95,7 +95,7 @@ metadata:
     helm.sh/chart: waxseal-server-0.1.0
     app.kubernetes.io/name: waxseal-server
     app.kubernetes.io/instance: waxseal-server
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: chain
@@ -130,7 +130,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: server
-          image: "ghcr.io/cuongbphv/waxseal-server:0.1.5"
+          image: "ghcr.io/cuongbphv/waxseal-server:0.1.6"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -203,7 +203,7 @@ spec:
           helm.sh/chart: waxseal-server-0.1.0
           app.kubernetes.io/name: waxseal-server
           app.kubernetes.io/instance: waxseal-server
-          app.kubernetes.io/version: "0.1.5"
+          app.kubernetes.io/version: "0.1.6"
           app.kubernetes.io/managed-by: Helm
           app.kubernetes.io/part-of: waxseal
           waxseal.io/trust-domain: chain
@@ -224,7 +224,7 @@ metadata:
     helm.sh/chart: waxseal-server-0.1.0
     app.kubernetes.io/name: waxseal-server
     app.kubernetes.io/instance: waxseal-server
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: chain
@@ -274,7 +274,7 @@ spec:
                   topologyKey: kubernetes.io/hostname
           containers:
             - name: anchor
-              image: "ghcr.io/cuongbphv/waxseal:0.1.5"
+              image: "ghcr.io/cuongbphv/waxseal:0.1.6"
               imagePullPolicy: IfNotPresent
               securityContext:
                 allowPrivilegeEscalation: false
@@ -330,7 +330,7 @@ metadata:
     helm.sh/chart: waxseal-server-0.1.0
     app.kubernetes.io/name: waxseal-server
     app.kubernetes.io/instance: waxseal-server
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: chain
@@ -363,7 +363,7 @@ metadata:
     helm.sh/chart: waxseal-server-0.1.0
     app.kubernetes.io/name: waxseal-server
     app.kubernetes.io/instance: waxseal-server
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: chain
@@ -392,7 +392,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: seed
-          image: "ghcr.io/cuongbphv/waxseal-server:0.1.5"
+          image: "ghcr.io/cuongbphv/waxseal-server:0.1.6"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

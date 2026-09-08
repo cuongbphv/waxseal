@@ -103,6 +103,23 @@ class TestExplicitAnchor:
         assert log._merkle.size == 5
         assert log.anchor().root == batch_root(hashes)
 
+    def test_anchor_rebuilds_when_memory_last_leaf_disagrees_with_disk(
+        self, tmp_path: Path
+    ) -> None:
+        from waxseal.domain.anchoring import IncrementalMerkle
+
+        log = open_anchored(tmp_path, anchor_every=None)
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type=PT)
+        hashes = log.entry_hashes()
+        log._merkle = IncrementalMerkle.from_hashes([*hashes[:-1], "ab" * 32])
+        assert log._merkle.size == len(hashes)
+        assert log._merkle.last_leaf != hashes[-1]
+        cp = log.anchor()
+        assert cp.root == batch_root(hashes)
+        assert cp.entry_hash == hashes[-1]
+        assert log._merkle.last_leaf == hashes[-1]
+
 
 class TestAnchorFailuresNeverPropagate:
     class FailingSink:

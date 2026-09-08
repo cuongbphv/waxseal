@@ -33,7 +33,7 @@ image:
   repository: ghcr.io/cuongbphv/waxseal-server
   # Never `latest`. An audit component whose version you cannot name from the
   # manifest is one whose fingerprint behaviour you cannot reproduce.
-  tag: "0.1.5"
+  tag: "0.1.6"
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -225,7 +225,7 @@ anchor:
   enabled: false
   image:
     repository: ghcr.io/cuongbphv/waxseal
-    tag: "0.1.5"
+    tag: "0.1.6"
     pullPolicy: IfNotPresent
   schedule: "23 * * * *"
   # ABSOLUTE path inside the container, under persistence.mountPath. Never a

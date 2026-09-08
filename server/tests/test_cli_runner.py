@@ -426,3 +426,113 @@ class TestInputStamp:
         monkeypatch.setattr(Path, "is_file", flaky_file)
         monkeypatch.setattr(Path, "is_dir", flaky_dir)
         assert _directory_children(tmp_path) == []
+
+    def test_stamp_includes_ctime_and_inode(self, tmp_path: Path) -> None:
+        from waxseal_server.runtime.cli import _stat_stamp
+
+        path = tmp_path / "trail.jsonl"
+        path.write_text("x\n")
+        st = path.stat()
+        stamp = _stat_stamp(path)
+        assert stamp is not None
+        assert stamp[3] == st.st_ctime_ns
+        assert stamp[4] == st.st_ino
+
+
+class TestReadCacheThreatModel:
+    """mtime+size is not a verdict. A same-size rewrite that restores
+    mtime must still miss: that is the writer verify exists to catch.
+    """
+
+    def test_same_size_edit_with_restored_mtime_is_not_served_from_cache(
+        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        calls: list[object] = []
+        real = cli_module.subprocess.run
+
+        def counting(*args: object, **kwargs: object) -> object:
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(cli_module.subprocess, "run", counting)
+        first = cli.run("verify", str(trail))
+        assert first.exit_code == 0
+        n = len(calls)
+        data = trail.read_bytes()
+        flip_at = data.find(b"a")
+        assert flip_at >= 0
+        st = trail.stat()
+        trail.write_bytes(data[:flip_at] + b"b" + data[flip_at + 1 :])
+        os.utime(trail, ns=(st.st_atime_ns, st.st_mtime_ns))
+        second = cli.run("verify", str(trail))
+        assert len(calls) > n
+        assert second.exit_code == 1
+
+    def test_ledger_status_is_never_served_from_cache(
+        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[object] = []
+        real = cli_module.subprocess.run
+
+        def counting(*args: object, **kwargs: object) -> object:
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(cli_module.subprocess, "run", counting)
+        argv = (
+            str(trail),
+            "--rpc",
+            "http://127.0.0.1:9",
+            "--liveness",
+            "0x" + "11" * 20,
+        )
+        cli.run("ledger-status", *argv)
+        n = len(calls)
+        cli.run("ledger-status", *argv)
+        assert len(calls) > n
+
+    def test_verify_with_rpc_is_never_served_from_cache(
+        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[object] = []
+        real = cli_module.subprocess.run
+
+        def counting(*args: object, **kwargs: object) -> object:
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(cli_module.subprocess, "run", counting)
+        argv = (
+            str(trail),
+            "--rpc",
+            "http://127.0.0.1:9",
+            "--liveness",
+            "0x" + "11" * 20,
+        )
+        cli.run("verify", *argv)
+        n = len(calls)
+        cli.run("verify", *argv)
+        assert len(calls) > n
+
+    def test_a_cached_verify_expires_after_the_ttl(
+        self, trail: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        clock = {"t": 1_000.0}
+        cli = WaxsealCli(now_fn=lambda: clock["t"])
+        calls: list[object] = []
+        real = cli_module.subprocess.run
+
+        def counting(*args: object, **kwargs: object) -> object:
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(cli_module.subprocess, "run", counting)
+        cli.run("verify", str(trail))
+        n = len(calls)
+        cli.run("verify", str(trail))
+        assert len(calls) == n
+        clock["t"] += 31.0
+        cli.run("verify", str(trail))
+        assert len(calls) > n

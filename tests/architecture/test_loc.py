@@ -60,10 +60,6 @@ OVER_LIMIT: dict[str, str] = {
         "dimension (Decree reporting window); splitting it would fork the "
         "window arithmetic from the record."
     ),
-    "src/waxseal/domain/report.py": (
-        "Domain report models after the render extract. One evidence "
-        "dimension; the renderer already lives in _report_render.py."
-    ),
 }
 
 _TREES = (

@@ -92,6 +92,13 @@ Two rules from `CLAUDE.md` govern this path and are not deployment choices:
   `BEGIN IMMEDIATE` for SQLite, `pg_advisory_xact_lock` for Postgres, a conditional PUT
   for S3, and a server-side compare-and-swap on `(seq, prev_hash)` for `RemoteBackend`.
 
+**POST body limit.** The chain server refuses a write body over 1 MiB with HTTP
+413 and `{error: payload_too_large}` (REMOTE.md section 4). It counts streamed
+bytes, so a chunked POST that omits `Content-Length` does not skip the stop.
+An ingress `proxy-body-size` (the Helm sample sets 8m) is a coarser outer cap
+on the same path, not a substitute and not the contract a client should
+branch on.
+
 ### Multi-replica agents
 
 Agent replicas do not coordinate with each other. They all append to the same chain, and

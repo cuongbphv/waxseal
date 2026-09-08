@@ -140,7 +140,7 @@ Four other ways, for the places a verifier actually has to run:
 uv tool install waxseal            # or: pipx install waxseal
 curl -fsSL https://raw.githubusercontent.com/cuongbphv/waxseal/main/deploy/install.sh | sh
 docker run --rm -v "$PWD:/data:ro" ghcr.io/cuongbphv/waxseal verify /data/trail.jsonl
-python3 waxseal-0.1.5.pyz verify trail.jsonl
+python3 waxseal-0.1.6.pyz verify trail.jsonl
 ```
 
 The installer script verifies the artifact's SHA-256 against the release's

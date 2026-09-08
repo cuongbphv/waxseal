@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-08
+
 ### Added
+
+- **`jsonl.read_last_line`**, with the compatibility alias the rotation and
+  server callers already used, so a tail read is one named function rather
+  than a private helper copied at each call site.
+- **CI `audit` job**: `pip-audit` on the library and the server, `npm audit`
+  on the web console, labelled advisory (`continue-on-error`). `trivy image
+  waxseal:ci` runs in the `image` job, where the image actually exists; the
+  `audit` job still says UNMEASURED when that image is not in the runner,
+  rather than printing a silent pass (rule 5).
+- **CI `web` job** now runs `npm run test` and `npm run lint` beside
+  `vue-tsc` and `build`. AuthNeeded (b2) and the eslint gate (b11) were
+  local-only until this release.
 
 - **Vietnam's AI law cluster, mapped and researched.**
   `docs/compliance/mapping.md` gains §7b for the Law on Artificial Intelligence
@@ -105,11 +119,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exit codes.
 - **`deploy/install.sh`**, a POSIX-sh installer. It tries `uv tool install`
   first, then `pipx`, then `pip install --user`, and falls back to the zipapp,
-  with `--from-dir` for an offline install and `--dry-run`. The zipapp path verifies the artifact's SHA-256 against the
-  release's `SHA256SUMS` before anything is moved or executed, and a mismatch
-  aborts having installed nothing. When `python3 -m sigstore` is unavailable the
-  run prints a labelled notice saying the signature was not checked and what
-  would check it, rather than passing over it (rule 6).
+  with `--from-dir` for an offline install and `--dry-run`. The zipapp path 
+  verifies the artifact's SHA-256 against the release's `SHA256SUMS` before 
+  anything is moved or executed, and a mismatch aborts having installed nothing.
+  When `python3 -m sigstore` is unavailable the run prints a labelled notice 
+  saying the signature was not checked and what would check it, rather than 
+  passing over it (rule 6).
 - **Two Helm charts, under two administrative authorities.** `waxseal-server` is
   a StatefulSet at one replica, because a JSONL trail behind a file lock admits
   exactly one writer and a Deployment's rolling update would surge a second onto
@@ -136,8 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   charts and validates every rendered value file with kubeconform.
   `deploy/` is excluded from the sdist, on the same footing as `server/` and
   `contracts/`; `tools/build_pyz.py` stays, like the other generators beside it.
-- **`deploy/README.vi.md` and `deploy/systemd/README.vi.md`**, and the two documentation ratchets now scan
-  `deploy/`. The tree arrived outside every glob in both
+- **`deploy/README.vi.md` and `deploy/systemd/README.vi.md`**, and the two 
+  documentation ratchets now scan `deploy/`. The tree arrived outside every glob in both
   `tests/test_docs_language.py` and `tests/architecture/test_epistemic_tags.py`,
   which meant a claim about what a topology proves, or an unlabelled claim about
   what was verified on the machine that wrote it, could have sat in an operator
@@ -248,19 +263,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exact-path allowlist. README CLI surface names `cadence`,
   `reconcile-tickets`, `receipt`, `bond prove`, and `verify --tsa-ca-file`.
 
+- **`cli`, `log`, `adapters/evm`, and `adapters/s3` are packages.** Import
+  paths are unchanged (`from waxseal.cli import main`, `from waxseal.log
+  import AuditLog`). The split is structural; message, exit code, and
+  ternary states did not move.
+
 - **Incremental RFC 6962 Merkle on the live trail.** `AuditLog.append`
   grows a peak forest; `anchor()` writes that root instead of walking
   `batch_root` over the whole prefix on every `anchor_every=N` tick.
   The rooted value is still the golden RFC 6962 vectors
   (`tests/domain/test_anchoring.py`); `verify_checkpoint` still
   recomputes independently. Membership and consistency proofs still
-  walk the leaf list — those need every leaf again.
+  walk the leaf list - those need every leaf again. `IncrementalMerkle`
+  keeps `last_leaf`: if disk `hashes[-1]` disagrees at the same size,
+  `anchor()` rebuilds from disk rather than publishing a RAM root next
+  to a disk `entry_hash`.
 
 - **Chain-server CLI read cache.** `WaxsealCli.run` keeps a bounded
-  `CliOutcome` map keyed on command, argv, and mtime/size of every
-  argv path plus trail sidecars and directory children. A miss still
-  shells out: the CLI remains the only verifier. A trail, `.anchors`,
-  or in-directory edit is a different stamp, never a stale `ok`.
+  `CliOutcome` map keyed on command, argv, and a stamp of every argv
+  path plus trail sidecars and directory children. The stamp is
+  `(path, mtime, size, ctime, ino)` and a 30s TTL sits on top: `utime`
+  can restore mtime after a same-size rewrite, and that rewrite is the
+  writer `verify` must catch. The cache is a subprocess budget, not a
+  second verdict. `ledger-status` is never cached (the reading depends
+  on RPC, not the trail file); `--rpc` / `--witness` / `--liveness` /
+  `--registry` / `--bond` skip the cache for the same reason. A miss
+  still shells out: the CLI remains the only verifier.
+
+- **Server version is `importlib.metadata.version("waxseal-server")`.**
+  `/v1/meta` and OpenAPI `info.version` import that one name. The
+  previous three hand-edited copies (pyproject, `API_VERSION`, the
+  meta JSON literal) could disagree after a bump.
+
+### Fixed
+
+- **Web console `AuthNeeded`.** An authenticated session was drawing the
+  locked state. `needsCredential` is now wired; the Vitest that holds
+  it runs in CI.
+
+### Security
+
+- **Redactor walks tuples.** A secret sitting in a `tuple` field was
+  reaching disk unredacted: the walker treated tuples as opaque leaves.
+  `set` / `frozenset` raise `TypeError` (they are not silently turned
+  into a list). `bytes` plus a configured redactor raise `ValueError`
+  rather than hashing cleartext the operator asked to mask.
+- **Provider redaction patterns** expanded with a batch of positive and
+  negative cases, so a new host pattern is a test, not a comment.
+- **Labelled notice when a local trail, sidecar, or sealkey is
+  group/world-readable** (POSIX only). The file is still opened; stderr
+  says so. A `0o600` trail is silent. Fail-open, labelled (rule 6).
+- **POST body limit counts streamed bytes.** A chunked POST that omits
+  `Content-Length` used to walk past the 1 MiB stop and into
+  `request.body()`. The server now counts as the body arrives and
+  returns 413 with `{error: payload_too_large}` before the handler
+  stores anything. REMOTE.md section 4 names the status. Helm sample
+  ingress `proxy-body-size: 8m` is a coarser outer cap, not a
+  substitute.
 
 ## [0.1.5] - 2026-09-01
 

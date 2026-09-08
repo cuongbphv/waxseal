@@ -376,6 +376,14 @@ class AuditLog:
 
     def _merkle_root_for(self, hashes: list[str]) -> str:
         if self._merkle.size == len(hashes):
+            if hashes and self._merkle.last_leaf != hashes[-1]:
+                # Same length, different last leaf: the in-memory forest
+                # was built from a different prefix than disk (an
+                # out-of-process rewrite of equal length). Recompute from
+                # the hashes this checkpoint will publish.
+                tree = IncrementalMerkle.from_hashes(hashes)
+                self._merkle = tree
+                return tree.root()
             return self._merkle.root()
         tree = IncrementalMerkle.from_hashes(hashes)
         if self._merkle.size == 0:

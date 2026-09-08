@@ -140,7 +140,7 @@ Bốn cách khác, cho những nơi một verifier thực sự phải chạy:
 uv tool install waxseal            # hoặc: pipx install waxseal
 curl -fsSL https://raw.githubusercontent.com/cuongbphv/waxseal/main/deploy/install.sh | sh
 docker run --rm -v "$PWD:/data:ro" ghcr.io/cuongbphv/waxseal verify /data/trail.jsonl
-python3 waxseal-0.1.5.pyz verify trail.jsonl
+python3 waxseal-0.1.6.pyz verify trail.jsonl
 ```
 
 Script cài đặt đối chiếu SHA-256 của artifact với `SHA256SUMS` của bản phát

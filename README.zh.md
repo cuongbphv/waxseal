@@ -180,7 +180,7 @@ pip install waxseal
 uv tool install waxseal            # 或：pipx install waxseal
 curl -fsSL https://raw.githubusercontent.com/cuongbphv/waxseal/main/deploy/install.sh | sh
 docker run --rm -v "$PWD:/data:ro" ghcr.io/cuongbphv/waxseal verify /data/trail.jsonl
-python3 waxseal-0.1.5.pyz verify trail.jsonl
+python3 waxseal-0.1.6.pyz verify trail.jsonl
 ```
 
 安装脚本会先用发布附带的 `SHA256SUMS` 校验产物的 SHA-256，校验通过之前不移动、

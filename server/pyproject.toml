@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "waxseal-server"
-version = "0.1.5"
+version = "0.1.6"
 description = "Self-hosted chain server and read-only portal for waxseal trails."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -1148,7 +1148,7 @@ wheels = [
 
 [[package]]
 name = "waxseal"
-version = "0.1.5"
+version = "0.1.6"
 source = { editable = "../" }
 
 [package.metadata]
@@ -1168,7 +1168,7 @@ provides-extras = ["dev", "s3", "postgres", "evm", "rfc3161"]
 
 [[package]]
 name = "waxseal-server"
-version = "0.1.5"
+version = "0.1.6"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

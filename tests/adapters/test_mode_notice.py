@@ -76,10 +76,10 @@ def test_a_stat_error_is_silent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     path = tmp_path / "missing.jsonl"
     real_stat = Path.stat
 
-    def boom(self: Path, *args: object, **kwargs: object) -> object:
+    def boom(self: Path, *, follow_symlinks: bool = True) -> os.stat_result:
         if self == path:
             raise OSError("UNMEASURED")
-        return real_stat(self, *args, **kwargs)
+        return real_stat(self, follow_symlinks=follow_symlinks)
 
     monkeypatch.setattr(Path, "stat", boom)
     from waxseal.adapters.mode_notice import notice_if_group_or_world_readable

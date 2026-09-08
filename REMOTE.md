@@ -109,6 +109,11 @@ envelope's own `(header.seq, header.prev_hash)`:
   retrying - never retry the same body. `RemoteBackend.append` retries up to 32 times
   (the same ceiling `S3Backend` uses for its own conditional-write race) before raising.
 - `400` - malformed envelope (missing field, wrong type, non-hex hash). Not retried.
+- `413` - body exceeds 1 MiB (1048576 bytes). The server MUST refuse before
+  the body is stored. A missing or unreadable `Content-Length` does not skip
+  the limit: the server counts streamed bytes. The JSON error shape is
+  `{"error": "payload_too_large", "detail": "body exceeds 1048576 bytes"}`.
+  Not retried.
 - `401` / `403` - authentication/authorization failure. Not retried.
 - `5xx` - server error. Not retried by the client; the caller sees a `RemoteError` and
   (through `AuditLog.try_append`) it becomes a labelled, counted drop - never a fork.

@@ -8,7 +8,7 @@ metadata:
     helm.sh/chart: waxseal-verifier-0.1.0
     app.kubernetes.io/name: waxseal-verifier
     app.kubernetes.io/instance: waxseal-verifier
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: verifier
@@ -23,7 +23,7 @@ metadata:
     helm.sh/chart: waxseal-verifier-0.1.0
     app.kubernetes.io/name: waxseal-verifier
     app.kubernetes.io/instance: waxseal-verifier
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: verifier
@@ -47,7 +47,7 @@ metadata:
     helm.sh/chart: waxseal-verifier-0.1.0
     app.kubernetes.io/name: waxseal-verifier
     app.kubernetes.io/instance: waxseal-verifier
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: verifier
@@ -84,7 +84,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: report
-              image: "ghcr.io/cuongbphv/waxseal:0.1.5"
+              image: "ghcr.io/cuongbphv/waxseal:0.1.6"
               imagePullPolicy: IfNotPresent
               securityContext:
                 allowPrivilegeEscalation: false
@@ -140,7 +140,7 @@ metadata:
     helm.sh/chart: waxseal-verifier-0.1.0
     app.kubernetes.io/name: waxseal-verifier
     app.kubernetes.io/instance: waxseal-verifier
-    app.kubernetes.io/version: "0.1.5"
+    app.kubernetes.io/version: "0.1.6"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: verifier
@@ -182,7 +182,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: verify
-              image: "ghcr.io/cuongbphv/waxseal:0.1.5"
+              image: "ghcr.io/cuongbphv/waxseal:0.1.6"
               imagePullPolicy: IfNotPresent
               securityContext:
                 allowPrivilegeEscalation: false

@@ -45,7 +45,7 @@ services:
   # answers a question and exits.
   verify:
     profiles: ["verify"]
-    image: ${WAXSEAL_CLI_IMAGE:-ghcr.io/cuongbphv/waxseal:0.1.5}
+    image: ${WAXSEAL_CLI_IMAGE:-ghcr.io/cuongbphv/waxseal:0.1.6}
     # No `latest`: a verdict you cannot attribute to a build is a verdict you
     # cannot reproduce, and "unverifiable" is a statement about which build
     # read the trail.

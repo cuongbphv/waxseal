@@ -11,7 +11,7 @@ type: application
 # The chart version. Bumped when the templates change.
 version: 0.1.0
 # The waxseal release this chart's default image tag was written against.
-appVersion: "0.1.5"
+appVersion: "0.1.6"
 keywords:
   - audit
   - hash-chain

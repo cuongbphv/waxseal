@@ -482,10 +482,8 @@ def _parse_decision(entry: Entry) -> Any:
 
 
 def _ranked(counter: Counter[str]) -> tuple[tuple[str, int], ...]:
-    """Most frequent first, ties broken by name, so two audits of the same
-    trail must diff cleanly."""
+    """Most frequent first; ties by name so two audits of the same trail must diff cleanly."""
     return tuple(sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])))
-
 
 
 from waxseal.domain._report_render import (  # noqa: E402
