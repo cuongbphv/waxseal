@@ -29,6 +29,15 @@ uv run pytest --cov=waxseal
   fingerprint entry; never edit a released descriptor. Golden vectors may be added,
   never edited or deleted - a frozen-hash test failure means stop, not "update the
   vector".
+- **Module size.** PEP 8 does not set a line count. Soft **400** lines/module is
+  review policy, not a failing test: at or above 400, the PR says whether the
+  file still has one bounded context or a second seam landed without an extract.
+  Do not split for the number alone. Hard **500** is
+  `tests/architecture/test_loc.py`: a production module over 500 lines fails
+  unless that exact path is on the allowlist with a bounded-context rationale.
+  The allowlist is a ratchet - a file that drops to 500 or under must leave it.
+  Named exception kinds: a protocol codec, the argparse table, a CLI command
+  whose exit semantics are frozen.
 
 ## Before opening a PR
 
