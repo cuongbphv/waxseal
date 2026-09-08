@@ -350,14 +350,21 @@ jobs:
         with:
           python-version: "3.13"
 
-      # ubuntu-latest ships shellcheck. `--shell=sh` on install.sh because it
-      # declares `#!/bin/sh` and must stay POSIX — shellcheck's default guess
-      # would let a bashism through.
-      - run: shellcheck --shell=sh deploy/install.sh
-      # -x follows `source`, -P SCRIPTDIR resolves the `# shellcheck source=`
-      # directives next to each script, so SERVER_DIR and friends are seen
-      # where they are set instead of flagged as unassigned.
-      - run: shellcheck -x -P SCRIPTDIR server/scripts/*.sh
+      # One pinned shellcheck, by image digest, shared with `make
+      # install-sh-check`. ubuntu-latest ships 0.9.0, which reads
+      # `A && B || true` as SC2015 while 0.11.0 does not: the first run of the
+      # 0.1.6 release PR was checked locally with one and failed here on the
+      # other. `--shell=sh` on install.sh because it declares `#!/bin/sh` and
+      # must stay POSIX; -x follows `source` and -P SCRIPTDIR resolves the
+      # `# shellcheck source=` directives next to each script.
+      - name: shellcheck (pinned image)
+        run: |
+          set -eu
+          sc() { docker run --rm -v "$PWD:/mnt" \
+            koalaman/shellcheck@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d "$@"; }
+          sc --version | head -2
+          sc --shell=sh deploy/install.sh
+          sc -x -P SCRIPTDIR server/scripts/*.sh
 
       - run: uv run --extra dev python tools/build_pyz.py
       - name: publish digests the way the release does

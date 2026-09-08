@@ -116,18 +116,23 @@ image-server:
 
 # ---- shell -------------------------------------------------------------------
 
-# shellcheck is not installed on the development machine this was written on,
-# so the target says which check it could not run instead of passing silently.
-# CLAUDE.md rule 6: a degradation is recorded in the output. CI has the tool
-# and runs it for real (.github/workflows/ci.yml, job `shell`).
+# The SAME shellcheck CI runs, by image digest, so a finding here is a finding
+# there and a clean run here means a clean run there. Versions disagree: 0.9.0
+# (what ubuntu-latest ships) flags `A && B || true` as SC2015, 0.11.0 does
+# not, and the release PR for 0.1.6 was checked locally with one and failed
+# in CI on the other. Without docker the target says which check it could not
+# run instead of passing silently (CLAUDE.md rule 6).
+SHELLCHECK_IMAGE = koalaman/shellcheck@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
 install-sh-check:
 	@sh -n deploy/install.sh && echo 'sh -n deploy/install.sh: ok'
-	@if command -v shellcheck >/dev/null 2>&1; then \
-	  shellcheck --shell=sh deploy/install.sh && shellcheck server/scripts/*.sh; \
+	@if command -v docker >/dev/null 2>&1; then \
+	  docker run --rm -v "$(CURDIR):/mnt" $(SHELLCHECK_IMAGE) --shell=sh deploy/install.sh \
+	  && docker run --rm -v "$(CURDIR):/mnt" $(SHELLCHECK_IMAGE) -x -P SCRIPTDIR server/scripts/*.sh \
+	  && echo 'shellcheck (pinned image): ok'; \
 	else \
-	  echo 'NOTICE [unverified]: shellcheck is not installed — only `sh -n` ran,'; \
-	  echo '            which checks syntax and nothing else.'; \
-	  echo '            remedy: brew install shellcheck (CI job `shell` runs it regardless).'; \
+	  echo 'NOTICE [unverified]: docker is not available, so the pinned shellcheck did not run;'; \
+	  echo '            only `sh -n` ran, which checks syntax and nothing else.'; \
+	  echo '            remedy: install docker (CI job `shell` runs the same image regardless).'; \
 	fi
 
 # ---- helm --------------------------------------------------------------------
