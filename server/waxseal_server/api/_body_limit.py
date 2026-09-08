@@ -19,15 +19,19 @@ from waxseal_server.api._http_errors import error
 MAX_BODY_BYTES = 1_048_576
 
 
+def _too_large() -> JSONResponse:
+    # One spelling for both the Content-Length path and the counting loop:
+    # written twice, the two 413s drift apart on the first edit to either.
+    return error(413, "payload_too_large", f"body exceeds {MAX_BODY_BYTES} bytes")
+
+
 def refuse_oversized_post(method: str, content_length: str | None) -> JSONResponse | None:
     if method != "POST":
         return None
     if content_length is None or not content_length.isdigit():
         return None
     if int(content_length) > MAX_BODY_BYTES:
-        return error(
-            413, "payload_too_large", f"body exceeds {MAX_BODY_BYTES} bytes"
-        )
+        return _too_large()
     return None
 
 
@@ -46,14 +50,22 @@ class BodySizeLimitMiddleware:
             return
         method = scope.get("method", "")
         headers = Headers(scope=scope)
-        refused = refuse_oversized_post(method, headers.get("content-length"))
+        content_length = headers.get("content-length")
+        refused = refuse_oversized_post(method, content_length)
         if refused is not None:
             await refused(scope, receive, send)
             return
         if method != "POST":
             await self.app(scope, receive, send)
             return
+        if content_length is not None and content_length.isdigit():
+            # Declared and within budget. The ASGI server enforces framing,
+            # so the body cannot outrun the header it announced; buffering it
+            # here again would only hold a second copy in memory.
+            await self.app(scope, receive, send)
+            return
 
+        # No usable Content-Length (chunked): count the stream itself.
         chunks: list[bytes] = []
         received = 0
         more_body = True
@@ -65,12 +77,7 @@ class BodySizeLimitMiddleware:
             chunk = message.get("body", b"")
             received += len(chunk)
             if received > MAX_BODY_BYTES:
-                response = error(
-                    413,
-                    "payload_too_large",
-                    f"body exceeds {MAX_BODY_BYTES} bytes",
-                )
-                await response(scope, receive, send)
+                await _too_large()(scope, receive, send)
                 return
             chunks.append(chunk)
             more_body = bool(message.get("more_body", False))
@@ -86,6 +93,10 @@ class BodySizeLimitMiddleware:
                     "body": b"".join(chunks),
                     "more_body": False,
                 }
-            return {"type": "http.request", "body": b"", "more_body": False}
+            # ASGI: after the final body chunk, receive() blocks until the
+            # connection has something new to say (http.disconnect). Answering
+            # with a synthetic empty http.request instead would keep the
+            # handler from ever seeing the client go away.
+            return await receive()
 
         await self.app(scope, replay_receive, send)

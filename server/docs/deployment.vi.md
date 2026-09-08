@@ -244,6 +244,200 @@ Verifier là **một chart riêng** dành cho một namespace hoặc một clust
 nâng cấp được là một writer tự kiểm chứng chính mình. Không chart nào kèm một
 witness, cũng vì lý do đó. Xem [`deploy/README.vi.md`](../../deploy/README.vi.md).
 
+## TLS
+
+Kết thúc TLS ở một reverse proxy (nginx, Caddy, một cloud load balancer) và
+chuyển tiếp HTTP thuần vào cổng 8000. File compose bind `127.0.0.1:8000` chính
+là để nó không tiếp cận được cho tới khi bạn đã đặt một thứ gì đó phía trước.
+Dự án này không ship một câu chuyện PKI và sẽ không phát minh ra một cái.
+
+## Bố cục dữ liệu
+
+File, trên data volume:
+
+```
+$WAXSEAL_SERVER_DATA_DIR/
+  chains/<chain_id>/trail.jsonl      # chain, mỗi dòng một JSON envelope
+  chains/<chain_id>/receipts.jsonl   # lịch sử xác nhận của chính server này
+  witness/<witness_id>.jsonl         # các checkpoint gửi vào witness này
+  imports/<import_id>/meta.json      # bản ghi của một trail đã import
+  imports/<import_id>/<filename>     # trail đã import, chmod 0400
+```
+
+PostgreSQL, hai bảng:
+
+```
+waxseal_operators   username, display_name, email, role, created_at, active
+waxseal_api_keys    key_id, username, label, fingerprint, key_sha256,
+                    created_at, last_used_at, revoked_at
+```
+
+Backup cả hai. `trail.jsonl` là định dạng JSONL waxseal thông thường, nên
+`waxseal verify` chạy trực tiếp trên một bản restore mà không cần server và
+không cần database nào đang chạy - đó chính là lý do giữ nó là một file.
+
+## Trỏ một agent hook vào server này
+
+`WAXSEAL_TRAIL` từ trước tới nay vẫn là thứ quyết định hook ghi vào đâu. Một
+giá trị `http(s)://` biến nó thành một chain server, nên không cần cơ chế cấu
+hình thứ hai:
+
+```sh
+#!/bin/sh
+# ~/.claude/hooks/waxseal-remote.sh - credential KHÔNG nằm trong settings.json.
+[ -f "$HOME/.config/waxseal/hook.env" ] && { set -a; . "$HOME/.config/waxseal/hook.env"; set +a; }
+WAXSEAL_TRAIL="${WAXSEAL_TRAIL:-http://127.0.0.1:8000}" \
+WAXSEAL_API_KEY="${WAXSEAL_WRITER_KEY:-}" \
+exec "$HOME/.claude/waxseal-venv/bin/python3" "$HOME/.claude/hooks/waxseal_hook.py"
+```
+
+Trỏ các hook `PreToolUse`, `PostToolUse` và `UserPromptSubmit` trong
+`~/.claude/settings.json` vào script đó, và giữ khóa trong một file env `0600`
+để cấu hình hook thì chia sẻ được còn credential thì không.
+
+Đưa cho hook khóa **writer**, không phải khóa admin. Hook chạy trên laptop, và
+một writer key bị lộ cho kẻ tấn công append rác vào một chain; một admin key bị
+lộ cho họ đọc mọi trail trên server và mint thêm khóa.
+
+Chain id được suy ra từ chính `cwd` của event, nên mỗi project rơi vào chain
+của riêng nó thay vì đan mọi project vào một. Đặt `WAXSEAL_CHAIN_ID` để ghi đè.
+Đây là dạng remote-target của cơ chế định tuyến theo project mà Workstream B đã
+ship cho trail LOCAL trong 0.1.5 (`routed_trail` của `integrations/_trail.py`);
+nó dùng một tên project đọc được thay cho cái slug đó, vì chain id là thứ con
+người đọc trên portal.
+
+Nếu server không tiếp cận được, hook exit 0 kèm một notice có nhãn trên stderr
+và event bị mất. Đó là observer contract đang hoạt động đúng: một đường audit
+hỏng không bao giờ được phủ quyết tool call của lập trình viên. Nó cũng có nghĩa
+là dừng container thì bạn mất độ phủ audit, và notice nói cho bạn biết điều đó
+ngay lúc ấy.
+
+## Server được tin cho việc gì, và không được tin cho việc gì
+
+**Server là một trusted writer.** REMOTE.md mục 1 nêu điều này như một ranh giới
+phạm vi, và self-hosting không đổi được nó:
+
+- `verify_chain` chạy **phía client**. Một server làm hỏng, cắt cụt hay đảo thứ
+  tự entry sẽ bị bắt đúng như một file local bị hỏng. Đó là tamper-evidence, và
+  đó là thứ server này cho bạn miễn phí.
+- Thứ không hash chain nào tự bắt được là một server bịa ra cả một bản rewrite
+  tự-nhất-quán từ genesis. Một đĩa local ghi được cũng có đúng điểm mù đó. Thu
+  hẹp nó theo cách thư viện đã ghi sẵn: ghim head ở một chỗ server không với tới
+  (SPEC.md mục 13), và đối chiếu với một witness dưới một **authority quản trị
+  khác** (SPEC.md mục 14).
+- **Một witness được host cạnh chain mà nó làm chứng thì không chứng minh được
+  gì.** Server này cài một witness endpoint để bạn host witness cho chain của
+  một team khác, không phải để một triển khai tự làm chứng cho chính mình. Không
+  dòng code nào cưỡng chế được điều đó; nó là một quyết định triển khai và đoạn
+  này là chỗ nó được nói ra.
+- Khóa ghi của chain không bao giờ được chấp nhận ở witness endpoint. Điều này
+  *có* được cưỡng chế, và có test khẳng định: một witness cầm khóa chain có thể
+  append entry giả vào đúng cái chain nó tồn tại để đối chiếu.
+
+**Self-hosting mua được sự tách bạch về authority, không mua được một định lý
+mạnh hơn.** Nếu team A host server và team B ghi vào đó, độ tách bạch τ thực sự
+tăng, và `waxseal report --declare-topology` sẽ nói vậy. Nếu một team giữ cả
+hai thì không, và không lượng hạ tầng nào đổi được điều đó.
+
+**Server và writer thông đồng là nấc cuối của thang năng lực.** Không gì ở đây
+xử lý nó. threat-model.md là bản tường thuật trung thực.
+
+## Server sẽ không làm gì
+
+Không có route nào sửa, xóa, đảo thứ tự, sửa chữa hay ký lại một entry, và không
+có nút nào trên UI cho việc đó. "Verify reports, never repairs" (CLAUDE.md rule
+4) áp dụng cho bề mặt web đúng như áp dụng cho CLI. Có test liệt kê mọi route
+ghi trong OpenAPI schema và fail nếu xuất hiện cái thứ ba.
+
+Trail đã import là bằng chứng của người khác: bản lưu được `chmod 0400` và nằm
+trong namespace riêng, nên không route chain nào địa chỉ tới được nó và không
+đường append nào chạm tới được nó.
+
+## Portal
+
+Mười sáu màn hình, hai ngôn ngữ (VI/EN), responsive xuống tới 390px. Sidebar trở
+thành drawer phủ lên khi dưới 900px.
+
+![Dashboard](screenshots/vi/01-dashboard.png)
+
+| | |
+|---|---|
+| ![Nhịp anchor](screenshots/vi/11-cadence.png) | ![Cài đặt](screenshots/vi/19-settings.png) |
+| **Nhịp anchor** - khoảng anchor tối ưu chi phí, tính từ số đo của chính operator. Không mở trail nào. | **Cài đặt** - credential, biến môi trường, và các tham số. Secret chỉ báo `đã đặt`/`chưa đặt`, không gì khác. |
+| ![Vé](screenshots/vi/10-tickets.png) | ![Output của trail](screenshots/vi/03-trail-output.png) |
+| **Vé** - thiếu một vé là một mất mát *đã phát hiện*; không có dữ liệu phát hành là *chưa đo*. Không bao giờ hiện thành "0 mất mát". | **Trail** - mọi verdict mang theo `argv` đã tạo ra nó, để operator tái hiện được. |
+
+Bộ đầy đủ: [`docs/screenshots/vi/`](screenshots/vi/) và
+[`docs/screenshots/en/`](screenshots/en/), cả desktop lẫn phone, tạo lại bằng
+`./scripts/screenshots.sh`.
+
+API token trước đây là một card trên chín màn hình; giờ nó được đặt một lần,
+trong Cài đặt. Một ô nhập credential lặp mười hai lần là mười hai chỗ để dán
+khóa vào và mười hai chỗ để bỏ quên nó.
+
+### Screenshot được sinh ra, không phải chọn tay
+
+`screenshots.sh` tự dựng server riêng với dữ liệu demo riêng trên một cổng tạm
+rồi chụp cái đó - không bao giờ chụp một triển khai thật. Hai lớp bảo vệ chạy
+trước mỗi lần bấm máy, vì cả hai lỗi này đều vô hình khi review một khi khung
+hình đã thành PNG:
+
+- mọi màn hình đều được kiểm tràn ngang;
+- phần text đã render được quét tìm đường dẫn home, API key hay bearer token.
+
+Đường dẫn được ghim dưới `/tmp/waxseal-demo`, và interpreter được gọi qua một
+symlink ở đó. Đây không phải chuyện thẩm mỹ: mọi output panel đều in ra `argv`
+đã tạo ra nó, nên một khung hình chụp thẳng từ checkout sẽ render thư mục home
+của lập trình viên vào ảnh xuất bản.
+
+Dữ liệu demo được ghi qua **thư viện** waxseal, nên nó không thể là hình dạng mà
+client thật không tạo ra. Nó không mang tên tổ chức, tên người, địa chỉ hay
+credential nào - chỉ có định danh giữ chỗ (`agent-a`, `reviewer-1`).
+
+## Chưa làm, và vì sao
+
+Ghi lại ở đây thay vì để ai đó tự phát hiện, theo cùng một kỷ luật với
+conformance ledger: **viết ra chưa phải là đã ship.**
+
+- **Không có pin-store endpoint.** Kế hoạch 0.1.5 liệt kê một cái dưới
+  Workstream I, nhưng không client waxseal nào nói HTTP với một pin store -
+  `FilePinStore` đọc và ghi một đường dẫn local do operator chọn, và docstring
+  của chính nó nói pin phải nằm ở chỗ writer của trail không với tới. Một
+  endpoint không có client là bề mặt trông như tính năng mà không kiểm gì, và
+  host pin cạnh server sẽ làm hỏng chính mục đích của pin. Giữ file pin ngoài
+  host này.
+- **Không có login bằng mật khẩu, và sẽ không có.** Xác thực là API key, hash
+  khi lưu. Một form đăng nhập trên một kho tài khoản không có cột mật khẩu sẽ là
+  một cơ chế nhận tất cả mọi người trong khi trông như một cơ chế không nhận.
+- **Không có 2FA và không có lịch sử session.** Bảng operator theo dõi những gì
+  nó thực sự quan sát được - vai trò, thời điểm tạo, một khóa đã từng được dùng
+  hay chưa. Cột nào server không điền được thì vắng mặt, thay vì render thành
+  dấu gạch.
+- **Đã ra khỏi danh sách này: màn `preflight` và `segments`.** Cả hai từng được
+  ghi ở đây là chưa ship. Workstream B ship `segments` và Workstream E ship
+  `preflight`, cả hai trong 0.1.5, và vì cổng năng lực được parse từ
+  `waxseal --help`, mỗi màn bắt đầu render chính output của verifier mà server
+  không đổi gì ngoài tham số được đưa cho `segments` (bên dưới). Mục này được
+  giữ thay vì xóa vì cái cổng không biến mất cùng chúng: một màn vẫn báo
+  `unavailable` mỗi khi wheel phía sau server này thiếu lệnh đó
+  (`GET /v1/capabilities` báo có-mặt-và-false), là trạng thái bình thường của
+  một wheel cũ nằm sau một portal mới.
+- **Không có sidecar `.receipts` phía client.** Đó là Workstream J2. Server này
+  đã công bố cái head mà client sẽ lưu, nên sidecar hạ cánh được mà không cần
+  server đổi gì.
+- **Đã ra khỏi danh sách này: màn Ledger.** Trước đây nó báo "chưa cấu hình" và
+  không thể báo gì khác, vì không có chỗ nào để đặt RPC endpoint hay địa chỉ
+  contract. Settings store giữ những cái đó rồi và
+  `GET /v1/chains/{id}/ledger-status` chạy lệnh thật, nên màn hình hiện kết quả
+  đọc thật. Cái **không** đổi là trường hợp chưa cấu hình: nó vẫn là một trạng
+  thái có nhãn, nêu tên setting cần đặt, chứ không bao giờ là một status không
+  ai đọc. Lưu ý một lần đối chiếu hoạt động cần **hai** nhà cung cấp RPC độc
+  lập - đó là quyết định mua sắm hơn là quyết định cấu hình.
+- **`receipt` không được expose qua HTTP.** Nó chỉ-đọc với trail, nhưng nó ghi
+  file receipt và frame vào một thư mục `--out` do operator đặt tên. Một route
+  cho nó sẽ khiến server này ghi file thay cho một request, và CLI là chỗ đúng
+  để chạy nó.
+
 ## Bề mặt đọc
 
 Mười sáu trong hai mươi lệnh của wheel là lệnh đọc. Mười một cái tiếp cận được
@@ -327,82 +521,41 @@ Hai hệ quả đáng biết:
   không có gì được kiểm - thay vì một `ok` sẽ khẳng định đã tìm thấy mọi segment
   của một trail vốn không có segment nào.
 
-## Portal
+## Chuỗi receipt
 
-Mười sáu màn hình, hai ngôn ngữ (VI/EN), responsive xuống tới 390px. Sidebar trở
-thành drawer phủ lên khi dưới 900px.
+Nếu `201` của client có `receipt_seq` và `receipt_head`, server này đang duy trì
+một chuỗi receipt cho `chain_id` đó (REMOTE.md mục 10): một hash chạy trên
+những gì nó đã xác nhận, theo thứ tự xác nhận, đóng khung bởi SPEC.md mục 19.
+Nó bền trên đĩa, nên một lần restart tiếp tục đúng chuỗi cũ thay vì bắt đầu
+một chuỗi mới.
 
-![Dashboard](screenshots/vi/01-dashboard.png)
+Ai cũng kiểm được mà không cần credential:
 
-| | |
-|---|---|
-| ![Nhịp anchor](screenshots/vi/11-cadence.png) | ![Cài đặt](screenshots/vi/19-settings.png) |
-| **Nhịp anchor** - khoảng anchor tối ưu chi phí, tính từ số đo của chính operator. Không mở trail nào. | **Cài đặt** - credential, biến môi trường, và các tham số. Secret chỉ báo `đã đặt`/`chưa đặt`, không gì khác. |
-| ![Vé](screenshots/vi/10-tickets.png) | ![Output của trail](screenshots/vi/03-trail-output.png) |
-| **Vé** - thiếu một vé là một mất mát *đã phát hiện*; không có dữ liệu phát hành là *chưa đo*. Không bao giờ hiện thành "0 mất mát". | **Trail** - mọi verdict mang theo `argv` đã tạo ra nó, để operator tái hiện được. |
+```
+GET /public/v1/chains/<id>/receipts              # chính các bản ghi
+GET /public/v1/chains/<id>/receipts/verify       # log có tự-nhất-quán không?
+GET /public/v1/chains/<id>/receipts/cross-check  # nó còn khớp với trail không?
+```
 
-Bộ đầy đủ: [`docs/screenshots/vi/`](screenshots/vi/) và
-[`docs/screenshots/en/`](screenshots/en/), cả desktop lẫn phone, tạo lại bằng
-`./scripts/screenshots.sh`.
+Cả ba được công bố vì một chuỗi receipt chỉ server đánh giá được là một lời hứa
+chứ không phải bằng chứng. Cả hai verdict đều ba giá trị: `ok`, `broken` và
+`unverifiable` (một phiên bản bản ghi mà build này không đọc được).
+`checked: null` kèm `reason: "not_recorded"` nghĩa là không có log nào cả - và
+điều đó không bao giờ giống một log không có gì sai trong nó.
 
-API token trước đây là một card trên chín màn hình; giờ nó được đặt một lần,
-trong Cài đặt. Một ô nhập credential lặp mười hai lần là mười hai chỗ để dán
-khóa vào và mười hai chỗ để bỏ quên nó.
+Hai cái trả lời hai câu hỏi khác nhau, và sự khác nhau đó chính là điểm chính:
 
-### Screenshot được sinh ra, không phải chọn tay
+- **`verify`** hỏi log xác nhận có tự-nhất-quán không. Nó vẫn `ok` sau một lần
+  sửa *trail*, vì bản thân log không bị đụng tới. Đúng, và vô dụng nếu đứng một
+  mình.
+- **`cross-check`** hỏi entry `seq` có còn mang đúng hash đã được xác nhận cho
+  nó không. Đây là thứ bắt được một lần rewrite local **tự-nhất-quán** - loại
+  tính lại `entry_hash` để `verify` thường vẫn qua. Receipt là ký ức mà kẻ
+  rewrite không nắm trong tay. Lý do là của SPEC.md mục 19: `receipt_mismatch`
+  và `receipt_beyond_head` (một lần rollback hay cắt cụt).
 
-`screenshots.sh` tự dựng server riêng với dữ liệu demo riêng trên một cổng tạm
-rồi chụp cái đó - không bao giờ chụp một triển khai thật. Hai lớp bảo vệ chạy
-trước mỗi lần bấm máy, vì cả hai lỗi này đều vô hình khi review một khi khung
-hình đã thành PNG:
-
-- mọi màn hình đều được kiểm tràn ngang;
-- phần text đã render được quét tìm đường dẫn home, API key hay bearer token.
-
-Đường dẫn được ghim dưới `/tmp/waxseal-demo`, và interpreter được gọi qua một
-symlink ở đó. Đây không phải chuyện thẩm mỹ: mọi output panel đều in ra `argv`
-đã tạo ra nó, nên một khung hình chụp thẳng từ checkout sẽ render thư mục home
-của lập trình viên vào ảnh xuất bản.
-
-Dữ liệu demo được ghi qua **thư viện** waxseal, nên nó không thể là hình dạng mà
-client thật không tạo ra. Nó không mang tên tổ chức, tên người, địa chỉ hay
-credential nào - chỉ có định danh giữ chỗ (`agent-a`, `reviewer-1`).
-
-## TLS
-
-HTTP thuần. TLS kết thúc ở một reverse proxy đặt phía trước - file này không tự
-phát minh ra một PKI. Xem bản tiếng Anh, mục *TLS*, để biết cấu hình cụ thể.
-
-## Server được tin cho việc gì, và không được tin cho việc gì
-
-Đây là mục quan trọng nhất của cả tài liệu và được giữ nguyên văn ở bản tiếng
-Anh: [*What the server is trusted for, and what it is not*](deployment.md#what-the-server-is-trusted-for-and-what-it-is-not).
-Đoạn cần nhớ nhất, nói lại ở đây:
-
-**Một witness được host cạnh chain mà nó làm chứng thì không chứng minh được
-gì.** Nếu cùng một người vận hành cả hai, một lần rewrite phối hợp sẽ đi qua cả
-hai. Witness chỉ có giá trị khi nó thuộc một authority quản trị khác - và đó là
-lý do khóa của nó là một biến môi trường khác, không bao giờ dùng chung với khóa
-ghi của chain.
-
-## Chưa làm, và vì sao
-
-Xem bản tiếng Anh, mục [*Not implemented, and why*](deployment.md#not-implemented-and-why).
-Ghi lại ở đây theo cùng một tinh thần với conformance ledger: **viết ra chưa phải
-là đã ship.** Ba mục đáng nhắc:
-
-- **Không có login bằng mật khẩu, và sẽ không có.** Xác thực là API key, hash
-  khi lưu. Một form đăng nhập trên một kho tài khoản không có cột mật khẩu sẽ là
-  một cơ chế nhận tất cả mọi người trong khi trông như một cơ chế không nhận.
-- **`receipt` không được expose qua HTTP.** Nó chỉ-đọc với trail, nhưng nó ghi
-  file receipt và frame vào một thư mục `--out` do operator đặt tên. Một route
-  cho nó sẽ khiến server này ghi file thay cho một request, và CLI là chỗ đúng
-  để chạy nó.
-- **Màn Ledger đã ra khỏi danh sách này.** Trước đây nó báo "chưa cấu hình" và
-  không thể báo gì khác, vì không có chỗ nào để đặt RPC endpoint hay địa chỉ
-  contract. Settings store giữ những cái đó rồi và
-  `GET /v1/chains/{id}/ledger-status` chạy lệnh thật. Cái **không** đổi là
-  trường hợp chưa cấu hình: nó vẫn là một trạng thái có nhãn, nêu tên setting
-  cần đặt, chứ không bao giờ là một status không ai đọc. Lưu ý một lần đối chiếu
-  hoạt động cần **hai** nhà cung cấp RPC độc lập - đó là quyết định mua sắm hơn
-  là quyết định cấu hình.
+Giới hạn trung thực cũng là của SPEC.md mục 19: một server rewrite **cả** trail
+lẫn log receipt của chính nó một cách nhất quán sẽ qua cả hai phép kiểm. Thứ
+chúng đánh bại là lần sửa rẻ hơn, không đồng thời chăm chút cả receipt. Thu hẹp
+thêm nữa nghĩa là đọc lại cái head server này đã công bố từ một chỗ khác -
+sidecar `.receipts` của client, hoặc một bên thứ ba đã giữ một bản sao.

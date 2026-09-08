@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Final
 
 from waxseal import Verdict
+from waxseal_server.runtime.ledger import LEDGER_FLAGS
 
 # Read-only by construction. `anchor` and `install` write, so they are not here
 # and cannot be reached from an HTTP request even by name — CLAUDE.md rule 4
@@ -87,10 +88,9 @@ _TRAIL_SIDECAR_SUFFIXES: Final = (
 # the false-confidence collapse CLAUDE.md names.
 _UNCACHED_COMMANDS: Final = frozenset({"ledger-status"})
 # verify/report do not take these from the server today; if they ever
-# do, a file stamp must not stand in for an RPC or witness reply.
-_NETWORK_FLAGS: Final = frozenset(
-    {"--rpc", "--witness", "--liveness", "--registry", "--bond"}
-)
+# do, a file stamp must not stand in for an RPC or witness reply. The set is
+# the ledger module's own, so it cannot drift from what that module emits.
+_NETWORK_FLAGS: Final = LEDGER_FLAGS
 
 STATUS_BY_VERDICT: Final = {
     Verdict.OK: "ok",
@@ -139,7 +139,11 @@ def _directory_children(path: Path) -> list[Path]:
 def _skips_outcome_cache(command: str, args: tuple[str, ...]) -> bool:
     if command in _UNCACHED_COMMANDS:
         return True
-    return any(flag in args for flag in _NETWORK_FLAGS)
+    # argparse takes `--rpc=URL` as well as `--rpc URL`; matching the bare
+    # token alone let the joined form through to a file-stamped cache.
+    return any(
+        arg == flag or arg.startswith(flag + "=") for arg in args for flag in _NETWORK_FLAGS
+    )
 
 
 def _input_stamp(args: tuple[str, ...]) -> tuple[_Stamp, ...]:

@@ -14,11 +14,20 @@ from typing import Final
 
 from waxseal_server.domain.settings import rpc_endpoints
 
+_RPC_FLAG: Final = "--rpc"
+_LIVENESS_FLAG: Final = "--liveness"
 _OPTIONAL_FLAGS: Final[tuple[tuple[str, str], ...]] = (
     ("ledger_registry_address", "--registry"),
     ("ledger_bond_address", "--bond"),
     ("ledger_writer_address", "--writer"),
     ("ledger_trail_id", "--trail-id"),
+)
+# Every flag this module can emit, plus `--witness`. The CLI runner's outcome
+# cache keys on file stamps, and none of these answers lives in a file: this
+# set is what it consults, so a flag added here is skipped there by
+# construction rather than by someone remembering a second list.
+LEDGER_FLAGS: Final[frozenset[str]] = frozenset(
+    {_RPC_FLAG, _LIVENESS_FLAG, "--witness", *(flag for _key, flag in _OPTIONAL_FLAGS)}
 )
 
 
@@ -37,8 +46,8 @@ def ledger_status_argv(
 
     args: list[str] = []
     for endpoint in rpc_endpoints(held.get("ledger_rpc_urls")):
-        args += ["--rpc", endpoint]
-    args += ["--liveness", liveness]
+        args += [_RPC_FLAG, endpoint]
+    args += [_LIVENESS_FLAG, liveness]
     for key, flag in _OPTIONAL_FLAGS:
         value = held.get(key)
         if value is not None:

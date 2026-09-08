@@ -34,6 +34,25 @@ def trail(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.fixture
+def spawn_calls(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """Every argv handed to subprocess.run, with the real call still made.
+
+    The read cache is asserted by counting spawns, never by inspecting the
+    cache: the CLI stays the only verifier, and "did not respawn" is the
+    whole observable claim.
+    """
+    calls: list[object] = []
+    real = cli_module.subprocess.run
+
+    def counting(*args: object, **kwargs: object) -> object:
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cli_module.subprocess, "run", counting)
+    return calls
+
+
 class TestAvailability:
     def test_the_shipped_read_commands_are_present(self, cli: WaxsealCli) -> None:
         assert {"verify", "report", "inspect", "tail", "head"} <= cli.available()
@@ -247,89 +266,49 @@ class TestReadCache:
     """
 
     def test_a_second_identical_verify_does_not_respawn(
-        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+        self, cli: WaxsealCli, trail: Path, spawn_calls: list[object]
     ) -> None:
-        calls: list[object] = []
-        real = cli_module.subprocess.run
-
-        def counting(*args: object, **kwargs: object) -> object:
-            calls.append(args)
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(cli_module.subprocess, "run", counting)
         first = cli.run("verify", str(trail))
-        n = len(calls)
+        n = len(spawn_calls)
         second = cli.run("verify", str(trail))
-        assert len(calls) == n
+        assert len(spawn_calls) == n
         assert second.exit_code == first.exit_code
         assert second.stdout == first.stdout
 
     def test_an_append_invalidates_the_cached_verify(
-        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+        self, cli: WaxsealCli, trail: Path, spawn_calls: list[object]
     ) -> None:
-        calls: list[object] = []
-        real = cli_module.subprocess.run
-
-        def counting(*args: object, **kwargs: object) -> object:
-            calls.append(args)
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(cli_module.subprocess, "run", counting)
         cli.run("verify", str(trail))
-        n = len(calls)
+        n = len(spawn_calls)
         AuditLog.open(trail).append(payload={"i": 99}, payload_type=PAYLOAD_TYPE)
         cli.run("verify", str(trail))
-        assert len(calls) > n
+        assert len(spawn_calls) > n
 
     def test_cadence_with_the_same_argv_is_cached(
-        self, cli: WaxsealCli, monkeypatch: pytest.MonkeyPatch
+        self, cli: WaxsealCli, spawn_calls: list[object]
     ) -> None:
-        calls: list[object] = []
-        real = cli_module.subprocess.run
-
-        def counting(*args: object, **kwargs: object) -> object:
-            calls.append(args)
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(cli_module.subprocess, "run", counting)
         argv = (
             "--lam", "1", "--c", "1", "--w", "1", "--rho", "1",
             "--delta", "1", "--t-max", "10",
         )
         cli.run("cadence", *argv)
-        n = len(calls)
+        n = len(spawn_calls)
         cli.run("cadence", *argv)
-        assert len(calls) == n
+        assert len(spawn_calls) == n
 
     def test_an_anchors_sidecar_change_invalidates_verify_with_anchors(
-        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+        self, cli: WaxsealCli, trail: Path, spawn_calls: list[object]
     ) -> None:
-        calls: list[object] = []
-        real = cli_module.subprocess.run
-
-        def counting(*args: object, **kwargs: object) -> object:
-            calls.append(args)
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(cli_module.subprocess, "run", counting)
         cli.run("verify", str(trail), "--anchors")
-        n = len(calls)
+        n = len(spawn_calls)
         trail.with_name(trail.name + ".anchors").write_text("{}\n")
         cli.run("verify", str(trail), "--anchors")
-        assert len(calls) > n
+        assert len(spawn_calls) > n
 
     def test_the_oldest_cached_outcome_is_evicted(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, spawn_calls: list[object]
     ) -> None:
         cli = WaxsealCli(outcome_cache_size=1)
-        calls: list[object] = []
-        real = cli_module.subprocess.run
-
-        def counting(*args: object, **kwargs: object) -> object:
-            calls.append(args)
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(cli_module.subprocess, "run", counting)
         first = (
             "--lam", "1", "--c", "1", "--w", "1", "--rho", "1",
             "--delta", "1", "--t-max", "10",
@@ -340,9 +319,9 @@ class TestReadCache:
         )
         cli.run("cadence", *first)
         cli.run("cadence", *second)
-        n = len(calls)
+        n = len(spawn_calls)
         cli.run("cadence", *first)
-        assert len(calls) > n
+        assert len(spawn_calls) > n
 
 
 class TestInputStamp:
@@ -445,21 +424,13 @@ class TestReadCacheThreatModel:
     """
 
     def test_same_size_edit_with_restored_mtime_is_not_served_from_cache(
-        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+        self, cli: WaxsealCli, trail: Path, spawn_calls: list[object]
     ) -> None:
         import os
 
-        calls: list[object] = []
-        real = cli_module.subprocess.run
-
-        def counting(*args: object, **kwargs: object) -> object:
-            calls.append(args)
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(cli_module.subprocess, "run", counting)
         first = cli.run("verify", str(trail))
         assert first.exit_code == 0
-        n = len(calls)
+        n = len(spawn_calls)
         data = trail.read_bytes()
         flip_at = data.find(b"a")
         assert flip_at >= 0
@@ -467,20 +438,12 @@ class TestReadCacheThreatModel:
         trail.write_bytes(data[:flip_at] + b"b" + data[flip_at + 1 :])
         os.utime(trail, ns=(st.st_atime_ns, st.st_mtime_ns))
         second = cli.run("verify", str(trail))
-        assert len(calls) > n
+        assert len(spawn_calls) > n
         assert second.exit_code == 1
 
     def test_ledger_status_is_never_served_from_cache(
-        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+        self, cli: WaxsealCli, trail: Path, spawn_calls: list[object]
     ) -> None:
-        calls: list[object] = []
-        real = cli_module.subprocess.run
-
-        def counting(*args: object, **kwargs: object) -> object:
-            calls.append(args)
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(cli_module.subprocess, "run", counting)
         argv = (
             str(trail),
             "--rpc",
@@ -489,21 +452,13 @@ class TestReadCacheThreatModel:
             "0x" + "11" * 20,
         )
         cli.run("ledger-status", *argv)
-        n = len(calls)
+        n = len(spawn_calls)
         cli.run("ledger-status", *argv)
-        assert len(calls) > n
+        assert len(spawn_calls) > n
 
     def test_verify_with_rpc_is_never_served_from_cache(
-        self, cli: WaxsealCli, trail: Path, monkeypatch: pytest.MonkeyPatch
+        self, cli: WaxsealCli, trail: Path, spawn_calls: list[object]
     ) -> None:
-        calls: list[object] = []
-        real = cli_module.subprocess.run
-
-        def counting(*args: object, **kwargs: object) -> object:
-            calls.append(args)
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(cli_module.subprocess, "run", counting)
         argv = (
             str(trail),
             "--rpc",
@@ -512,27 +467,58 @@ class TestReadCacheThreatModel:
             "0x" + "11" * 20,
         )
         cli.run("verify", *argv)
-        n = len(calls)
+        n = len(spawn_calls)
         cli.run("verify", *argv)
-        assert len(calls) > n
+        assert len(spawn_calls) > n
+
+    def test_an_rpc_flag_in_equals_form_also_skips_the_cache(self) -> None:
+        # argparse accepts `--rpc=URL` as well as `--rpc URL`. A skip list
+        # that only matched the bare token would serve a stamped `ok` for a
+        # reading whose answer lives on an RPC node, not in any file.
+        from waxseal_server.runtime.cli import _skips_outcome_cache
+
+        assert _skips_outcome_cache("verify", ("t.jsonl", "--rpc=http://x"))
+        assert _skips_outcome_cache("verify", ("t.jsonl", "--rpc", "http://x"))
+        assert not _skips_outcome_cache("verify", ("t.jsonl", "--anchors"))
+
+    def test_every_flag_the_ledger_can_emit_skips_the_cache(self) -> None:
+        # The flag vocabulary used to live twice: once where ledger-status
+        # argv is assembled, once in the cache's skip list. A flag added to
+        # the first and not the second would let a file stamp stand in for
+        # an RPC reply. One constant, and this test holds both ends to it.
+        from waxseal_server.runtime.cli import _skips_outcome_cache
+        from waxseal_server.runtime.ledger import LEDGER_FLAGS, ledger_status_argv
+
+        reason, _missing, args = ledger_status_argv(
+            {
+                "ledger_rpc_urls": "http://a,http://b",
+                "ledger_liveness_address": "0x" + "11" * 20,
+                "ledger_registry_address": "0x" + "22" * 20,
+                "ledger_bond_address": "0x" + "33" * 20,
+                "ledger_writer_address": "0x" + "44" * 20,
+                "ledger_trail_id": "trail-1",
+            }
+        )
+        assert reason is None
+        emitted = {arg for arg in args if arg.startswith("--")}
+        assert emitted, "the fully configured argv emitted no flag at all"
+        assert emitted <= LEDGER_FLAGS
+        # verify/report do not take `--witness` from the server today; if
+        # they ever do, a witness reply is no more a file than an RPC one.
+        assert "--witness" in LEDGER_FLAGS
+        for flag in sorted(LEDGER_FLAGS):
+            assert _skips_outcome_cache("verify", ("t.jsonl", flag, "v")), flag
+            assert _skips_outcome_cache("verify", ("t.jsonl", f"{flag}=v")), flag
 
     def test_a_cached_verify_expires_after_the_ttl(
-        self, trail: Path, monkeypatch: pytest.MonkeyPatch
+        self, trail: Path, spawn_calls: list[object]
     ) -> None:
         clock = {"t": 1_000.0}
         cli = WaxsealCli(now_fn=lambda: clock["t"])
-        calls: list[object] = []
-        real = cli_module.subprocess.run
-
-        def counting(*args: object, **kwargs: object) -> object:
-            calls.append(args)
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(cli_module.subprocess, "run", counting)
         cli.run("verify", str(trail))
-        n = len(calls)
+        n = len(spawn_calls)
         cli.run("verify", str(trail))
-        assert len(calls) == n
+        assert len(spawn_calls) == n
         clock["t"] += 31.0
         cli.run("verify", str(trail))
-        assert len(calls) > n
+        assert len(spawn_calls) > n
