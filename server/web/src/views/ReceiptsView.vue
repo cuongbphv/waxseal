@@ -14,9 +14,8 @@
 import { computed } from 'vue'
 import { useI18n } from '@/lib/i18n'
 import { tsLabel } from '@/lib/format'
-import { receiptsChecked } from '@/lib/measure'
-import { toneOfVerdict } from '@/lib/states'
-import { loadReceiptFeed, type ChainReceiptChecks, type ReceiptFeed } from '@/services/receipts'
+import { loadReceiptFeed, type ReceiptFeed } from '@/services/receipts'
+import { panelsByChainId } from '@/lib/receiptPresentation'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { useChainDirectory } from '@/composables/useChainDirectory'
 import type { Column } from '@/components/ui/table'
@@ -45,34 +44,7 @@ const columns = computed<Column[]>(() => [
 
 const records = computed(() => feed.data.value?.records ?? [])
 const checks = computed(() => feed.data.value?.checks ?? [])
-
-function verifyPanel(entry: ChainReceiptChecks) {
-  const check = entry.verify
-  if (!check.resolved) return { label: t('serverSilent'), tone: 'neutral' as const, title: check.error.detail }
-  const { verdict, checked, reason, exit_code: exit } = check.value
-  return {
-    label: `${verdict} · ${exit}`,
-    tone: checked === null ? ('neutral' as const) : toneOfVerdict(verdict),
-    title: [receiptsChecked(checked, reason), reason].filter(Boolean).join(' · '),
-  }
-}
-
-function crossPanel(entry: ChainReceiptChecks) {
-  const check = entry.crossCheck
-  if (!check.resolved) return { label: t('serverSilent'), tone: 'neutral' as const, title: check.error.detail }
-  const { verdict, checked, reason, broken_seq: brokenSeq, exit_code: exit } = check.value
-  return {
-    label: `${verdict} · ${exit}`,
-    tone: checked === null ? ('neutral' as const) : toneOfVerdict(verdict),
-    title: [
-      receiptsChecked(checked, reason),
-      reason,
-      brokenSeq === null ? null : t('receiptsBrokenSeq', { seq: brokenSeq }),
-    ]
-      .filter(Boolean)
-      .join(' · '),
-  }
-}
+const panels = computed(() => panelsByChainId(checks.value, t))
 </script>
 
 <template>
@@ -120,18 +92,18 @@ function crossPanel(entry: ChainReceiptChecks) {
           <h3 class="q-title mono">{{ t('receiptsVerifyTitle') }}</h3>
           <p class="q">{{ t('receiptsVerifyQuestion') }}</p>
           <StatusPill
-            :tone="verifyPanel(entry).tone"
-            :label="verifyPanel(entry).label"
-            :title="verifyPanel(entry).title"
+            :tone="panels.get(entry.chainId)!.verify.tone"
+            :label="panels.get(entry.chainId)!.verify.label"
+            :title="panels.get(entry.chainId)!.verify.title"
           />
         </AppCard>
         <AppCard size="panel">
           <h3 class="q-title mono">{{ t('receiptsCrossTitle') }}</h3>
           <p class="q">{{ t('receiptsCrossQuestion') }}</p>
           <StatusPill
-            :tone="crossPanel(entry).tone"
-            :label="crossPanel(entry).label"
-            :title="crossPanel(entry).title"
+            :tone="panels.get(entry.chainId)!.cross.tone"
+            :label="panels.get(entry.chainId)!.cross.label"
+            :title="panels.get(entry.chainId)!.cross.title"
           />
         </AppCard>
       </div>

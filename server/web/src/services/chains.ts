@@ -58,6 +58,29 @@ export async function loadReport(id: string): Promise<ReportOutcome> {
   return api.report(id)
 }
 
+export async function loadSummary(id: string): Promise<ChainSummary> {
+  return api.summary(id)
+}
+
+export async function loadVerify(id: string): Promise<Outcome> {
+  return api.verify(id)
+}
+
+/** Typed mapper: the cadence form's field names are the CLI flags. An empty
+ * optional `m` is omitted so the CLI's own default stays the only default. */
+export function cadenceInputFromForm(values: Record<string, string>): CadenceInput {
+  const input: CadenceInput = {
+    lam: values.lam ?? '',
+    c: values.c ?? '',
+    w: values.w ?? '',
+    rho: values.rho ?? '',
+    delta: values.delta ?? '',
+    t_max: values.t_max ?? '',
+  }
+  if (values.m) input.m = values.m
+  return input
+}
+
 export function reportOf(outcome: ReportOutcome | null): AuditReportJson | null {
   return outcome?.report ?? null
 }
@@ -150,6 +173,10 @@ export async function runReconcileTickets(
 
 export async function runCadence(input: CadenceInput): Promise<Outcome> {
   return api.cadence(input)
+}
+
+export async function runCadenceForm(values: Record<string, string>): Promise<Outcome> {
+  return runCadence(cadenceInputFromForm(values))
 }
 
 /** The segments command, landed by Workstream B in 0.1.5. The trail's Segments

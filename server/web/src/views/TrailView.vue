@@ -18,8 +18,7 @@ import type { ChainSummary, Outcome } from '@/lib/api'
 import { useI18n, type MessageKey } from '@/lib/i18n'
 import { countLabel } from '@/lib/format'
 import { stateOf } from '@/lib/states'
-import { api } from '@/lib/api'
-import { TRAIL_ACTIONS, runTrailAction, type TrailAction } from '@/services/chains'
+import { TRAIL_ACTIONS, loadSummary, loadVerify, runTrailAction, type TrailAction } from '@/services/chains'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { clearActiveHead, setActiveHead } from '@/composables/useActiveChain'
 import AsyncBlock from '@/components/ui/AsyncBlock.vue'
@@ -59,7 +58,7 @@ function goToTab(tab: TabId): void {
 
 /* ------------------------------------------------------------- chain facts */
 
-const summary = useAsyncData<ChainSummary>(() => api.summary(props.id), {
+const summary = useAsyncData<ChainSummary>(() => loadSummary(props.id), {
   watching: [() => props.id],
 })
 
@@ -83,7 +82,7 @@ const subtitle = computed(() => {
 
 /* --------------------------------------------------------------- verdict */
 
-const verify = useAsyncData<Outcome>(() => api.verify(props.id), {
+const verify = useAsyncData<Outcome>(() => loadVerify(props.id), {
   watching: [() => props.id],
 })
 
