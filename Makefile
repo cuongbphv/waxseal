@@ -41,7 +41,7 @@ help:
 	@echo 'waxseal — make targets'
 	@echo ''
 	@echo '  test              pytest with the coverage floor'
-	@echo '  lint              ruff'
+	@echo '  lint              ruff check + ruff format --check'
 	@echo '  typecheck         mypy over src/ and tests/, both platform views'
 	@echo '  cov               alias for test (the floor IS the coverage gate)'
 	@echo '  ci                the three commands the root Dockerfile runs, in order'
@@ -66,6 +66,7 @@ test:
 
 lint:
 	$(UV) run --extra dev ruff check .
+	$(UV) run --extra dev ruff format --check .
 
 # Both platform views, both trees — exactly the set ci.yml runs. fcntl/msvcrt
 # attribute gating in typeshed differs per --platform, and the 0.1.5 release
@@ -89,6 +90,7 @@ ci:
 	$(UV) run --extra dev pytest --cov=waxseal
 	$(UV) run --extra dev mypy
 	$(UV) run --extra dev ruff check .
+	$(UV) run --extra dev ruff format --check .
 
 # ---- artifacts ---------------------------------------------------------------
 

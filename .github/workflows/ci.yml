@@ -14,9 +14,9 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # setup-uv stopped publishing moving major tags after v7 — pin the full version.
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: ${{ matrix.python-version }}
       # tests/domain/test_abi.py cross-checks the frozen ABI selectors against
@@ -27,7 +27,7 @@ jobs:
       # Installed on both matrix OSes for the same reason the job runs on both:
       # a claimed check nobody performs is the one thing this project must
       # never ship.
-      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with:
           version: "1.8.1"
       # CLAUDE.md: all green + coverage floor (100%) before any "done" claim.
@@ -53,6 +53,10 @@ jobs:
       - run: uv run --extra dev mypy --platform linux
       - run: uv run --extra dev mypy --platform linux tests/
       - run: uv run --extra dev ruff check .
+      # Formatting is a gate since 0.1.6: 207 files had drifted from `ruff
+      # format` with nothing to say so, and a hand-formatted file the next
+      # formatter run partly undoes is churn in every diff that touches it.
+      - run: uv run --extra dev ruff format --check .
       # CLAUDE.md: golden vectors are cross-checked by scripts that implement
       # SPEC.md prose directly instead of importing waxseal. A vector suite
       # only ever checked against the code it came from checks nothing.
@@ -89,8 +93,8 @@ jobs:
     env:
       WAXSEAL_TEST_DATABASE_URL: postgresql://waxseal:waxseal-dev@127.0.0.1:55432/waxseal
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
       # The load-bearing test in here runs the LIBRARY's own backend-conformance
@@ -103,6 +107,8 @@ jobs:
         working-directory: server
       - run: uv run mypy
         working-directory: server
+      - run: uv run ruff check . && uv run ruff format --check .
+        working-directory: server
 
   # The on-chain contracts (0.1.5, Workstream F2).
   # A separate application like server/: its own toolchain, never packaged into
@@ -110,11 +116,11 @@ jobs:
   contracts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
-      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with:
           version: "1.8.1"
       # The cross vectors are generated FROM the Python side, so they are
@@ -146,8 +152,8 @@ jobs:
   web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
       - run: npm ci
@@ -184,14 +190,14 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: build the CLI image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: deploy/docker/Dockerfile
@@ -206,7 +212,7 @@ jobs:
       # the exit-code contract checks below - so the scan itself is also
       # advisory, or a scanner hiccup would hide the contract.
       - name: trivy image waxseal:ci (advisory)
-        uses: aquasecurity/trivy-action@v0.32.0
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
         continue-on-error: true
         with:
           image-ref: waxseal:ci
@@ -339,8 +345,8 @@ jobs:
   shell:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
 
@@ -426,8 +432,8 @@ jobs:
   helm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
       - name: install kubeconform
         run: |
           version=0.6.7
@@ -472,7 +478,9 @@ jobs:
           }
           render waxseal-server   deploy/helm/tests/values/server-minimal.yaml
           render waxseal-server   deploy/helm/tests/values/server-full.yaml
+          render waxseal-server   deploy/helm/tests/values/server-digest.yaml
           render waxseal-verifier deploy/helm/tests/values/verifier.yaml
+          render waxseal-verifier deploy/helm/tests/values/verifier-digest.yaml
 
       # Every value file must be rendered by the step above. A file added to
       # deploy/helm/tests/values/ and forgotten would otherwise be a test case
@@ -480,7 +488,7 @@ jobs:
       - name: no value file is left unrendered
         run: |
           set -eu
-          expected="server-full.yaml server-minimal.yaml verifier.yaml"
+          expected="server-digest.yaml server-full.yaml server-minimal.yaml verifier-digest.yaml verifier.yaml"
           actual=$(cd deploy/helm/tests/values && ls -1 *.yaml | sort | tr '\n' ' ')
           expected=$(printf '%s\n' $expected | sort | tr '\n' ' ')
           test "$actual" = "$expected" || {
@@ -504,11 +512,11 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
       - name: pip-audit library

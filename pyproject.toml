@@ -251,5 +251,13 @@ extend-exclude = ["tools/pm"]
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.format]
+# `ruff format --check .` is a CI gate since 0.1.6. ruff also formats Python
+# fences inside Markdown, and CLAUDE.md's frozen paths may not be edited by a
+# tool any more than by an agent: a future ruff that decided to reflow one of
+# them must fail on nothing rather than rewrite it. None of these is
+# unformatted today; the list is a guard, not a fix.
+exclude = ["SPEC.md", "CLAUDE.md", "LICENSE", "tests/vectors", "src/waxseal/domain/fingerprint.py"]
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

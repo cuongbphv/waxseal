@@ -45,6 +45,7 @@ uv run pytest --cov=waxseal
 uv run pytest --cov=waxseal   # all green, coverage 100%
 uv run mypy                   # strict mode, configured in pyproject
 uv run ruff check .
+uv run ruff format --check . # formatting is a gate; `uv run ruff format .` fixes it
 ```
 
 Commit messages: conventional and plain - say what changed and why, one change per
