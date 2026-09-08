@@ -30,11 +30,10 @@ from waxseal.adapters.redactors import REDACTED
 SECRET = "sk-abcdef1234567890abcdef"
 
 # Every integration that clips and redacts; they share one _sanitize body,
-# so a shape that escapes one escapes all of them. AGT also re-exports the
-# shared sanitizer but is not in this list: both "in" and "out" mappings
-# pass the existing tests (measured 08/09), so the list stays the original
-# seven until the owner picks.
+# so a shape that escapes one escapes all of them. Owner ruling 08/09/2026:
+# AGT joins this list (both mappings already passed).
 REDACTING_MODULES = [
+    "waxseal.integrations.agt",
     "waxseal.integrations.claude_code",
     "waxseal.integrations.codex",
     "waxseal.integrations.crewai",
@@ -200,11 +199,3 @@ class TestHermesGatewaySanitize:
     def test_none_survives_as_none(self) -> None:
         gw = importlib.import_module("waxseal.integrations.hermes_gateway")
         assert gw._sanitize({"iteration": None}) == {"iteration": None}
-
-
-def test_agt_uses_shared_sanitize_without_joining_the_redacting_list() -> None:
-    from waxseal.integrations import agt
-    from waxseal.integrations._sanitize import sanitize
-
-    assert agt._sanitize is sanitize
-    assert "waxseal.integrations.agt" not in REDACTING_MODULES
