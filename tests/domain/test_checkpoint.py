@@ -76,6 +76,10 @@ class TestCheckpointFor:
         with pytest.raises(ValueError, match="empty"):
             checkpoint_for([])
 
+    def test_a_precomputed_root_is_written_without_changing_the_checkpoint(self) -> None:
+        hashes = entry_hashes(5)
+        assert checkpoint_for(hashes, root=batch_root(hashes)) == checkpoint_for(hashes)
+
 
 class TestVerifyCheckpoint:
     def test_fresh_checkpoint_verifies(self) -> None:

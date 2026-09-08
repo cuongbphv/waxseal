@@ -524,16 +524,15 @@ class TestEntryHashesSkipPayloadDecode:
 
 
 class TestBatchRootHashInvocations:
-    """P3 measure-only. `batch_root` walks a full RFC 6962 tree on every
-    call, so with `anchor_every=N` the cumulative SHA-256 count is
-    O(n^2/N). Incremental Merkle would not change the rooted value
-    (golden vectors stay byte-for-byte) but is an algorithm change next
-    to frozen vectors -- owner must approve before any implementation.
+    """P3: one-shot `batch_root` is still a full RFC 6962 walk (2n-1 hashes
+    for n≥1). The incremental forest in IncrementalMerkle is what stops
+    `anchor_every=N` from paying that cost on every prefix. Golden vectors
+    stay byte-for-byte; this receipt is the one-shot bound, and
+    TestIncrementalMerkleCumulativeCost is the across-prefixes bound.
 
-    P4 is not a hash count: every server GET read/verify shells out
-    (`server/waxseal_server/runtime/cli.py` `WaxsealCli.run`) because the
-    CLI is the sole verdict authority. That is a design decision, not a
-    leftover. Finding + proposal live in the b13c RE-MEASURE note.
+    P4 is not a hash count: every server GET read/verify still shells out
+    on a cache miss (`WaxsealCli.run`) because the CLI is the sole verdict
+    authority. The cache keys on command + argv + input mtime/size.
     """
 
     def test_batch_root_still_matches_rfc6962_golden_vectors(self) -> None:
@@ -567,6 +566,55 @@ class TestBatchRootHashInvocations:
             "Cumulative under anchor_every=N at sizes N,2N,...,mN is "
             "N*m*(m+1)-m (n=1000 N=10 -> 100900), which is the O(n^2/N) "
             "the plan named."
+        )
+
+
+class TestIncrementalMerkleCumulativeCost:
+    """P3 GREEN bound: growing the same trail with IncrementalMerkle must
+    not replay the full prefix at every anchor. RED (repeated batch_root
+    of N,2N,...,mN) is N*m*(m+1)-m hashes; recorded here so backing the
+    incremental tree out restores that number.
+    """
+
+    def test_growing_prefixes_do_not_replay_the_full_tree(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+
+        from waxseal.domain.anchoring import IncrementalMerkle, batch_root
+
+        n, step = 256, 16
+        hashes = [hashlib.sha256(f"leaf-{i}".encode()).hexdigest() for i in range(n)]
+        expected = [batch_root(hashes[:k]) for k in range(step, n + 1, step)]
+
+        sink: list[int] = []
+        real = hashlib.sha256
+
+        def counting(data: bytes = b"", usedforsecurity: bool = True) -> hashlib._Hash:
+            sink.append(1)
+            return real(data)
+
+        monkeypatch.setattr("waxseal.domain.anchoring.hashlib.sha256", counting)
+        for k in range(step, n + 1, step):
+            batch_root(hashes[:k])
+        replayed = sum(sink)
+        sink.clear()
+
+        tree = IncrementalMerkle()
+        sampled: list[str] = []
+        for i, h in enumerate(hashes, start=1):
+            tree.push(h)
+            if i % step == 0:
+                sampled.append(tree.root())
+        incremental = sum(sink)
+        assert sampled == expected
+
+        m = n // step
+        expected_replay = step * m * (m + 1) - m
+        assert replayed == expected_replay
+        assert incremental * 4 < replayed, (
+            f"incremental {incremental} hashes vs replayed {replayed}; "
+            "appending a leaf must not rehash the whole prefix"
         )
 
 

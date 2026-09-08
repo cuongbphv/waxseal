@@ -58,6 +58,54 @@ def _tree_hash(leaves: Sequence[bytes]) -> bytes:
     return _pair_hash(_tree_hash(leaves[:k]), _tree_hash(leaves[k:]))
 
 
+class IncrementalMerkle:
+    """Left-to-right RFC 6962 forest: the same root as ``_tree_hash`` at
+    every size, without rehashing the prefix on each append.
+
+    Peaks are the complete 2^h subtrees matching the binary digits of the
+    current size. Folding them largest-first is the RFC 6962 split
+    (largest power of two strictly below n) applied to the leftover
+    unbalanced spine. Membership and consistency proofs still walk
+    ``_tree_hash`` over the leaf list — those need every leaf again.
+    """
+
+    __slots__ = ("_peaks", "_size")
+
+    def __init__(self) -> None:
+        self._peaks: list[tuple[int, bytes]] = []
+        self._size = 0
+
+    @property
+    def size(self) -> int:
+        return self._size
+
+    @classmethod
+    def from_hashes(cls, entry_hashes: Sequence[str]) -> IncrementalMerkle:
+        tree = cls()
+        for entry_hash in entry_hashes:
+            tree.push(entry_hash)
+        return tree
+
+    def push(self, entry_hash: str) -> None:
+        node = _leaf_hash(bytes.fromhex(entry_hash))
+        height = 0
+        while self._peaks and self._peaks[-1][0] == height:
+            _, left = self._peaks.pop()
+            node = _pair_hash(left, node)
+            height += 1
+        self._peaks.append((height, node))
+        self._size += 1
+
+    def root(self) -> str:
+        if self._size == 0:
+            return hashlib.sha256(b"").hexdigest()
+        hashes = [digest for _height, digest in self._peaks]
+        acc = hashes[-1]
+        for left in reversed(hashes[:-1]):
+            acc = _pair_hash(left, acc)
+        return acc.hex()
+
+
 def _audit_path(m: int, leaves: Sequence[bytes]) -> list[bytes]:
     if len(leaves) == 1:
         return []

@@ -145,8 +145,16 @@ def checkpoint_for(
     *,
     agg_commit: str | None = None,
     agg_epoch: int | None = None,
+    root: str | None = None,
 ) -> Checkpoint:
     """Checkpoint over ``entry_hashes`` (write order, index 0 is seq 0).
+
+    ``root`` is the RFC 6962 batch root already computed for this exact
+    sequence (the incremental tree AuditLog keeps across appends). Omitted,
+    it is recomputed with ``batch_root``. Passing a root of a different
+    prefix would be a checkpoint that ``verify_checkpoint`` later rejects —
+    this function does not re-check, because that would pay the O(n) the
+    caller already avoided.
 
     Raises ValueError on an empty trail: there is no tip to pin, and silently
     returning some placeholder would be a checkpoint over nothing that a
@@ -157,7 +165,7 @@ def checkpoint_for(
     return Checkpoint(
         seq=len(entry_hashes) - 1,
         entry_hash=entry_hashes[-1],
-        root=batch_root(entry_hashes),
+        root=batch_root(entry_hashes) if root is None else root,
         agg_commit=agg_commit,
         agg_epoch=agg_epoch,
     )

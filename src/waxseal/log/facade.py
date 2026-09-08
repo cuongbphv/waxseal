@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from waxseal.adapters.jsonl import JSONLBackend
+from waxseal.domain.anchoring import IncrementalMerkle
 from waxseal.domain.canonical import canonical_json
 from waxseal.domain.checkpoint import Checkpoint, checkpoint_for
 from waxseal.domain.fingerprint import fingerprint
@@ -98,6 +99,10 @@ class AuditLog:
         # Serializes threads sharing this instance; a second sealed writer
         # instance/process still fails loudly (epoch mismatch), never forges.
         self._append_lock = threading.Lock()
+        # RFC 6962 forest grown with the trail. Empty until the first
+        # append or anchor on this instance; an opened existing trail is
+        # rebuilt once from entry_hashes(), never guessed.
+        self._merkle = IncrementalMerkle()
 
     @classmethod
     def open(
@@ -179,6 +184,10 @@ class AuditLog:
 
         with self._append_lock:
             entry = self._backend.append(build)
+            # Merkle tracks the durable chain, not a successful seal: an
+            # AttestationFailure still left the row on disk (CLAUDE.md: the
+            # entry is not a dropped write).
+            self._note_appended(entry)
             if self._attestor is not None:
                 # Attest AFTER the entry is durably appended. A crash between
                 # the two leaves the sidecar one behind, and FileAttestor refuses
@@ -347,9 +356,34 @@ class AuditLog:
         if not hashes:
             raise ValueError("cannot anchor an empty trail")
         agg_commit, agg_epoch = self._aggregate_binding()
-        cp = checkpoint_for(hashes, agg_commit=agg_commit, agg_epoch=agg_epoch)
+        with self._append_lock:
+            root = self._merkle_root_for(hashes)
+        cp = checkpoint_for(
+            hashes, agg_commit=agg_commit, agg_epoch=agg_epoch, root=root
+        )
         self._anchor_sink.anchor(cp)
         return cp
+
+    def _note_appended(self, entry: Entry) -> None:
+        # seq is 0-based: a tree that already holds seq leaves is the
+        # prefix this row extends. Any other size means this instance
+        # opened an existing trail (or a with_anchor_sink view) and must
+        # rebuild from disk rather than push onto an empty forest.
+        if self._merkle.size == entry.header.seq:
+            self._merkle.push(entry.entry_hash)
+        else:
+            self._merkle = IncrementalMerkle.from_hashes(self.entry_hashes())
+
+    def _merkle_root_for(self, hashes: list[str]) -> str:
+        if self._merkle.size == len(hashes):
+            return self._merkle.root()
+        tree = IncrementalMerkle.from_hashes(hashes)
+        if self._merkle.size == 0:
+            # First use on this instance: keep the rebuilt forest so the
+            # next anchor does not walk the prefix again. Do not overwrite
+            # a live tree another thread already extended past `hashes`.
+            self._merkle = tree
+        return tree.root()
 
     def _aggregate_binding(self) -> tuple[str | None, int | None]:
         return aggregate_binding(self._aggregate_source)

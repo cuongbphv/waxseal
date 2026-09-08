@@ -91,6 +91,18 @@ class TestExplicitAnchor:
         with pytest.raises(ValueError, match="anchor_sink"):
             log.anchor()
 
+    def test_a_stale_hash_snapshot_does_not_rewind_the_incremental_tree(
+        self, tmp_path: Path
+    ) -> None:
+        log = open_anchored(tmp_path, anchor_every=None)
+        for i in range(5):
+            log.append(payload={"i": i}, payload_type=PT)
+        hashes = log.entry_hashes()
+        prefix_root = log._merkle_root_for(hashes[:3])
+        assert prefix_root == batch_root(hashes[:3])
+        assert log._merkle.size == 5
+        assert log.anchor().root == batch_root(hashes)
+
 
 class TestAnchorFailuresNeverPropagate:
     class FailingSink:
