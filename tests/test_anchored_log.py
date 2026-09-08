@@ -120,6 +120,44 @@ class TestExplicitAnchor:
         assert cp.entry_hash == hashes[-1]
         assert log._merkle.last_leaf == hashes[-1]
 
+    def test_equal_length_rewrite_of_an_earlier_row_is_verify_s_job_not_anchor_s(
+        self, tmp_path: Path
+    ) -> None:
+        """Pins the DESIGN behind the one-leaf compare in _merkle_root_for.
+
+        Comparing only the last leaf looks like a partial check: an equal-length
+        rewrite of an EARLIER row leaves last_leaf == hashes[-1] and the anchor
+        publishes the root of what this process wrote, not of what is now on
+        disk. That is deliberate and sound, because entry_hash is a chain:
+        hashes[-1] commits transitively (via prev_hash) to every earlier
+        header, so a middle row that changed without the last leaf changing
+        is by construction a broken link, and `verify` says so. Anchoring
+        commits to the chain this writer produced; disk divergence is verify's
+        finding. A "stronger" full recompute here would undo bcc0c59's O(n)
+        saving to catch a tamper the chain already catches.
+        """
+        log = open_anchored(tmp_path, anchor_every=None)
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type=PT)
+        written = log.entry_hashes()
+        first = log.anchor()
+        assert first.root == batch_root(written)
+
+        trail = tmp_path / "trail.jsonl"
+        rows = trail.read_text().splitlines()
+        row = json.loads(rows[1])
+        row["entry_hash"] = "f" * 64  # same length, different middle leaf
+        rows[1] = json.dumps(row)
+        trail.write_text("\n".join(rows) + "\n")
+
+        on_disk = log.entry_hashes()
+        assert on_disk[1] != written[1] and on_disk[-1] == written[-1]
+        second = log.anchor()
+        assert second.root == first.root
+        assert second.root != batch_root(on_disk)
+        result = log.verify()
+        assert not result.ok and result.broken_seq == 1
+
 
 class TestAnchorFailuresNeverPropagate:
     class FailingSink:

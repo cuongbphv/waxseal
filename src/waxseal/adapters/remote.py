@@ -184,7 +184,7 @@ def urllib_transport(*, timeout: float = 10.0) -> Transport:
             request.url, data=request.body, headers=request.headers, method=request.method
         )
         try:
-            with _opener().open(req, timeout=timeout) as resp:  # noqa: S310
+            with _opener().open(req, timeout=timeout) as resp:  # noqa: S310 - scheme checked against _ALLOWED_SCHEMES above
                 return RemoteResponse(
                     status=resp.status, headers=dict(resp.headers), body=resp.read()
                 )

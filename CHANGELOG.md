@@ -16,9 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than a private helper copied at each call site.
 - **CI `audit` job**: `pip-audit` on the library and the server, `npm audit`
   on the web console, labelled advisory (`continue-on-error`). `trivy image
-  waxseal:ci` runs in the `image` job, where the image actually exists; the
-  `audit` job still says UNMEASURED when that image is not in the runner,
-  rather than printing a silent pass (rule 5).
+  waxseal:ci` runs in the `image` job, where the image actually exists, and
+  only there: the copy the `audit` job carried could never find that image
+  and installed a scanner on every run to print UNMEASURED.
 - **CI `web` job** now runs `npm run test` and `npm run lint` beside
   `vue-tsc` and `build`. AuthNeeded (b2) and the eslint gate (b11) were
   local-only until this release.
@@ -119,11 +119,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exit codes.
 - **`deploy/install.sh`**, a POSIX-sh installer. It tries `uv tool install`
   first, then `pipx`, then `pip install --user`, and falls back to the zipapp,
-  with `--from-dir` for an offline install and `--dry-run`. The zipapp path 
-  verifies the artifact's SHA-256 against the release's `SHA256SUMS` before 
+  with `--from-dir` for an offline install and `--dry-run`. The zipapp path
+  verifies the artifact's SHA-256 against the release's `SHA256SUMS` before
   anything is moved or executed, and a mismatch aborts having installed nothing.
-  When `python3 -m sigstore` is unavailable the run prints a labelled notice 
-  saying the signature was not checked and what would check it, rather than 
+  When `python3 -m sigstore` is unavailable the run prints a labelled notice
+  saying the signature was not checked and what would check it, rather than
   passing over it (rule 6).
 - **Two Helm charts, under two administrative authorities.** `waxseal-server` is
   a StatefulSet at one replica, because a JSONL trail behind a file lock admits
@@ -151,7 +151,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   charts and validates every rendered value file with kubeconform.
   `deploy/` is excluded from the sdist, on the same footing as `server/` and
   `contracts/`; `tools/build_pyz.py` stays, like the other generators beside it.
-- **`deploy/README.vi.md` and `deploy/systemd/README.vi.md`**, and the two 
+- **`deploy/README.vi.md` and `deploy/systemd/README.vi.md`**, and the two
   documentation ratchets now scan `deploy/`. The tree arrived outside every glob in both
   `tests/test_docs_language.py` and `tests/architecture/test_epistemic_tags.py`,
   which meant a claim about what a topology proves, or an unlabelled claim about
@@ -300,6 +300,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web console `AuthNeeded`.** An authenticated session was drawing the
   locked state. `needsCredential` is now wired; the Vitest that holds
   it runs in CI.
+
+Pre-release review, 08/09/2026 (found on `develop` before the tag; none
+of these shipped in a release):
+
+- **CI pinned two GitHub Actions tags that do not exist.**
+  `aquasecurity/trivy-action@0.32.0` (the tag is `v0.32.0`) and
+  `aquasecurity/setup-trivy@v0.2.4` (only v0.2.6 and later exist). Both
+  jobs failed at "Set up job", so the image exit-code contract never
+  ran and, because `audit` is advisory, `pip-audit` and `npm audit` were
+  silently skipped on every run. The `image` scan is now also
+  `continue-on-error`: `exit-code: "0"` silences findings, not a
+  rate-limited vulnerability-DB download, and the scan sits before the
+  contract checks.
+- **Circular import between `domain/report.py` and
+  `domain/_report_render.py`.** The split left the renderer import at the
+  bottom of `report.py`; importing the renderer first raised "partially
+  initialized module" while every test passed. The two shared names now
+  live in `domain/_report_types.py`, `report.py` re-exports them, and
+  `tests/architecture/test_import_order.py` imports every module of the
+  package first in a fresh module table. `report.py` drops from exactly
+  500 lines (the hard ceiling) to 469.
+- **`server/web/package.json` still said 0.1.5.** The one version literal
+  the bump missed; `tests/architecture/test_web_version.py` pins it (and
+  the lock) to `server/pyproject.toml`.
+- **Server image built from floors, not the lock.** `pip install
+  ./server` resolved FastAPI/uvicorn/psycopg at build time, so the audited
+  `server/uv.lock` and the shipped image only agreed by luck. The
+  Dockerfile now exports the lock with hashes and installs from it
+  (`--require-hashes`), then the application with `--no-deps`.
+  `npm ci || npm install` fallbacks (Dockerfile, CI) are plain `npm ci`,
+  so a drifted lock fails loudly.
+- **`waxseal_server._version` crashed on import from a bare checkout.**
+  `importlib.metadata.version` raised `PackageNotFoundError` with no
+  dist-info installed; the fallback is now `"0+unknown"`, labelled (rule
+  6). The tautological second assert in `test_version_sync.py` is gone.
+- **POST body middleware, three corrections.** After replaying the
+  buffered body it answered every further `receive()` with a synthetic
+  empty `http.request` and never `http.disconnect` (ASGI says receive
+  blocks until disconnect); it now delegates to the real `receive`. A
+  POST with a valid `Content-Length` within budget passes through
+  unbuffered, since the ASGI server enforces framing. The 413 body is
+  built in one place.
+- **Server CLI outcome cache: `--rpc=URL` bypassed the network carve-out.**
+  Only the bare `--rpc URL` token form skipped the file-stamp cache. The
+  flag set is now `runtime/ledger.py`'s own `LEDGER_FLAGS`, consumed by
+  the cache check, with a test that every flag `ledger_status_argv` can
+  emit skips the cache in both spellings.
+- **Merkle last-leaf compare, documented and pinned.** An equal-length
+  rewrite of a middle row keeps the last leaf, so `anchor()` publishes
+  the root of what this writer produced. That is sound because
+  `entry_hash` chains through `prev_hash`, which makes the rewrite a
+  broken link `verify` reports; the comment says so and
+  `test_anchored_log.py` holds the case so nobody "strengthens" it back
+  into the O(n) walk bcc0c59 removed.
+- **Vietnamese docs caught up.** `server/docs/deployment.vi.md` gains
+  the four sections and three abridged ones it lacked (16/16 headings,
+  20/20 code blocks against the English); `docs/architecture/
+  deployment.vi.md` gains the POST body limit paragraph; `README.zh.md`'s
+  note no longer claims `docs/` is English-only. The dead-link ratchet
+  now scans `deploy/**` and `tools/**`; `test_docs_language.py` scans
+  `server/`, `tools/`, `examples/`, `integrations/`.
+- **Two copies fewer.** The stdin -> parse -> append -> labelled-drop loop
+  that `claude_code`, `codex` and `cursor` each carried is one
+  `integrations/_stdin_hook.run_stdin_hook`; the anchor/witness/ledger
+  observation plumbing `verify` and `report` each carried is one
+  `cli/_dimensions._observe`. Messages, exit codes, stderr notices and
+  drop-record locations are byte-identical; the hermes, openai-agents,
+  langchain, crewai and openclaw integrations have different contracts
+  and were left as they are.
 
 ### Security
 

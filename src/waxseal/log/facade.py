@@ -381,6 +381,14 @@ class AuditLog:
                 # was built from a different prefix than disk (an
                 # out-of-process rewrite of equal length). Recompute from
                 # the hashes this checkpoint will publish.
+                #
+                # One leaf is enough. entry_hash is a chain, so hashes[-1]
+                # commits (via prev_hash) to every earlier header: an
+                # equal-length rewrite of a MIDDLE row that keeps the last
+                # leaf is a broken link, which is `verify`'s finding, not
+                # the anchor's. Do not "strengthen" this into a full
+                # recompute - that is the O(n) walk bcc0c59 removed, and
+                # tests/test_anchored_log.py pins the decision.
                 tree = IncrementalMerkle.from_hashes(hashes)
                 self._merkle = tree
                 return tree.root()

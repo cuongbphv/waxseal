@@ -328,7 +328,7 @@ class ExternalEvmSigner:
         from waxseal.ports.ledger import LedgerError
 
         try:
-            completed = subprocess.run(  # noqa: S603
+            completed = subprocess.run(  # noqa: S603 - argv list, no shell; the command is the operator's WAXSEAL_EVM_SIGNER_CMD
                 self._argv(*args),
                 input=input_text,
                 capture_output=True,
