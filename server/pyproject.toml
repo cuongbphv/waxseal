@@ -33,6 +33,10 @@ dev = [
     # warning left standing is a warning nobody reads the next time.
     "httpx2",
     "mypy>=2.3.1",
+    # CI runs `uv run ruff check . && uv run ruff format --check .` in this
+    # directory; the first PR with that step failed with "Failed to spawn:
+    # ruff" because only the root project carried it.
+    "ruff",
 ]
 
 [project.scripts]
