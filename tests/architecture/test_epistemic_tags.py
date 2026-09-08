@@ -121,8 +121,7 @@ class TestEpistemicTagVocabulary:
             # this UTF-8 corpus (all 8 win CI jobs, UnicodeDecodeError, 01/09).
             for lineno, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), start=1):
                 offenders += [
-                    f"{doc.relative_to(REPO)}:{lineno}: {tag}"
-                    for tag in translated_tags_in(line)
+                    f"{doc.relative_to(REPO)}:{lineno}: {tag}" for tag in translated_tags_in(line)
                 ]
         assert offenders == []
 
@@ -130,9 +129,7 @@ class TestEpistemicTagVocabulary:
         # A pattern that matches nothing passes the test above in silence. The
         # detector is therefore exercised against known-positive samples rather
         # than trusted, including the accent-stripped spelling.
-        assert translated_tags_in("**`[Chưa xác minh]`** Bộ byte chính xác") == [
-            "[Chưa xác minh]"
-        ]
+        assert translated_tags_in("**`[Chưa xác minh]`** Bộ byte chính xác") == ["[Chưa xác minh]"]
         assert translated_tags_in("[Chua xac minh] can cu: ...") == ["[Chua xac minh]"]
         assert translated_tags_in("[Suy luận — căn cứ: ngày tạo công khai]") != []
         # ...and does not fire on the sanctioned form, nor on a Vietnamese

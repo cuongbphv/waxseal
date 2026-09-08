@@ -171,9 +171,7 @@ class TestTransitiveAnchoringTwoLevel:
 class TestMultiHopDelegation:
     """A -> B -> C. Anchoring C pins BOTH B's and A's prefixes."""
 
-    def _build(
-        self, tmp_path: Path
-    ) -> tuple[AuditLog, AuditLog, AuditLog, int, str, int, str]:
+    def _build(self, tmp_path: Path) -> tuple[AuditLog, AuditLog, AuditLog, int, str, int, str]:
         log_a = open_log(tmp_path / "a.jsonl")
         fill(log_a, 2, prefix="a")
         seq_a, hash_a = tip(log_a)
@@ -242,9 +240,7 @@ class TestPayloadDeletionIsUnverifiableNotBroken:
     TestPayloadAbsent); this class only confirms it already holds for the
     new handoff-binding payload type without touching verify.py."""
 
-    def test_deleting_the_handoff_payload_is_reported_ok_not_broken(
-        self, tmp_path: Path
-    ) -> None:
+    def test_deleting_the_handoff_payload_is_reported_ok_not_broken(self, tmp_path: Path) -> None:
         log_a = open_log(tmp_path / "a.jsonl")
         fill(log_a, 1)
         seq_a, hash_a = tip(log_a)
@@ -254,9 +250,7 @@ class TestPayloadDeletionIsUnverifiableNotBroken:
         fill(log_b, 2)
 
         entries = list(log_b.entries())
-        redacted = [
-            replace(e, payload=None) if e.header.seq == 0 else e for e in entries
-        ]
+        redacted = [replace(e, payload=None) if e.header.seq == 0 else e for e in entries]
         result = verify_chain(redacted, VersionRegistry())
 
         assert result.ok is True
@@ -279,12 +273,9 @@ class TestPayloadDeletionIsUnverifiableNotBroken:
         record_handoff(log_b, chain_id="agent-a", seq=seq_a, head_hash=hash_a)
 
         entries = list(log_b.entries())
-        lying_header = replace(
-            entries[0].header, payload_hash=hashlib.sha256(b"lie").hexdigest()
-        )
+        lying_header = replace(entries[0].header, payload_hash=hashlib.sha256(b"lie").hexdigest())
         tampered = [replace(entries[0], header=lying_header, payload=None)]
         result = verify_chain(tampered, VersionRegistry())
 
         assert result.ok is False
         assert result.reason == "entry_hash_mismatch"
-

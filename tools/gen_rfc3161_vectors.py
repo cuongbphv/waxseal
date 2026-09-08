@@ -101,9 +101,20 @@ def check_against_openssl() -> list[str]:
         out = Path(tmp) / "query.tsq"
         try:
             subprocess.run(
-                ["openssl", "ts", "-query", "-data", str(data), "-sha256",
-                 "-cert", "-no_nonce", "-out", str(out)],
-                check=True, capture_output=True,
+                [
+                    "openssl",
+                    "ts",
+                    "-query",
+                    "-data",
+                    str(data),
+                    "-sha256",
+                    "-cert",
+                    "-no_nonce",
+                    "-out",
+                    str(out),
+                ],
+                check=True,
+                capture_output=True,
             )
         except (OSError, subprocess.CalledProcessError) as e:
             print(f"skipping OpenSSL cross-check: {e}")

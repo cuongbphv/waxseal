@@ -201,8 +201,11 @@ class TestFramePrefixNaming:
         # picks the shape. That is what "parallel shapes" means.
         bare = Checkpoint(seq=1, entry_hash="aa" * 32, root="bb" * 32)
         bound = Checkpoint(
-            seq=1, entry_hash="aa" * 32, root="bb" * 32,
-            agg_commit="cc" * 32, agg_epoch=2,
+            seq=1,
+            entry_hash="aa" * 32,
+            root="bb" * 32,
+            agg_commit="cc" * 32,
+            agg_epoch=2,
         )
         assert checkpoint_frame(bare).startswith(CHECKPOINT_FRAME_PREFIX_BARE)
         assert checkpoint_frame(bound).startswith(CHECKPOINT_FRAME_PREFIX_AGG_BOUND)

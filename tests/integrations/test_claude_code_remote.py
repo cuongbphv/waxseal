@@ -132,9 +132,7 @@ class TestRemoteTarget:
         )
         assert result.stdout == ""
 
-    def test_a_secret_is_redacted_before_it_leaves_the_machine(
-        self, live: LiveFakeServer
-    ) -> None:
+    def test_a_secret_is_redacted_before_it_leaves_the_machine(self, live: LiveFakeServer) -> None:
         # Redaction runs before hashing, so it also runs before the POST. A
         # remote target must not be the one path where a key escapes.
         import base64
@@ -164,15 +162,11 @@ class TestChainId:
         run_hook(event(cwd="/Users/dev/Projects/waxseal"), live.url)
         assert len(live.entries("waxseal")) == 1
 
-    def test_a_directory_name_is_sanitised_into_a_safe_chain_id(
-        self, live: LiveFakeServer
-    ) -> None:
+    def test_a_directory_name_is_sanitised_into_a_safe_chain_id(self, live: LiveFakeServer) -> None:
         run_hook(event(cwd="/Users/dev/My Project (v2)"), live.url)
         assert len(live.entries("my-project-v2")) == 1
 
-    def test_an_event_with_no_cwd_falls_back_to_default(
-        self, live: LiveFakeServer
-    ) -> None:
+    def test_an_event_with_no_cwd_falls_back_to_default(self, live: LiveFakeServer) -> None:
         no_cwd = event()
         del no_cwd["cwd"]
         run_hook(no_cwd, live.url)
@@ -187,9 +181,7 @@ class TestChainId:
 
 
 class TestStillNeverBlocks:
-    def test_an_unreachable_server_exits_zero_with_a_labelled_notice(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_unreachable_server_exits_zero_with_a_labelled_notice(self, tmp_path: Path) -> None:
         # The observer contract: a broken audit path must never veto the
         # developer's tool call. Port 1 is reserved and refuses immediately.
         result = run_hook(event(), "http://127.0.0.1:1", WAXSEAL_CHAIN_ID="waxseal")
@@ -197,9 +189,7 @@ class TestStillNeverBlocks:
         assert result.stdout == ""
         assert "waxseal-audit" in result.stderr
 
-    def test_a_url_target_does_not_crash_on_the_drops_sidecar(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_url_target_does_not_crash_on_the_drops_sidecar(self, tmp_path: Path) -> None:
         # `record_drops=True` with a URL raises ValueError in AuditLog.open —
         # a remote trail has no next-to for a sidecar. The hook must not ask.
         result = run_hook(event(), "http://127.0.0.1:1", WAXSEAL_CHAIN_ID="waxseal")

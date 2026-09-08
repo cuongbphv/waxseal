@@ -53,6 +53,9 @@ class TestCanonicalJsonFrozenFormat:
         assert canonical_json(payload) == (
             b'{"args":["--pin"],"note":null,"ok":true,"tool":"verify"}'
         )
-        assert digest == hashlib.sha256(
-            b'{"args":["--pin"],"note":null,"ok":true,"tool":"verify"}'
-        ).hexdigest()
+        assert (
+            digest
+            == hashlib.sha256(
+                b'{"args":["--pin"],"note":null,"ok":true,"tool":"verify"}'
+            ).hexdigest()
+        )

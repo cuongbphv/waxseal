@@ -50,7 +50,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def run_verify(trail: Path) -> tuple[int, str]:
     proc = subprocess.run(
         [sys.executable, "-m", "waxseal.cli", "verify", str(trail)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return proc.returncode, proc.stdout.strip()
 
@@ -75,14 +76,14 @@ def main() -> int:
     def tool_ctx(call_id: str, arguments: str) -> ToolContext:
         # The exact context object Runner builds for function-tool hooks.
         return ToolContext(
-            context=None, tool_name=run_shell.name,
-            tool_call_id=call_id, tool_arguments=arguments,
+            context=None,
+            tool_name=run_shell.name,
+            tool_call_id=call_id,
+            tool_arguments=arguments,
         )
 
     async def session() -> None:
-        secret_args = (
-            '{"command": "export GITHUB_TOKEN=ghp_16C7e42F292c6912E7710c838347Ae178B4a"}'
-        )
+        secret_args = '{"command": "export GITHUB_TOKEN=ghp_16C7e42F292c6912E7710c838347Ae178B4a"}'
         deploy_args = '{"command": "kubectl apply -f deploy.yaml"}'
         await audit.on_agent_start(tool_ctx("c0", "{}"), agent)
         await audit.on_tool_start(tool_ctx("c1", secret_args), agent, run_shell)
@@ -102,14 +103,19 @@ def main() -> int:
         for line in trail.read_text().splitlines()
     ]
     phases = [p["phase"] for p in decoded_lines]
-    check("full lifecycle recorded (start/dispatch/result/handoff/end)",
-          phases == ["agent_start", "dispatch", "result", "dispatch",
-                     "result", "handoff", "agent_end"], str(phases))
+    check(
+        "full lifecycle recorded (start/dispatch/result/handoff/end)",
+        phases
+        == ["agent_start", "dispatch", "result", "dispatch", "result", "handoff", "agent_end"],
+        str(phases),
+    )
 
     print("\nScenario 5 — secret in tool arguments never reaches disk")
     decoded = json.dumps(decoded_lines).encode()
-    check("GitHub token absent from decoded payloads",
-          b"ghp_16C7e42F292c6912E7710c838347Ae178B4a" not in decoded)
+    check(
+        "GitHub token absent from decoded payloads",
+        b"ghp_16C7e42F292c6912E7710c838347Ae178B4a" not in decoded,
+    )
     check("redaction marker present in decoded payloads", b"***REDACTED***" in decoded)
 
     print("\nScenario 2 — attacker rewrites a past action")
@@ -147,15 +153,28 @@ def main() -> int:
         prev_hash=last["entry_hash"],
     )
     future = tmp / "future.jsonl"
-    future.write_text("\n".join(lines + [json.dumps({
-        "header": {
-            "seq": header.seq, "ts": header.ts, "hash_version": header.hash_version,
-            "payload_type": header.payload_type, "payload_hash": header.payload_hash,
-            "prev_hash": header.prev_hash,
-        },
-        "entry_hash": compute_entry_hash(header),
-        "payload_b64": base64.b64encode(new_payload).decode(),
-    })]) + "\n")
+    future.write_text(
+        "\n".join(
+            lines
+            + [
+                json.dumps(
+                    {
+                        "header": {
+                            "seq": header.seq,
+                            "ts": header.ts,
+                            "hash_version": header.hash_version,
+                            "payload_type": header.payload_type,
+                            "payload_hash": header.payload_hash,
+                            "prev_hash": header.prev_hash,
+                        },
+                        "entry_hash": compute_entry_hash(header),
+                        "payload_b64": base64.b64encode(new_payload).decode(),
+                    }
+                )
+            ]
+        )
+        + "\n"
+    )
     code, out = run_verify(future)
     check("unknown schema -> exit 2, not broken", code == 2, out)
     check("reported unverifiable, NOT tampering", "NOT evidence of tampering" in out)

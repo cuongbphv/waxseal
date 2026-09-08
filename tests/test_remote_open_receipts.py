@@ -115,11 +115,7 @@ class TestTheDocumentedPathReachesTheSidecar:
         trail = tmp_path / "trail.jsonl"
         append_two(AuditLog.open(live.url, receipts_trail=trail))
 
-        records = [
-            line
-            for line in read_receipts(trail).lines
-            if isinstance(line, ReceiptRecord)
-        ]
+        records = [line for line in read_receipts(trail).lines if isinstance(line, ReceiptRecord)]
         assert [r.receipt_head for r in records] == live.server.receipt_heads
         assert [r.receipt_seq for r in records] == [0, 1]
         assert {r.source for r in records} == {live.url}

@@ -25,9 +25,7 @@ def _built(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def built(tmp_path: Path) -> TestClient:
-    return TestClient(
-        create_app(Settings(data_dir=tmp_path / "data", static_dir=_built(tmp_path)))
-    )
+    return TestClient(create_app(Settings(data_dir=tmp_path / "data", static_dir=_built(tmp_path))))
 
 
 @pytest.fixture

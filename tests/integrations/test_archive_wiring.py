@@ -670,9 +670,7 @@ class TestTheSeamItself:
     ) -> None:
         # The destination raises out of its own encoder here. The seam adds no
         # new way for that to escape: it is a report, like every other outcome.
-        destination = archive_destination(
-            {ENV_ARCHIVE: live.url, ENV_ARCHIVE_API_KEY: ARCHIVE_KEY}
-        )
+        destination = archive_destination({ENV_ARCHIVE: live.url, ENV_ARCHIVE_API_KEY: ARCHIVE_KEY})
         assert destination is not None
         report = destination("x.jsonl", f"--{_MULTIPART_BOUNDARY}\n".encode())
         assert report.state is ArchiveState.FAILED

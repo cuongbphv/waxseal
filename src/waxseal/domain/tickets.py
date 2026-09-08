@@ -219,15 +219,9 @@ def reconcile_tickets(
     window_lo = (max_issued // lease_size) * lease_size
     window_hi = window_lo + lease_size - 1
 
-    missing = tuple(
-        sorted(t for t in issued_set if t < window_lo and t not in present_set)
-    )
+    missing = tuple(sorted(t for t in issued_set if t < window_lo and t not in present_set))
     blind_spot_missing = tuple(
-        sorted(
-            t
-            for t in issued_set
-            if window_lo <= t <= window_hi and t not in present_set
-        )
+        sorted(t for t in issued_set if window_lo <= t <= window_hi and t not in present_set)
     )
     return TicketReconciliation(
         measured=True,

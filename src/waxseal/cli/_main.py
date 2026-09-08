@@ -19,10 +19,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     from waxseal.cli.pin import _pin_target
 
-    if args.command in ("verify", "report") and args.pin is None and (
-        args.expect_anchor_binding
-        or args.max_anchor_age_s is not None
-        or args.declare_topology is not None
+    if (
+        args.command in ("verify", "report")
+        and args.pin is None
+        and (
+            args.expect_anchor_binding
+            or args.max_anchor_age_s is not None
+            or args.declare_topology is not None
+        )
     ):
         # A declaration with nowhere to land would otherwise be silently a
         # no-op, per CLAUDE.md rule 6 (a degraded/ineffective flag must be
@@ -33,8 +37,10 @@ def main(argv: list[str] | None = None) -> int:
             "--pin (there is no pin state file to declare against)"
         )
 
-    if args.command in ("verify", "report") and args.trail_id is not None and not (
-        args.liveness or args.registry
+    if (
+        args.command in ("verify", "report")
+        and args.trail_id is not None
+        and not (args.liveness or args.registry)
     ):
         # Same rule-6 shape as the pin-declaration check above: --trail-id
         # names WHICH on-chain trail to check, and checks nothing on its own.
@@ -47,15 +53,22 @@ def main(argv: list[str] | None = None) -> int:
         # Pure arithmetic over operator-supplied measurements: opens no
         # trail at all, unlike every other subcommand here.
         from waxseal.cli.cadence import _cadence
+
         return _cadence(
-            lam=args.lam, c=args.c, w=args.w, rho=args.rho, M=args.M,
-            delta=args.delta, t_max=args.t_max,
+            lam=args.lam,
+            c=args.c,
+            w=args.w,
+            rho=args.rho,
+            M=args.M,
+            delta=args.delta,
+            t_max=args.t_max,
         )
 
     if args.command == "segments":
         # Takes a DIRECTORY, not a trail path, so it sits above the
         # single-trail plumbing below (the same reason `cadence` does).
         from waxseal.cli.segments import _segments
+
         return _segments(Path(args.dir).expanduser())
 
     if args.command == "preflight":
@@ -65,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         # read, nothing created) rather than the exit 1 `anchor`/`receipt`
         # use — a reading command has no verdict codes to spend.
         from waxseal.cli.preflight import _preflight
+
         return _preflight(args.path, pin_path=args.pin)
 
     if args.command == "install":
@@ -78,12 +92,14 @@ def main(argv: list[str] | None = None) -> int:
         # file and no trail at all, so none of the trail plumbing below
         # applies to it.
         from waxseal.cli.report import _verify_proof
+
         return _verify_proof(Path(args.bundle).expanduser())
 
     if args.command == "registry":
         # Publishes a descriptor by fingerprint, not by trail: no audit log
         # is ever opened for this command, the same shape `cadence` has.
         from waxseal.cli.ledger import _registry_publish
+
         return _registry_publish(
             descriptor_of=args.descriptor_of,
             registry_addr=args.registry,
@@ -94,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "bond":
         if args.bond_command == "deposit":
             from waxseal.cli.ledger import _bond_deposit
+
             return _bond_deposit(
                 bond_addr=args.bond,
                 rpc_urls=args.rpc,
@@ -101,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
                 amount_wei=args.amount_wei,
             )
         from waxseal.cli.ledger import _bond_prove
+
         return _bond_prove(
             bond_addr=args.bond,
             rpc_urls=args.rpc,
@@ -139,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         # is never opened, keeping this read-only against both files.
         assert trail is not None  # guarded above: URL targets returned already
         from waxseal.cli.receipt import _receipt_export
+
         return _receipt_export(trail, seq=args.seq, out=args.out)
 
     try:
@@ -156,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             from waxseal.cli.verify import _verify
             from waxseal.domain.report import SCOPE_LINE
+
             code = _verify(
                 log,
                 trail,
@@ -173,9 +193,7 @@ def main(argv: list[str] | None = None) -> int:
                 ledger_liveness=args.liveness,
                 ledger_registry=args.registry,
                 ledger_trail_id=(
-                    args.trail_id
-                    if args.trail_id is not None
-                    else _pin_target(args.path, trail)
+                    args.trail_id if args.trail_id is not None else _pin_target(args.path, trail)
                 ),
             )
             # Printed here rather than inside _verify so it cannot drift
@@ -191,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
             from waxseal.cli.report import _report
+
             return _report(
                 log,
                 trail,
@@ -208,13 +227,12 @@ def main(argv: list[str] | None = None) -> int:
                 ledger_liveness=args.liveness,
                 ledger_registry=args.registry,
                 ledger_trail_id=(
-                    args.trail_id
-                    if args.trail_id is not None
-                    else _pin_target(args.path, trail)
+                    args.trail_id if args.trail_id is not None else _pin_target(args.path, trail)
                 ),
             )
         if args.command == "ledger-status":
             from waxseal.cli.ledger import _ledger_status
+
             return _ledger_status(
                 log,
                 rpc_urls=args.rpc,
@@ -223,32 +241,37 @@ def main(argv: list[str] | None = None) -> int:
                 bond=args.bond,
                 writer=args.writer,
                 trail_id=(
-                    args.trail_id
-                    if args.trail_id is not None
-                    else _pin_target(args.path, trail)
+                    args.trail_id if args.trail_id is not None else _pin_target(args.path, trail)
                 ),
                 as_json=args.json,
             )
         if args.command == "export-proof":
             from waxseal.cli.report import _export_proof
+
             return _export_proof(log, args.seq)
         if args.command == "tail":
             from waxseal.cli.inspect import _tail
+
             return _tail(log, args.n)
         if args.command == "head":
             from waxseal.cli.inspect import _head
+
             return _head(log)
         if args.command == "checkpoint":
             from waxseal.cli.inspect import _checkpoint
+
             return _checkpoint(log)
         if args.command == "consistency":
             from waxseal.cli.report import _consistency
+
             return _consistency(log, old_seq=args.old_seq, old_root=args.old_root)
         if args.command == "verify-handoff":
             from waxseal.cli.report import _verify_handoff
+
             return _verify_handoff(log, origin_path=Path(args.origin).expanduser())
         if args.command == "incidents":
             from waxseal.cli.incidents import _incidents
+
             return _incidents(
                 log,
                 window_h=args.report_window_h,
@@ -258,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "reconcile-tickets":
             from waxseal.cli.tickets import _reconcile_tickets
+
             return _reconcile_tickets(
                 log,
                 issuer=args.issuer,
@@ -268,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "anchor":
             assert trail is not None  # guarded above: URL targets returned already
             from waxseal.cli.anchor import _anchor
+
             return _anchor(
                 log,
                 trail,
@@ -281,6 +306,7 @@ def main(argv: list[str] | None = None) -> int:
                 evm_consistency_proof_file=args.evm_consistency_proof_file,
             )
         from waxseal.cli.inspect import _inspect
+
         return _inspect(log, trail)
     except (OSError, RemoteError) as e:
         # OSError covers urllib's URLError/HTTPError/timeout; RemoteError is

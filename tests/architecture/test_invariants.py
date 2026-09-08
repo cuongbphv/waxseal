@@ -45,9 +45,9 @@ class TestZeroDependencies:
     # the host is present by definition.
     HOST_IMPORTS_ALLOWED_IN_INTEGRATIONS = {
         "langchain_core",  # waxseal/integrations/langchain.py
-        "crewai",          # waxseal/integrations/crewai.py
-        "agents",          # waxseal/integrations/openai_agents.py
-        "hermes_cli",      # waxseal/integrations/hermes.py (lazy, in-function)
+        "crewai",  # waxseal/integrations/crewai.py
+        "agents",  # waxseal/integrations/openai_agents.py
+        "hermes_cli",  # waxseal/integrations/hermes.py (lazy, in-function)
     }
 
     def test_src_imports_stdlib_and_waxseal_only(self) -> None:
@@ -240,9 +240,10 @@ class TestNoInternalNames:
         # The repo is public OSS; origins are referred to only as "a prior
         # production system". Banned tokens are assembled from codepoints so
         # this file itself stays grep-clean.
-        banned = ["".join(map(chr, cs)) for cs in ([118, 101, 108, 111, 120],
-                                                   [102, 112, 116],
-                                                   [102, 105, 115])]
+        banned = [
+            "".join(map(chr, cs))
+            for cs in ([118, 101, 108, 111, 120], [102, 112, 116], [102, 105, 115])
+        ]
         checked = [
             *REPO.glob("*.md"),
             *REPO.glob("*.toml"),
@@ -528,17 +529,48 @@ class TestDocumentationLinks:
 # path. The numbers are PARSED, never hardcoded: a test that pins "nine" is the
 # fourth copy of the number and the next thing to go stale.
 _CARDINALS = {
-    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
-    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
-    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
-    "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
 }
 _ORDINALS = {
-    "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
-    "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11,
-    "twelfth": 12, "thirteenth": 13, "fourteenth": 14, "fifteenth": 15,
-    "sixteenth": 16, "seventeenth": 17, "eighteenth": 18, "nineteenth": 19,
-    "twentieth": 20, "twenty-first": 21,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+    "tenth": 10,
+    "eleventh": 11,
+    "twelfth": 12,
+    "thirteenth": 13,
+    "fourteenth": 14,
+    "fifteenth": 15,
+    "sixteenth": 16,
+    "seventeenth": 17,
+    "eighteenth": 18,
+    "nineteenth": 19,
+    "twentieth": 20,
+    "twenty-first": 21,
 }
 
 
@@ -677,9 +709,7 @@ class TestSelectorsAreFrozenInOnePlace:
         # recompute here. An ALIAS of an already-frozen constant is not a
         # second source of truth, and `adapters/evm.py` keeps one
         # (`SELECTOR_SUBMIT_HEAD`) to say which `submit` it means.
-        frozen = re.compile(
-            r"^SELECTOR_\w+\s*:\s*Final\s*=\s*bytes\.fromhex", re.MULTILINE
-        )
+        frozen = re.compile(r"^SELECTOR_\w+\s*:\s*Final\s*=\s*bytes\.fromhex", re.MULTILINE)
         offenders = sorted(
             str(path.relative_to(REPO))
             for path in source_files()

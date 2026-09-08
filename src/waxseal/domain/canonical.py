@@ -24,6 +24,6 @@ from typing import Any
 
 
 def canonical_json(payload: dict[str, Any]) -> bytes:
-    return json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    ).encode("ascii")
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "ascii"
+    )

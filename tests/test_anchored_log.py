@@ -47,9 +47,7 @@ class TestAutoAnchoring:
         log.append(payload={"i": 0}, payload_type=PT)
         assert not (tmp_path / "trail.jsonl.anchors").exists()
 
-    def test_non_positive_anchor_every_is_rejected_at_construction(
-        self, tmp_path: Path
-    ) -> None:
+    def test_non_positive_anchor_every_is_rejected_at_construction(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
         for bad in (0, -1):
             with pytest.raises(ValueError, match="anchor_every"):
@@ -273,9 +271,7 @@ class TestSidecarAppendCriticalSection:
             barrier.wait()
             for i in range(per_thread):
                 sink.anchor(
-                    Checkpoint(
-                        seq=worker_id * per_thread + i, entry_hash="ab" * 32, root="cd" * 32
-                    )
+                    Checkpoint(seq=worker_id * per_thread + i, entry_hash="ab" * 32, root="cd" * 32)
                 )
 
         with ThreadPoolExecutor(max_workers=threads) as pool:
@@ -368,9 +364,7 @@ class TestSidecarPermissions:
         old_umask = os.umask(0o022)
         try:
             trail = tmp_path / "trail.jsonl"
-            FileAnchorSink(trail).anchor(
-                Checkpoint(seq=0, entry_hash="aa" * 32, root="bb" * 32)
-            )
+            FileAnchorSink(trail).anchor(Checkpoint(seq=0, entry_hash="aa" * 32, root="bb" * 32))
             mode = (tmp_path / "trail.jsonl.anchors").stat().st_mode
             assert (mode & 0o777) == 0o600
         finally:

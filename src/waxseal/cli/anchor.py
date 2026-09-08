@@ -81,7 +81,7 @@ def _anchor(
     # waxseal-4yk: --tsa-url and --ots-calendar publish the SAME checkpoint to
     # two independent domains now (tau rises by one per domain reached, per
     # the anchor-selection corollary). One sink being unreachable must not
-        # cost the other its record (CLAUDE.md rule 6): MultiAnchorSink already
+    # cost the other its record (CLAUDE.md rule 6): MultiAnchorSink already
     # let the reachable sink's record land; this only has to label the one
     # that didn't, in the same "error: ... nothing recorded" wording the
     # single-sink path above uses for a total failure.

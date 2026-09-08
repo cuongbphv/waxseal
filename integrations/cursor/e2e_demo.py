@@ -45,7 +45,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def run_verify(trail: Path) -> tuple[int, str]:
     proc = subprocess.run(
         [sys.executable, "-m", "waxseal.cli", "verify", str(trail)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return proc.returncode, proc.stdout.strip()
 
@@ -58,26 +59,63 @@ def main() -> int:
     def fire(event: dict) -> None:
         proc = subprocess.run(
             [sys.executable, str(HOOK)],
-            input=json.dumps(event), capture_output=True, text=True, env=env,
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "", proc.stdout
 
-    common = {"conversation_id": "conv-1", "generation_id": "gen-1",
-              "model": "some-model", "workspace_roots": ["/work/project"]}
-    fire({**common, "hook_event_name": "beforeShellExecution", "cwd": "/work/project",
-          "command": "export GITHUB_TOKEN=ghp_16C7e42F292c6912E7710c838347Ae178B4a"})
-    fire({**common, "hook_event_name": "afterShellExecution",
-          "command": "export GITHUB_TOKEN=...", "output": "ok", "duration": 12})
-    fire({**common, "hook_event_name": "beforeShellExecution", "cwd": "/work/project",
-          "command": "kubectl apply -f deploy.yaml"})
+    common = {
+        "conversation_id": "conv-1",
+        "generation_id": "gen-1",
+        "model": "some-model",
+        "workspace_roots": ["/work/project"],
+    }
+    fire(
+        {
+            **common,
+            "hook_event_name": "beforeShellExecution",
+            "cwd": "/work/project",
+            "command": "export GITHUB_TOKEN=ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+        }
+    )
+    fire(
+        {
+            **common,
+            "hook_event_name": "afterShellExecution",
+            "command": "export GITHUB_TOKEN=...",
+            "output": "ok",
+            "duration": 12,
+        }
+    )
+    fire(
+        {
+            **common,
+            "hook_event_name": "beforeShellExecution",
+            "cwd": "/work/project",
+            "command": "kubectl apply -f deploy.yaml",
+        }
+    )
     written_key = "OPENAI_API_KEY=sk-fileedit1234567890abcdef"
-    fire({**common, "hook_event_name": "afterFileEdit", "file_path": "/work/project/.env",
-          "edits": [{"old_string": "", "new_string": written_key}]})
+    fire(
+        {
+            **common,
+            "hook_event_name": "afterFileEdit",
+            "file_path": "/work/project/.env",
+            "edits": [{"old_string": "", "new_string": written_key}],
+        }
+    )
     # Literal split: GitHub push protection blocks the contiguous glpat- fixture.
     gitlab_pat = "glpat-" + "Xk2fjPq81mNbV4wZs7Ay"
-    fire({**common, "hook_event_name": "beforeSubmitPrompt",
-          "prompt": f"deploy with token {gitlab_pat} please"})
+    fire(
+        {
+            **common,
+            "hook_event_name": "beforeSubmitPrompt",
+            "prompt": f"deploy with token {gitlab_pat} please",
+        }
+    )
 
     print("\nScenario 1 — audited session verifies clean (hook stayed observe-only)")
     code, out = run_verify(trail)
@@ -85,15 +123,19 @@ def main() -> int:
 
     print("\nScenario 5 — secrets never reach disk")
     decoded = b"\n".join(
-        base64.b64decode(json.loads(line)["payload_b64"])
-        for line in trail.read_text().splitlines()
+        base64.b64decode(json.loads(line)["payload_b64"]) for line in trail.read_text().splitlines()
     )
-    check("shell-leaked GitHub token absent from decoded payloads",
-          b"ghp_16C7e42F292c6912E7710c838347Ae178B4a" not in decoded)
-    check("key written into a file edit absent from decoded payloads",
-          b"sk-fileedit1234567890abcdef" not in decoded)
-    check("user-pasted GitLab token absent from decoded payloads",
-          gitlab_pat.encode() not in decoded)
+    check(
+        "shell-leaked GitHub token absent from decoded payloads",
+        b"ghp_16C7e42F292c6912E7710c838347Ae178B4a" not in decoded,
+    )
+    check(
+        "key written into a file edit absent from decoded payloads",
+        b"sk-fileedit1234567890abcdef" not in decoded,
+    )
+    check(
+        "user-pasted GitLab token absent from decoded payloads", gitlab_pat.encode() not in decoded
+    )
     check("redaction marker present in decoded payloads", b"***REDACTED***" in decoded)
 
     print("\nScenario 2 — attacker rewrites a past action")
@@ -131,15 +173,28 @@ def main() -> int:
         prev_hash=last["entry_hash"],
     )
     future = tmp / "future.jsonl"
-    future.write_text("\n".join(lines + [json.dumps({
-        "header": {
-            "seq": header.seq, "ts": header.ts, "hash_version": header.hash_version,
-            "payload_type": header.payload_type, "payload_hash": header.payload_hash,
-            "prev_hash": header.prev_hash,
-        },
-        "entry_hash": compute_entry_hash(header),
-        "payload_b64": base64.b64encode(new_payload).decode(),
-    })]) + "\n")
+    future.write_text(
+        "\n".join(
+            lines
+            + [
+                json.dumps(
+                    {
+                        "header": {
+                            "seq": header.seq,
+                            "ts": header.ts,
+                            "hash_version": header.hash_version,
+                            "payload_type": header.payload_type,
+                            "payload_hash": header.payload_hash,
+                            "prev_hash": header.prev_hash,
+                        },
+                        "entry_hash": compute_entry_hash(header),
+                        "payload_b64": base64.b64encode(new_payload).decode(),
+                    }
+                )
+            ]
+        )
+        + "\n"
+    )
     code, out = run_verify(future)
     check("unknown schema -> exit 2, not broken", code == 2, out)
     check("reported unverifiable, NOT tampering", "NOT evidence of tampering" in out)

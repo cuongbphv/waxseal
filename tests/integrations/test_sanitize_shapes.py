@@ -44,9 +44,15 @@ REDACTING_MODULES = [
 ]
 
 _CREWAI_EVENT_NAMES = (
-    "CrewKickoffCompletedEvent", "CrewKickoffFailedEvent", "CrewKickoffStartedEvent",
-    "TaskCompletedEvent", "TaskFailedEvent", "TaskStartedEvent",
-    "ToolUsageErrorEvent", "ToolUsageFinishedEvent", "ToolUsageStartedEvent",
+    "CrewKickoffCompletedEvent",
+    "CrewKickoffFailedEvent",
+    "CrewKickoffStartedEvent",
+    "TaskCompletedEvent",
+    "TaskFailedEvent",
+    "TaskStartedEvent",
+    "ToolUsageErrorEvent",
+    "ToolUsageFinishedEvent",
+    "ToolUsageStartedEvent",
 )
 
 

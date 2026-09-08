@@ -179,9 +179,7 @@ def acknowledge(log_path: Path, entry: Entry) -> tuple[int, str]:
             chain = ReceiptChain()
         else:
             prior = json.loads(last)
-            chain = ReceiptChain.resume(
-                int(prior["receipt_seq"]), str(prior["receipt_head"])
-            )
+            chain = ReceiptChain.resume(int(prior["receipt_seq"]), str(prior["receipt_head"]))
         receipt_seq, receipt_head = chain.acknowledge(entry.entry_hash)
         record = {
             "entry_hash": entry.entry_hash,

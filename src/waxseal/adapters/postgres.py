@@ -56,16 +56,12 @@ class PostgresBackend:
             cur = conn.cursor()
             # Lock first: no other writer may read the same tail (rule 7).
             cur.execute("SELECT pg_advisory_xact_lock(%s)", (ADVISORY_LOCK_KEY,))
-            cur.execute(
-                "SELECT seq, entry_hash FROM waxseal_entries ORDER BY seq DESC LIMIT 1"
-            )
+            cur.execute("SELECT seq, entry_hash FROM waxseal_entries ORDER BY seq DESC LIMIT 1")
             row = cur.fetchone()
             next_seq, prev_hash = (0, GENESIS_PREV_HASH) if row is None else (row[0] + 1, row[1])
             entry = build(next_seq, prev_hash)
             if entry.payload is None:
-                raise ValueError(
-                    "Postgres backend stores payload bytes; payload must not be None"
-                )
+                raise ValueError("Postgres backend stores payload bytes; payload must not be None")
             cur.execute(
                 "INSERT INTO waxseal_entries"
                 " (seq, ts, hash_version, payload_type, payload_hash,"

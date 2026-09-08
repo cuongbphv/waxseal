@@ -176,9 +176,7 @@ class AuditReport:
                     "broken_seq": self.broken_seq,
                     "reason": self.reason,
                     "unverifiable_seqs": list(self.unverifiable),
-                    "unverifiable_note": (
-                        "unknown schema fingerprint — NOT evidence of tampering"
-                    ),
+                    "unverifiable_note": ("unknown schema fingerprint — NOT evidence of tampering"),
                 },
                 "completeness": {
                     "dropped_writes": self.dropped_writes,

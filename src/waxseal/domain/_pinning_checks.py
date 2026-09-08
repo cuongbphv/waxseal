@@ -18,6 +18,8 @@ _REASONS: Final = {
     "anchor_entry_hash_mismatch": "pin_mismatch",
     "anchor_root_mismatch": "pin_mismatch",
 }
+
+
 def check_pin(entry_hashes: list[str] | tuple[str, ...], pin: Checkpoint) -> str | None:
     """Check the trail against a previously pinned checkpoint.
 

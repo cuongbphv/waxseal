@@ -89,7 +89,7 @@ from waxseal.adapters.redactors import RegexRedactor
 from waxseal.sources.openclaw import ingest
 
 log = AuditLog.open("trail.jsonl", redactor=RegexRedactor(), record_drops=True)
-result = ingest(log)          # idempotent; resume point comes from the chain
+result = ingest(log)  # idempotent; resume point comes from the chain
 print(result.ingested, result.last_sequence, result.gaps)
 ```
 

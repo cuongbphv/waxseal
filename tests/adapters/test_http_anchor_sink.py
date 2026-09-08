@@ -59,9 +59,7 @@ class TestAnchor:
             captured.append(request)
             return RemoteResponse(status=200, body=b"{}")
 
-        HTTPAnchorSink(
-            "http://anchor.example", transport=transport, api_key="tok-abc"
-        ).anchor(CP)
+        HTTPAnchorSink("http://anchor.example", transport=transport, api_key="tok-abc").anchor(CP)
         assert captured[0].headers["Authorization"] == "Bearer tok-abc"
 
     def test_no_api_key_means_no_authorization_header(self) -> None:

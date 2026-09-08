@@ -141,9 +141,7 @@ def _skips_outcome_cache(command: str, args: tuple[str, ...]) -> bool:
         return True
     # argparse takes `--rpc=URL` as well as `--rpc URL`; matching the bare
     # token alone let the joined form through to a file-stamped cache.
-    return any(
-        arg == flag or arg.startswith(flag + "=") for arg in args for flag in _NETWORK_FLAGS
-    )
+    return any(arg == flag or arg.startswith(flag + "=") for arg in args for flag in _NETWORK_FLAGS)
 
 
 def _input_stamp(args: tuple[str, ...]) -> tuple[_Stamp, ...]:
@@ -219,9 +217,7 @@ class WaxsealCli:
         # second verifier (the CLI remains the sole verdict authority).
         # Value is (outcome, stored_at); TTL is a second layer over the
         # stamp so a forged mtime cannot keep an `ok` forever.
-        self._outcomes: OrderedDict[_OutcomeKey, tuple[CliOutcome, float]] = (
-            OrderedDict()
-        )
+        self._outcomes: OrderedDict[_OutcomeKey, tuple[CliOutcome, float]] = OrderedDict()
         self._outcome_lock = threading.Lock()
 
     @lru_cache(maxsize=1)  # noqa: B019 - one instance per app; the CLI cannot change under it
@@ -278,9 +274,7 @@ class WaxsealCli:
             text=True,
             timeout=self._timeout,
         )
-        outcome = _classify(
-            command, argv, completed.returncode, completed.stdout, completed.stderr
-        )
+        outcome = _classify(command, argv, completed.returncode, completed.stdout, completed.stderr)
         if key is not None:
             with self._outcome_lock:
                 self._outcomes[key] = (outcome, self._now())

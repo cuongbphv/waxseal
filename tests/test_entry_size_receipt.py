@@ -68,8 +68,7 @@ MINIMAL_PROMPT_EVENT: dict[str, Any] = {
 #: 400 lines of pytest progress output: 26_290 characters, six times past
 #: `MAX_FIELD_CHARS`, so the stored field is the clip and not the dump.
 TERMINAL_DUMP = "".join(
-    f"{i:5d}  ok  tests/integrations/test_thing.py::test_case_{i} passed\n"
-    for i in range(400)
+    f"{i:5d}  ok  tests/integrations/test_thing.py::test_case_{i} passed\n" for i in range(400)
 )
 
 #: FIXTURE "clipped tool result" -- the ceiling. A `PostToolUse` hook event
@@ -112,9 +111,7 @@ ROTATION_BINDING_BYTES = 624
 BINDING_DIR_NAME = "waxseal-fg4"
 
 
-def _stored_line_bytes(
-    tmp_path: Path, payload: dict[str, Any], payload_type: str
-) -> int:
+def _stored_line_bytes(tmp_path: Path, payload: dict[str, Any], payload_type: str) -> int:
     """Bytes appended to a fresh JSONL trail by one real `AuditLog.append`.
 
     The whole append path, not a hand-built envelope: redactor, canonical
@@ -146,9 +143,7 @@ class TestStoredEntrySizeAtBothExtremes:
         # ever stopped applying, the ceiling would be unbounded and the
         # comparison below would be meaningless rather than merely wrong.
         assert len(TERMINAL_DUMP) > claude_code.MAX_FIELD_CHARS
-        assert payload["tool_output"].startswith(
-            TERMINAL_DUMP[: claude_code.MAX_FIELD_CHARS]
-        )
+        assert payload["tool_output"].startswith(TERMINAL_DUMP[: claude_code.MAX_FIELD_CHARS])
         assert "truncated" in payload["tool_output"]
 
         size = _stored_line_bytes(tmp_path, payload, claude_code.PAYLOAD_TYPE)
@@ -228,14 +223,10 @@ class TestTheOlderCitedFigures:
         650 B. Citing it as "a stored entry" is how it ended up in a commit
         message arguing about hook trail growth.
         """
-        size = _stored_line_bytes(
-            tmp_path, SYNTHETIC_TEST_PAYLOAD, SYNTHETIC_TEST_PAYLOAD_TYPE
-        )
+        size = _stored_line_bytes(tmp_path, SYNTHETIC_TEST_PAYLOAD, SYNTHETIC_TEST_PAYLOAD_TYPE)
         assert size == SYNTHETIC_TEST_EVENT_BYTES
 
-    def test_the_rotation_binding_line_depends_on_the_directory_name(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_rotation_binding_line_depends_on_the_directory_name(self, tmp_path: Path) -> None:
         """624 B is real too, and it is not a constant.
 
         `chain_id` is `<directory name>/<segment identity>`, so the binding

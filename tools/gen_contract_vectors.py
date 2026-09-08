@@ -86,6 +86,7 @@ _FAIL = {
 }
 _FAIL_NAME = {v: k for k, v in _FAIL.items()}
 
+
 def _hex(value: bytes) -> str:
     return "0x" + value.hex()
 
@@ -362,16 +363,10 @@ def build_consistency_vectors() -> list[dict[str, Any]]:
     # Structural rejections that never reach the walk at all.
     honest_3 = list(wx.consistency_proof(hashes, 3))
     root_3 = wx.batch_root(hashes[:3])
-    vectors.append(
-        _consistency_case("bad_zero_old_size", root_3, 0, new_root, base_n, honest_3)
-    )
-    vectors.append(
-        _consistency_case("bad_shrinking_tree", new_root, base_n, root_3, 3, honest_3)
-    )
+    vectors.append(_consistency_case("bad_zero_old_size", root_3, 0, new_root, base_n, honest_3))
+    vectors.append(_consistency_case("bad_shrinking_tree", new_root, base_n, root_3, 3, honest_3))
     vectors.append(_consistency_case("bad_empty_proof", root_3, 3, new_root, base_n, []))
-    vectors.append(
-        _consistency_case("bad_equal_size_with_proof", root_3, 3, root_3, 3, honest_3)
-    )
+    vectors.append(_consistency_case("bad_equal_size_with_proof", root_3, 3, root_3, 3, honest_3))
     vectors.append(
         _consistency_case(
             "bad_equal_size_root_mismatch", root_3, 3, _flip_first_byte(root_3), 3, []

@@ -138,8 +138,10 @@ def test_no_string_encodes_like_the_absent_marker(s: str) -> None:
 
 
 @settings(max_examples=100)
-@given(a=st.one_of(_utf8_text, _former_sentinel_shapes),
-       b=st.one_of(_utf8_text, _former_sentinel_shapes))
+@given(
+    a=st.one_of(_utf8_text, _former_sentinel_shapes),
+    b=st.one_of(_utf8_text, _former_sentinel_shapes),
+)
 def test_distinct_strings_never_encode_alike(a: str, b: str) -> None:
     if a != b:
         assert lp(a) != lp(b)

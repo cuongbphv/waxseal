@@ -134,9 +134,7 @@ class TestOperatorRoutes:
         assert again.status_code == 409
         assert again.json()["error"] == "operator_exists"
 
-    def test_an_unknown_role_is_400_and_names_the_valid_ones(
-        self, client: TestClient
-    ) -> None:
+    def test_an_unknown_role_is_400_and_names_the_valid_ones(self, client: TestClient) -> None:
         resp = client.post(
             "/v1/operators",
             json={"username": "x", "display_name": "x", "role": "superuser"},
@@ -210,14 +208,10 @@ class TestKeyRoutes:
         assert client.post(f"/v1/keys/{key_id}/revoke", headers=admin(client)).json() == {
             "revoked": False
         }
-        revoked_call = client.get(
-            "/v1/whoami", headers={"Authorization": f"Bearer {key}"}
-        )
+        revoked_call = client.get("/v1/whoami", headers={"Authorization": f"Bearer {key}"})
         assert revoked_call.status_code == 401
 
-    def test_revoking_an_unknown_key_reports_that_it_did_nothing(
-        self, client: TestClient
-    ) -> None:
+    def test_revoking_an_unknown_key_reports_that_it_did_nothing(self, client: TestClient) -> None:
         assert client.post("/v1/keys/nope/revoke", headers=admin(client)).json() == {
             "revoked": False
         }
@@ -250,9 +244,7 @@ class TestScopeEnforcement:
         # 404 is "chain empty", which means the guard let it through.
         assert client.get("/v1/chains/default/head", headers=writer).status_code == 404
 
-    def test_a_writer_may_not_read_the_entries(
-        self, client: TestClient, writer: Any
-    ) -> None:
+    def test_a_writer_may_not_read_the_entries(self, client: TestClient, writer: Any) -> None:
         resp = client.get("/v1/chains/default/entries", headers=writer)
         assert resp.status_code == 403
         assert "trails:read" in resp.json()["detail"]
@@ -285,9 +277,7 @@ class TestScopeEnforcement:
         self, client: TestClient, auditor: Any, envelopes: list[dict[str, Any]]
     ) -> None:
         assert client.get("/v1/chains/default/verify", headers=auditor).status_code == 200
-        assert (
-            client.get("/v1/chains/default/export-proof/0", headers=auditor).status_code == 200
-        )
+        assert client.get("/v1/chains/default/export-proof/0", headers=auditor).status_code == 200
         resp = client.post("/v1/chains/default/entries", json=envelopes[0], headers=auditor)
         assert resp.status_code == 403
 
@@ -340,9 +330,7 @@ class TestKeyAdministrationIsAdminOnly:
     def writer(self, client: TestClient) -> dict[str, str]:
         return {"Authorization": f"Bearer {seed(client, 'user-waxseal', 'writer')}"}
 
-    def test_a_writer_may_not_create_an_operator(
-        self, client: TestClient, writer: Any
-    ) -> None:
+    def test_a_writer_may_not_create_an_operator(self, client: TestClient, writer: Any) -> None:
         resp = client.post(
             "/v1/operators",
             json={"username": "sneaky", "display_name": "s", "role": "admin"},
@@ -350,7 +338,8 @@ class TestKeyAdministrationIsAdminOnly:
         )
         assert resp.status_code == 403
         assert client.get("/v1/operators", headers=admin(client)).json()["operators"] == [
-            o for o in client.get("/v1/operators", headers=admin(client)).json()["operators"]
+            o
+            for o in client.get("/v1/operators", headers=admin(client)).json()["operators"]
             if o["username"] != "sneaky"
         ]
 
@@ -395,9 +384,7 @@ class TestCorrectingAnOperator:
 
     def test_omitting_a_field_leaves_it_alone(self, client: TestClient) -> None:
         seed(client, "admin", "admin")
-        client.patch(
-            "/v1/operators/admin", json={"email": "a@b.c"}, headers=admin(client)
-        )
+        client.patch("/v1/operators/admin", json={"email": "a@b.c"}, headers=admin(client))
         after = client.patch(
             "/v1/operators/admin", json={"display_name": "Renamed"}, headers=admin(client)
         ).json()
@@ -409,9 +396,7 @@ class TestCorrectingAnOperator:
         # not share a value.
         seed(client, "ci", "writer")
         client.patch("/v1/operators/ci", json={"email": "x@y.z"}, headers=admin(client))
-        after = client.patch(
-            "/v1/operators/ci", json={"email": None}, headers=admin(client)
-        ).json()
+        after = client.patch("/v1/operators/ci", json={"email": None}, headers=admin(client)).json()
         assert after["email"] is None
 
     def test_a_role_change_changes_the_scopes(self, client: TestClient) -> None:
@@ -422,14 +407,11 @@ class TestCorrectingAnOperator:
         assert after["role"] == "auditor"
         assert "verify:run" in after["scopes"]
 
-    def test_deactivating_stops_the_operators_keys_working(
-        self, client: TestClient
-    ) -> None:
+    def test_deactivating_stops_the_operators_keys_working(self, client: TestClient) -> None:
         key = seed(client, "x", "admin")
         client.patch("/v1/operators/x", json={"active": False}, headers=admin(client))
         assert (
-            client.get("/v1/whoami", headers={"Authorization": f"Bearer {key}"}).status_code
-            == 401
+            client.get("/v1/whoami", headers={"Authorization": f"Bearer {key}"}).status_code == 401
         )
 
     def test_reactivating_restores_them(self, client: TestClient) -> None:
@@ -437,28 +419,21 @@ class TestCorrectingAnOperator:
         client.patch("/v1/operators/x", json={"active": False}, headers=admin(client))
         client.patch("/v1/operators/x", json={"active": True}, headers=admin(client))
         assert (
-            client.get("/v1/whoami", headers={"Authorization": f"Bearer {key}"}).status_code
-            == 200
+            client.get("/v1/whoami", headers={"Authorization": f"Bearer {key}"}).status_code == 200
         )
 
     def test_an_unknown_operator_is_404(self, client: TestClient) -> None:
-        resp = client.patch(
-            "/v1/operators/ghost", json={"email": "x@y.z"}, headers=admin(client)
-        )
+        resp = client.patch("/v1/operators/ghost", json={"email": "x@y.z"}, headers=admin(client))
         assert resp.status_code == 404
 
     def test_an_unknown_role_is_400(self, client: TestClient) -> None:
         seed(client, "x", "viewer")
-        resp = client.patch(
-            "/v1/operators/x", json={"role": "superuser"}, headers=admin(client)
-        )
+        resp = client.patch("/v1/operators/x", json={"role": "superuser"}, headers=admin(client))
         assert resp.status_code == 400
 
     def test_a_non_boolean_active_is_400(self, client: TestClient) -> None:
         seed(client, "x", "viewer")
-        resp = client.patch(
-            "/v1/operators/x", json={"active": "yes"}, headers=admin(client)
-        )
+        resp = client.patch("/v1/operators/x", json={"active": "yes"}, headers=admin(client))
         assert resp.status_code == 400
 
     def test_a_malformed_body_is_400(self, client: TestClient) -> None:

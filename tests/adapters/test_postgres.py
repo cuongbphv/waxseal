@@ -152,9 +152,7 @@ class TestPostgresBackendContract(BackendContractTests):
 
 
 class TestProtocol:
-    def test_append_takes_advisory_lock_before_tail_read(
-        self, backend: PostgresBackend
-    ) -> None:
+    def test_append_takes_advisory_lock_before_tail_read(self, backend: PostgresBackend) -> None:
         # FakeCursor asserts lock-before-read/insert; this drives the flow.
         backend.append(lambda seq, prev: build_entry(seq, prev))
         stmts = [s for conn in _conns(backend) for s, _ in conn.statements]
@@ -165,8 +163,10 @@ class TestProtocol:
     def test_advisory_lock_uses_the_documented_key(self, backend: PostgresBackend) -> None:
         backend.append(lambda seq, prev: build_entry(seq, prev))
         lock_params = [
-            p for conn in _conns(backend)
-            for s, p in conn.statements if "pg_advisory_xact_lock" in s
+            p
+            for conn in _conns(backend)
+            for s, p in conn.statements
+            if "pg_advisory_xact_lock" in s
         ]
         assert lock_params == [(ADVISORY_LOCK_KEY,)]
 
@@ -286,9 +286,7 @@ class TestRealPostgres:
         result = verify_chain(pg_backend.entries(), VersionRegistry())
         assert result.ok and result.checked == 3
 
-    def test_binary_payload_round_trip_byte_exact(
-        self, pg_backend: PostgresBackend
-    ) -> None:
+    def test_binary_payload_round_trip_byte_exact(self, pg_backend: PostgresBackend) -> None:
         # BYTEA must hand back the exact bytes hashed on the way in — NULs,
         # high bytes, and the empty payload included (b"" is a payload; only
         # None is refused).
@@ -328,9 +326,7 @@ class TestRealPostgres:
     def test_edited_payload_is_reported(self, pg_backend: PostgresBackend) -> None:
         for _ in range(3):
             pg_backend.append(lambda seq, prev: build_entry(seq, prev))
-        pg_execute(
-            "UPDATE waxseal_entries SET payload = %s WHERE seq = 1", (b"forged",)
-        )
+        pg_execute("UPDATE waxseal_entries SET payload = %s WHERE seq = 1", (b"forged",))
         result = verify_chain(pg_backend.entries(), VersionRegistry())
         assert not result.ok
         assert (result.broken_seq, result.reason) == (1, "payload_hash_mismatch")
@@ -366,9 +362,7 @@ class TestRealPostgres:
         assert not result.ok
         assert result.reason == "seq_gap"
 
-    def test_duplicate_seq_fork_rejected_by_primary_key(
-        self, pg_backend: PostgresBackend
-    ) -> None:
+    def test_duplicate_seq_fork_rejected_by_primary_key(self, pg_backend: PostgresBackend) -> None:
         # Storage-level backstop: even if the advisory lock were bypassed,
         # the second branch of a fork must die on PRIMARY KEY(seq).
         import psycopg
@@ -423,9 +417,7 @@ class TestRealPostgres:
         assert result.checked == 2
 
     # -- concurrency: advisory lock must serialize real parallel writers -------
-    def test_parallel_appends_never_fork_the_chain(
-        self, pg_backend: PostgresBackend
-    ) -> None:
+    def test_parallel_appends_never_fork_the_chain(self, pg_backend: PostgresBackend) -> None:
         # Falsifiability receipt: with pg_advisory_xact_lock removed from
         # append(), this test failed 3 out of 3 runs against Postgres 16
         # (duplicate-seq forks, measured 2026-08-21). If it never failed on
@@ -453,9 +445,7 @@ class TestRealPostgres:
         assert [e.header.seq for e in entries] == list(range(threads * per_thread))
 
     # -- failure atomicity ------------------------------------------------------
-    def test_failed_append_rolls_back_and_releases_lock(
-        self, pg_backend: PostgresBackend
-    ) -> None:
+    def test_failed_append_rolls_back_and_releases_lock(self, pg_backend: PostgresBackend) -> None:
         def bad_build(seq: int, prev: str) -> Entry:
             raise RuntimeError("builder exploded")
 

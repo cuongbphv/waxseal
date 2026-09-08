@@ -140,9 +140,7 @@ class TestIncidentSchema:
         with pytest.raises(ValueError, match="JSON object"):
             from_payload(["not", "a", "dict"])
 
-    @pytest.mark.parametrize(
-        "field", ["incident_id", "system_id", "detected_at", "severity"]
-    )
+    @pytest.mark.parametrize("field", ["incident_id", "system_id", "detected_at", "severity"])
     def test_from_payload_rejects_a_missing_required_field(self, field: str) -> None:
         payload = to_payload(a_record())
         del payload[field]
@@ -186,9 +184,7 @@ class TestIncidentSchema:
         with pytest.raises(ValueError, match="consequence_kinds"):
             a_record(consequence_kinds=["tai san"])
 
-    @pytest.mark.parametrize(
-        "field", ["incident_id", "system_id", "detected_at", "severity"]
-    )
+    @pytest.mark.parametrize("field", ["incident_id", "system_id", "detected_at", "severity"])
     def test_rejects_an_empty_required_field(self, field: str) -> None:
         with pytest.raises(ValueError, match=field):
             a_record(**{field: ""})
@@ -364,9 +360,7 @@ class TestWindowStatusUnmeasured:
         assert "detected_at" in reading.reason
 
     def test_an_unparseable_confirmed_at_is_unmeasured(self) -> None:
-        reading = window_status(
-            a_view(confirmed_at="hôm qua"), window=WINDOW_72H, now=at(9)
-        )
+        reading = window_status(a_view(confirmed_at="hôm qua"), window=WINDOW_72H, now=at(9))
         assert reading.status is WindowStatus.UNMEASURED
         assert "confirmed_at" in reading.reason
         assert "ISO-8601" in reading.reason
@@ -425,9 +419,7 @@ class TestWindowStatusUnmeasured:
         assert "reported_at" in reading.reason
 
     def test_a_now_before_confirmed_at_is_unmeasured(self) -> None:
-        reading = window_status(
-            a_view(confirmed_at=CONFIRMED), window=WINDOW_72H, now=at(7)
-        )
+        reading = window_status(a_view(confirmed_at=CONFIRMED), window=WINDOW_72H, now=at(7))
         assert reading.status is WindowStatus.UNMEASURED
         assert "confirmed_at" in reading.reason
         assert "as-of" in reading.reason
@@ -460,9 +452,7 @@ class TestRenderIncidents:
         return "\n".join(render_incidents(*args, **kwargs))
 
     def test_the_caller_asserted_qualification_is_on_the_status_line(self) -> None:
-        scan = scan_incidents(
-            [incident_entry(0, a_record(confirmed_at=CONFIRMED))]
-        )
+        scan = scan_incidents([incident_entry(0, a_record(confirmed_at=CONFIRMED))])
         lines = render_incidents(scan, window=WINDOW_72H, now=at(20))
         status_lines = [line for line in lines if WindowStatus.WINDOW_OPEN.value in line]
         assert status_lines, lines

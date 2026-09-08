@@ -58,13 +58,9 @@ class FakeS3Client:
                 raise FakeClientError("NoSuchKey")
             return {"Body": FakeBody(self._objects[(Bucket, Key)])}
 
-    def list_objects_v2(
-        self, *, Bucket: str, Prefix: str, **kwargs: object
-    ) -> dict[str, object]:
+    def list_objects_v2(self, *, Bucket: str, Prefix: str, **kwargs: object) -> dict[str, object]:
         with self._lock:
-            keys = sorted(
-                k for (b, k) in self._objects if b == Bucket and k.startswith(Prefix)
-            )
+            keys = sorted(k for (b, k) in self._objects if b == Bucket and k.startswith(Prefix))
         start = kwargs.get("StartAfter", "")
         assert isinstance(start, str)
         keys = [k for k in keys if k > start]

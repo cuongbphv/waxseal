@@ -51,7 +51,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def run_verify(trail: Path) -> tuple[int, str]:
     proc = subprocess.run(
         [sys.executable, "-m", "waxseal.cli", "verify", str(trail)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return proc.returncode, proc.stdout.strip()
 
@@ -69,20 +70,34 @@ def main() -> int:
 
     # --- drive the REAL global event bus -------------------------------------
     emit(CrewKickoffStartedEvent(crew_name="deploy-crew", inputs={"target": "prod"}))
-    emit(ToolUsageStartedEvent(
-        tool_name="shell", agent_role="DevOps", agent_id="agent-1",
-        tool_args={"command": "export GITHUB_TOKEN=ghp_16C7e42F292c6912E7710c838347Ae178B4a"},
-    ))
-    emit(ToolUsageStartedEvent(
-        tool_name="shell", agent_role="DevOps", agent_id="agent-1",
-        tool_args={"command": "kubectl apply -f deploy.yaml"},
-    ))
+    emit(
+        ToolUsageStartedEvent(
+            tool_name="shell",
+            agent_role="DevOps",
+            agent_id="agent-1",
+            tool_args={"command": "export GITHUB_TOKEN=ghp_16C7e42F292c6912E7710c838347Ae178B4a"},
+        )
+    )
+    emit(
+        ToolUsageStartedEvent(
+            tool_name="shell",
+            agent_role="DevOps",
+            agent_id="agent-1",
+            tool_args={"command": "kubectl apply -f deploy.yaml"},
+        )
+    )
     t0 = datetime(2026, 8, 21, 7, 0, 0, tzinfo=UTC)
-    emit(ToolUsageFinishedEvent(
-        tool_name="shell", agent_role="DevOps", agent_id="agent-1",
-        tool_args={"command": "kubectl apply -f deploy.yaml"}, output="deployed",
-        started_at=t0, finished_at=t0,
-    ))
+    emit(
+        ToolUsageFinishedEvent(
+            tool_name="shell",
+            agent_role="DevOps",
+            agent_id="agent-1",
+            tool_args={"command": "kubectl apply -f deploy.yaml"},
+            output="deployed",
+            started_at=t0,
+            finished_at=t0,
+        )
+    )
 
     print("\nScenario 1 — audited events verify clean")
     code, out = run_verify(trail)
@@ -92,14 +107,24 @@ def main() -> int:
         for line in trail.read_text().splitlines()
     ]
     events = [p["event"] for p in decoded_lines]
-    check("crew kickoff + tool events all recorded",
-          events == ["crew_kickoff_started", "tool_usage_started",
-                     "tool_usage_started", "tool_usage_finished"], str(events))
+    check(
+        "crew kickoff + tool events all recorded",
+        events
+        == [
+            "crew_kickoff_started",
+            "tool_usage_started",
+            "tool_usage_started",
+            "tool_usage_finished",
+        ],
+        str(events),
+    )
 
     print("\nScenario 5 — secret in tool args never reaches disk")
     decoded = json.dumps(decoded_lines).encode()
-    check("GitHub token absent from decoded payloads",
-          b"ghp_16C7e42F292c6912E7710c838347Ae178B4a" not in decoded)
+    check(
+        "GitHub token absent from decoded payloads",
+        b"ghp_16C7e42F292c6912E7710c838347Ae178B4a" not in decoded,
+    )
     check("redaction marker present in decoded payloads", b"***REDACTED***" in decoded)
 
     print("\nScenario 2 — attacker rewrites a past action")
@@ -137,15 +162,28 @@ def main() -> int:
         prev_hash=last["entry_hash"],
     )
     future = tmp / "future.jsonl"
-    future.write_text("\n".join(lines + [json.dumps({
-        "header": {
-            "seq": header.seq, "ts": header.ts, "hash_version": header.hash_version,
-            "payload_type": header.payload_type, "payload_hash": header.payload_hash,
-            "prev_hash": header.prev_hash,
-        },
-        "entry_hash": compute_entry_hash(header),
-        "payload_b64": base64.b64encode(new_payload).decode(),
-    })]) + "\n")
+    future.write_text(
+        "\n".join(
+            lines
+            + [
+                json.dumps(
+                    {
+                        "header": {
+                            "seq": header.seq,
+                            "ts": header.ts,
+                            "hash_version": header.hash_version,
+                            "payload_type": header.payload_type,
+                            "payload_hash": header.payload_hash,
+                            "prev_hash": header.prev_hash,
+                        },
+                        "entry_hash": compute_entry_hash(header),
+                        "payload_b64": base64.b64encode(new_payload).decode(),
+                    }
+                )
+            ]
+        )
+        + "\n"
+    )
     code, out = run_verify(future)
     check("unknown schema -> exit 2, not broken", code == 2, out)
     check("reported unverifiable, NOT tampering", "NOT evidence of tampering" in out)

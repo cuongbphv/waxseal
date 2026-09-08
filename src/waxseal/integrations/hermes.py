@@ -89,9 +89,7 @@ def _append(phase: str, kwargs: dict[str, Any], fields: tuple[str, ...]) -> None
         # best-effort (FileDropRecorder.record() never raises).
         from waxseal.adapters.drops import FileDropRecorder
 
-        FileDropRecorder(_trail_path()).record(
-            reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-        )
+        FileDropRecorder(_trail_path()).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
         return
     payload = {"phase": phase}
     payload.update({name: _sanitize(kwargs.get(name)) for name in fields})
@@ -106,11 +104,20 @@ def _append(phase: str, kwargs: dict[str, Any], fields: tuple[str, ...]) -> None
 
 
 _DISPATCH_FIELDS = (
-    "tool_name", "args", "task_id", "session_id",
-    "tool_call_id", "turn_id", "api_request_id",
+    "tool_name",
+    "args",
+    "task_id",
+    "session_id",
+    "tool_call_id",
+    "turn_id",
+    "api_request_id",
 )
 _RESULT_FIELDS = _DISPATCH_FIELDS + (
-    "result", "status", "duration_ms", "error_type", "error_message",
+    "result",
+    "status",
+    "duration_ms",
+    "error_type",
+    "error_message",
 )
 
 

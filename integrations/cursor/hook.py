@@ -2,6 +2,7 @@
 """waxseal-audit hook shim — the logic lives in waxseal.integrations.cursor
 (shipped in the wheel). Prefer `waxseal install cursor`, which writes this
 same shim; upgrade behavior with `pip install -U waxseal`."""
+
 import sys
 
 try:

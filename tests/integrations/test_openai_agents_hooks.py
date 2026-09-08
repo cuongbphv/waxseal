@@ -51,9 +51,7 @@ def hooks_module(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleType]:
 
 
 @pytest.fixture()
-def make_hooks(
-    hooks_module: types.ModuleType, tmp_path: Path
-) -> Callable[..., Any]:
+def make_hooks(hooks_module: types.ModuleType, tmp_path: Path) -> Callable[..., Any]:
     def _make(trail: Path | None = None) -> Any:
         return hooks_module.WaxsealRunHooks(trail or tmp_path / "trail.jsonl")
 
@@ -80,9 +78,7 @@ TOOL = SimpleNamespace(name="get_weather")
 
 def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
     line = trail.read_text().splitlines()[line_no]
-    result: dict[str, Any] = json.loads(
-        base64.b64decode(json.loads(line)["payload_b64"])
-    )
+    result: dict[str, Any] = json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
     return result
 
 
@@ -193,7 +189,8 @@ class TestNeverAbortsTheRun:
         # yet, so it calls FileDropRecorder directly. tmp_path is writable,
         # so unlike the blocked-directory case above, the record must land.
         monkeypatch.setattr(
-            AuditLog, "open",
+            AuditLog,
+            "open",
             staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
         )
         trail = tmp_path / "trail.jsonl"

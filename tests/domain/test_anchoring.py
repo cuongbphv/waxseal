@@ -90,9 +90,7 @@ class TestRoundTrip:
     def test_reference_vectors_round_trip(self) -> None:
         for index in range(len(RFC_LEAVES)):
             proof = membership_proof(RFC_LEAVES, index)
-            assert verify_membership(
-                RFC_LEAVES[index], index, len(RFC_LEAVES), proof, RFC_ROOTS[8]
-            )
+            assert verify_membership(RFC_LEAVES[index], index, len(RFC_LEAVES), proof, RFC_ROOTS[8])
 
 
 class TestTamperRejection:
@@ -185,9 +183,7 @@ class TestConsistencyRoundTrip:
         for old_size in range(1, len(RFC_LEAVES) + 1):
             old_root = RFC_ROOTS[old_size]
             proof = consistency_proof(RFC_LEAVES, old_size)
-            assert verify_consistency(
-                old_root, old_size, RFC_ROOTS[8], len(RFC_LEAVES), proof
-            )
+            assert verify_consistency(old_root, old_size, RFC_ROOTS[8], len(RFC_LEAVES), proof)
 
 
 class TestConsistencyTamperRejection:

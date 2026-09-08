@@ -203,9 +203,7 @@ def router(services: Services, authz: Authorizer) -> APIRouter:
         )
 
     @api.post("/keys/{key_id}/revoke")
-    def post_revoke(
-        key_id: str, authorization: str | None = Header(default=None)
-    ) -> JSONResponse:
+    def post_revoke(key_id: str, authorization: str | None = Header(default=None)) -> JSONResponse:
         denied = authz.require(authorization, SCOPE_KEYS_MANAGE)
         if denied is not None:
             return denied

@@ -49,10 +49,7 @@ def _cadence(
     band_high = plan.n_opt * 2.0
     print(f"N* (unclamped optimum): {plan.n_star:.6g}")
     print(f"N_opt (clamped, feasible): {plan.n_opt:.6g}")
-    print(
-        f"clamp bounds [lam*delta, lam*t_max]: "
-        f"[{plan.lower_bound:.6g}, {plan.upper_bound:.6g}]"
-    )
+    print(f"clamp bounds [lam*delta, lam*t_max]: [{plan.lower_bound:.6g}, {plan.upper_bound:.6g}]")
     print(
         f"balance at N* (equal by construction): "
         f"anchor_term={plan.anchor_term:.6g}, exposure_term={plan.exposure_term:.6g}"

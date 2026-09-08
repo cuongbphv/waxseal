@@ -62,8 +62,15 @@ PAYLOAD_TYPE = "application/vnd.claude-code.hook-event+json"
 
 # Common fields recorded for every event; per-event fields added below.
 _COMMON_FIELDS = (
-    "session_id", "cwd", "permission_mode", "tool_use_id",
-    "tool_name", "tool_input", "prompt", "agent_id", "agent_type",
+    "session_id",
+    "cwd",
+    "permission_mode",
+    "tool_use_id",
+    "tool_name",
+    "tool_input",
+    "prompt",
+    "agent_id",
+    "agent_type",
 )
 
 
@@ -120,9 +127,7 @@ def _trail_path(event: dict[str, Any]) -> Path:
     then `WAXSEAL_TRAIL`, then the host's own default — which is now routed
     per project rather than shared.
     """
-    return resolve_trail(
-        default=lambda: routed_trail(_WAXSEAL_HOME(), _project_key(event))
-    )
+    return resolve_trail(default=lambda: routed_trail(_WAXSEAL_HOME(), _project_key(event)))
 
 
 def _WAXSEAL_HOME() -> Path:  # noqa: N802 - a constant-shaped accessor, not a class
@@ -144,7 +149,7 @@ def build_payload(event: dict[str, Any]) -> dict[str, Any]:
         if name in event:
             payload[name] = _sanitize(event[name])
     # tool_output is the documented field; tool_response is what older
-# releases sent, so store either under one key so trails stay uniform.
+    # releases sent, so store either under one key so trails stay uniform.
     if "tool_output" in event or "tool_response" in event:
         payload["tool_output"] = _sanitize(event.get("tool_output", event.get("tool_response")))
     return payload

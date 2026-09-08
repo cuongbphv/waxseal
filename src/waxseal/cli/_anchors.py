@@ -98,9 +98,7 @@ _RECEIPTS_LIMIT_NOTE: Final = (
 )
 
 
-def _receipts_check(
-    log: AuditLog, trail: Path | None, hashes: list[str] | None = None
-) -> _Check:
+def _receipts_check(log: AuditLog, trail: Path | None, hashes: list[str] | None = None) -> _Check:
     """Reconcile the `.receipts` sidecar against the trail as it stands now.
 
     A receipt is a second authority's write-time acknowledgment that entry

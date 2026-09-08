@@ -54,9 +54,12 @@ class TestConsistent:
 
         code = main(
             [
-                "consistency", str(path),
-                "--old-seq", str(old["seq"]),
-                "--old-root", str(old["root"]),
+                "consistency",
+                str(path),
+                "--old-seq",
+                str(old["seq"]),
+                "--old-root",
+                str(old["root"]),
             ]
         )
         assert code == 0
@@ -67,13 +70,19 @@ class TestConsistent:
     ) -> None:
         path = trail_of(tmp_path, 2)
         old = checkpoint_output(path, capsys)
-        assert main(
-            [
-                "consistency", str(path),
-                "--old-seq", str(old["seq"]),
-                "--old-root", str(old["root"]),
-            ]
-        ) == 0
+        assert (
+            main(
+                [
+                    "consistency",
+                    str(path),
+                    "--old-seq",
+                    str(old["seq"]),
+                    "--old-root",
+                    str(old["root"]),
+                ]
+            )
+            == 0
+        )
 
 
 class TestInconsistent:
@@ -81,9 +90,7 @@ class TestInconsistent:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = trail_of(tmp_path, 3)
-        assert main(
-            ["consistency", str(path), "--old-seq", "1", "--old-root", "a" * 64]
-        ) == 1
+        assert main(["consistency", str(path), "--old-seq", "1", "--old-root", "a" * 64]) == 1
         out = capsys.readouterr().out
         assert "INCONSISTENT" in out
         # Evidence, not a verdict: the line names WHAT diverged (the root the
@@ -102,13 +109,19 @@ class TestInconsistent:
         first["entry_hash"] = "f" * 64
         path.write_text("\n".join([json.dumps(first), *lines[1:]]) + "\n")
 
-        assert main(
-            [
-                "consistency", str(path),
-                "--old-seq", str(old["seq"]),
-                "--old-root", str(old["root"]),
-            ]
-        ) == 1
+        assert (
+            main(
+                [
+                    "consistency",
+                    str(path),
+                    "--old-seq",
+                    str(old["seq"]),
+                    "--old-root",
+                    str(old["root"]),
+                ]
+            )
+            == 1
+        )
 
 
 class TestUnverifiable:
@@ -120,18 +133,14 @@ class TestUnverifiable:
         # proof over entries that are not there cannot be computed. Reported
         # as unverifiable, with the ambiguity stated, never as "tampered".
         path = trail_of(tmp_path, 2)
-        assert main(
-            ["consistency", str(path), "--old-seq", "9", "--old-root", "a" * 64]
-        ) == 2
+        assert main(["consistency", str(path), "--old-seq", "9", "--old-root", "a" * 64]) == 2
         out = capsys.readouterr().out
         assert "cannot" in out
         assert "truncat" in out  # the honest half of the ambiguity is stated
 
     def test_a_negative_old_seq_is_exit_2(self, tmp_path: Path) -> None:
         path = trail_of(tmp_path, 2)
-        assert main(
-            ["consistency", str(path), "--old-seq", "-1", "--old-root", "a" * 64]
-        ) == 2
+        assert main(["consistency", str(path), "--old-seq", "-1", "--old-root", "a" * 64]) == 2
 
     def test_a_non_hex_root_is_exit_2_not_inconsistent(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -140,25 +149,19 @@ class TestUnverifiable:
         # that as INCONSISTENT would turn an operator's typo into split-view
         # evidence, so malformed input is screened out first.
         path = trail_of(tmp_path, 2)
-        assert main(
-            ["consistency", str(path), "--old-seq", "0", "--old-root", "z" * 64]
-        ) == 2
+        assert main(["consistency", str(path), "--old-seq", "0", "--old-root", "z" * 64]) == 2
         assert "INCONSISTENT" not in capsys.readouterr().out
 
     def test_a_wrong_length_root_is_exit_2(self, tmp_path: Path) -> None:
         path = trail_of(tmp_path, 2)
-        assert main(
-            ["consistency", str(path), "--old-seq", "0", "--old-root", "abcd"]
-        ) == 2
+        assert main(["consistency", str(path), "--old-seq", "0", "--old-root", "abcd"]) == 2
 
     def test_a_root_with_whitespace_is_exit_2(self, tmp_path: Path) -> None:
         # bytes.fromhex tolerates spaces, so a 64-char "root" with one inside
         # would otherwise slip past both the length check and the decode.
         path = trail_of(tmp_path, 2)
         spaced = "a" * 32 + " " + "a" * 31
-        assert main(
-            ["consistency", str(path), "--old-seq", "0", "--old-root", spaced]
-        ) == 2
+        assert main(["consistency", str(path), "--old-seq", "0", "--old-root", spaced]) == 2
 
     def test_an_empty_but_existing_trail_is_exit_2(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -167,18 +170,22 @@ class TestUnverifiable:
         # empty file is not a missing trail (that is exit 3).
         path = tmp_path / "trail.jsonl"
         path.write_text("")
-        assert main(
-            ["consistency", str(path), "--old-seq", "0", "--old-root", "a" * 64]
-        ) == 2
+        assert main(["consistency", str(path), "--old-seq", "0", "--old-root", "a" * 64]) == 2
         assert "empty trail" in capsys.readouterr().out
 
 
 class TestTrailMissing:
     def test_a_missing_trail_is_exit_3(self, tmp_path: Path) -> None:
-        assert main(
-            [
-                "consistency", str(tmp_path / "absent.jsonl"),
-                "--old-seq", "0",
-                "--old-root", "a" * 64,
-            ]
-        ) == 3
+        assert (
+            main(
+                [
+                    "consistency",
+                    str(tmp_path / "absent.jsonl"),
+                    "--old-seq",
+                    "0",
+                    "--old-root",
+                    "a" * 64,
+                ]
+            )
+            == 3
+        )

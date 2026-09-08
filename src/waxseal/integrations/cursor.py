@@ -58,21 +58,35 @@ PAYLOAD_TYPE = "application/vnd.cursor.hook-event+json"
 # fields (e.g. beforeReadFile's full file content) are deliberately dropped:
 # the trail records actions, not a copy of the workspace.
 _EVENT_FIELDS = (
-    "command", "cwd", "output", "duration", "sandbox",
-    "tool_name", "tool_input", "result_json", "url",
-    "file_path", "edits", "prompt", "attachments", "status", "loop_count",
-    "error_message", "failure_type",
+    "command",
+    "cwd",
+    "output",
+    "duration",
+    "sandbox",
+    "tool_name",
+    "tool_input",
+    "result_json",
+    "url",
+    "file_path",
+    "edits",
+    "prompt",
+    "attachments",
+    "status",
+    "loop_count",
+    "error_message",
+    "failure_type",
 )
 _COMMON_FIELDS = (
-    "conversation_id", "generation_id", "model", "workspace_roots",
+    "conversation_id",
+    "generation_id",
+    "model",
+    "workspace_roots",
 )
 
 
 def _trail_path(event: dict[str, Any]) -> Path:
     return resolve_trail(
-        default=lambda: routed_trail(
-            home_base() / ".cursor" / "waxseal", _project_key(event)
-        )
+        default=lambda: routed_trail(home_base() / ".cursor" / "waxseal", _project_key(event))
     )
 
 

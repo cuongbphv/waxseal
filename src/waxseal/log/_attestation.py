@@ -157,14 +157,20 @@ def verify_sidecar(
             agg_data = attestor.read_aggregate()
         except (ValueError, KeyError, TypeError):
             return AttestResult(
-                ok=False, checked=result.checked, broken_seq=None,
-                reason="malformed_aggregate", unverifiable=result.unverifiable,
+                ok=False,
+                checked=result.checked,
+                broken_seq=None,
+                reason="malformed_aggregate",
+                unverifiable=result.unverifiable,
             )
         has_agg_row = any(att.scheme == FS_HMAC_AGG_SCHEME for att in attestations)
         if has_agg_row and agg_data is None:
             return AttestResult(
-                ok=False, checked=result.checked, broken_seq=None,
-                reason="aggregate_missing", unverifiable=result.unverifiable,
+                ok=False,
+                checked=result.checked,
+                broken_seq=None,
+                reason="aggregate_missing",
+                unverifiable=result.unverifiable,
             )
         if agg_data is not None:
             agg_start, epoch, agg = agg_data
@@ -173,7 +179,10 @@ def verify_sidecar(
             )
             if reason is not None:
                 return AttestResult(
-                    ok=False, checked=result.checked, broken_seq=None,
-                    reason=reason, unverifiable=result.unverifiable,
+                    ok=False,
+                    checked=result.checked,
+                    broken_seq=None,
+                    reason=reason,
+                    unverifiable=result.unverifiable,
                 )
     return result

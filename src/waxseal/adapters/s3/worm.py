@@ -465,15 +465,13 @@ def bucket_worm_state(client: Any, *, bucket: str) -> WormReport:
                 subject=WormSubject.BUCKET,
                 state=WormState.UNLOCKED,
                 strength=WormStrength.UNESTABLISHED,
-                detail=f"S3 reports no Object Lock configuration on {bucket!r} "
-                f"({_describe(exc)})",
+                detail=f"S3 reports no Object Lock configuration on {bucket!r} ({_describe(exc)})",
             )
         return WormReport(
             subject=WormSubject.BUCKET,
             state=WormState.UNKNOWN,
             strength=WormStrength.UNESTABLISHED,
-            detail=f"the bucket's Object Lock configuration could not be read "
-            f"({_describe(exc)})",
+            detail=f"the bucket's Object Lock configuration could not be read ({_describe(exc)})",
         )
 
     config = reply.get("ObjectLockConfiguration") if isinstance(reply, dict) else None
@@ -521,6 +519,7 @@ def bucket_worm_state(client: Any, *, bucket: str) -> WormReport:
         detail=f"Object Lock is enabled on {bucket!r}; no default retention rule was "
         "readable, so per-object retention is the only mechanism in play",
     )
+
 
 # The ONE sentence in this module that promises storage-level refusal, named so
 # that a test can sweep the whole label surface and assert exactly one finding
@@ -644,7 +643,5 @@ def render_worm_state(report: WormReport) -> list[str]:
     """
     return [
         f"{report.subject.value}/{report.state.value}/{report.strength.value}: "
-        + _WORM_LABEL[(report.subject, report.state, report.strength)].format(
-            detail=report.detail
-        )
+        + _WORM_LABEL[(report.subject, report.state, report.strength)].format(detail=report.detail)
     ]

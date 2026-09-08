@@ -61,9 +61,7 @@ def render_incidents(
         for view in scan.views:
             record = view.latest
             kinds = (
-                ", ".join(record.consequence_kinds)
-                if record.consequence_kinds
-                else "none declared"
+                ", ".join(record.consequence_kinds) if record.consequence_kinds else "none declared"
             )
             status = (
                 repr(record.operating_status)

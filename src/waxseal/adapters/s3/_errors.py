@@ -18,7 +18,8 @@ def _error_code(exc: Exception) -> str:
     if isinstance(response, dict):
         return str(response.get("Error", {}).get("Code", ""))
     return ""
+
+
 def _describe(exc: Exception) -> str:
     code = _error_code(exc)
     return f"{type(exc).__name__} code={code!r}: {exc}"
-

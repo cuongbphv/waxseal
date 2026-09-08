@@ -72,8 +72,16 @@ class TestPayloadShape:
         # rule 5: absent and unmeasured must not look alike. An omitted key
         # would be indistinguishable from a schema that never had the field.
         payload = to_payload(minimal())
-        for key in ("rationale", "policy_version", "confidence", "human_oversight",
-                    "subject_ref", "trace_id", "risk_tier", "classification_ref"):
+        for key in (
+            "rationale",
+            "policy_version",
+            "confidence",
+            "human_oversight",
+            "subject_ref",
+            "trace_id",
+            "risk_tier",
+            "classification_ref",
+        ):
             assert key in payload, key
             assert payload[key] is None, key
 
@@ -177,9 +185,7 @@ class TestValidation:
     # it looks like evidence and proves nothing. These reject at write time,
     # where the caller can still fix it, rather than at audit time.
 
-    @pytest.mark.parametrize(
-        "field", ["decision_id", "decision_type", "system_id", "outcome"]
-    )
+    @pytest.mark.parametrize("field", ["decision_id", "decision_type", "system_id", "outcome"])
     def test_empty_required_string_is_rejected(self, field: str) -> None:
         kwargs = {
             "decision_id": "d",
@@ -203,9 +209,7 @@ class TestValidation:
         with pytest.raises(ValueError, match="mode"):
             HumanOversight(mode="")
 
-    @pytest.mark.parametrize(
-        "bad", ["", "abc", "A" * 64, "g" * 64, HEX64 + "a", " " + "a" * 63]
-    )
+    @pytest.mark.parametrize("bad", ["", "abc", "A" * 64, "g" * 64, HEX64 + "a", " " + "a" * 63])
     def test_input_commitment_must_be_64_lowercase_hex(self, bad: str) -> None:
         with pytest.raises(ValueError, match="input_commitment"):
             DecisionRecord(

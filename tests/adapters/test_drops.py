@@ -58,7 +58,9 @@ class TestRecord:
             recorder.record(reason=reason)
         lines = (tmp_path / "trail.jsonl.drops").read_text().splitlines()
         assert [json.loads(line)["reason"] for line in lines] == [
-            "ValueError", "TypeError", "OSError",
+            "ValueError",
+            "TypeError",
+            "OSError",
         ]
 
 
@@ -159,9 +161,7 @@ class TestTheRecorderNeverRaises:
         monkeypatch.setattr(os_module, "fdopen", explode)
         recorder.record(reason="ValueError")  # must not raise
 
-    def test_an_unserializable_field_is_swallowed_like_a_failed_write(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_unserializable_field_is_swallowed_like_a_failed_write(self, tmp_path: Path) -> None:
         # Deliberately broader than OSError: a broken now_fn must not turn an
         # already-handled drop into an unhandled exception.
         recorder = FileDropRecorder(

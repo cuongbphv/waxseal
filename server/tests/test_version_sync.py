@@ -25,9 +25,7 @@ SERVER_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_api_version_matches_pyproject_and_the_installed_package() -> None:
-    declared = tomllib.loads((SERVER_ROOT / "pyproject.toml").read_text())[
-        "project"
-    ]["version"]
+    declared = tomllib.loads((SERVER_ROOT / "pyproject.toml").read_text())["project"]["version"]
     assert declared == API_VERSION
 
 

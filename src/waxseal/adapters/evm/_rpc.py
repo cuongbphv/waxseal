@@ -43,6 +43,7 @@ class _RpcRevert(LedgerUnreachable):
     def selector(self) -> bytes:
         return self.data[:4]
 
+
 def _hex_bytes(what: str, value: object) -> bytes:
     if not isinstance(value, str) or not value.startswith("0x"):
         raise LedgerUnreachable(f"{what}: the node returned {value!r}, which is not 0x-hex")

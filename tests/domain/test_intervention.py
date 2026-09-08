@@ -60,10 +60,7 @@ def intervention_entry(seq: int, record: InterventionRecord) -> Entry:
 
 class TestInterventionPayloadType:
     def test_payload_type_names_the_schema_and_its_version(self) -> None:
-        assert (
-            INTERVENTION_PAYLOAD_TYPE
-            == "application/vnd.waxseal.human-intervention.v1+json"
-        )
+        assert INTERVENTION_PAYLOAD_TYPE == "application/vnd.waxseal.human-intervention.v1+json"
 
 
 class TestInterventionSchema:
@@ -94,9 +91,7 @@ class TestInterventionSchema:
         with pytest.raises(ValueError, match="JSON object"):
             from_payload("not a dict")
 
-    @pytest.mark.parametrize(
-        "field", ["intervention_id", "system_id", "actor_ref", "action"]
-    )
+    @pytest.mark.parametrize("field", ["intervention_id", "system_id", "actor_ref", "action"])
     def test_from_payload_rejects_a_missing_required_field(self, field: str) -> None:
         payload = to_payload(a_record())
         del payload[field]
@@ -115,9 +110,7 @@ class TestInterventionSchema:
         with pytest.raises(ValueError, match="decision_ref"):
             from_payload(payload)
 
-    @pytest.mark.parametrize(
-        "field", ["intervention_id", "system_id", "actor_ref", "action"]
-    )
+    @pytest.mark.parametrize("field", ["intervention_id", "system_id", "actor_ref", "action"])
     def test_rejects_an_empty_required_field(self, field: str) -> None:
         with pytest.raises(ValueError, match=field):
             a_record(**{field: ""})

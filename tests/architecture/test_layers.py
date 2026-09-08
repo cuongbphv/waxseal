@@ -38,8 +38,7 @@ class TestFacadeEncapsulation:
         offenders = [
             str(path.relative_to(REPO))
             for path in source_files()
-            if "._backend" in path.read_text(encoding="utf-8")
-            and not _is_log_module(path)
+            if "._backend" in path.read_text(encoding="utf-8") and not _is_log_module(path)
         ]
         assert offenders == []
 

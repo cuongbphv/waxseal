@@ -184,7 +184,11 @@ class TestReport:
         AuditLog(log._backend, anchor_sink=FileAnchorSink(path)).anchor()
         assert main(["report", str(path), "--anchors", "--json"]) == 0
         assert json.loads(capsys.readouterr().out)["anchors"] == {
-            "ok": True, "checked": 1, "reason": None, "unverifiable": False, "notes": []
+            "ok": True,
+            "checked": 1,
+            "reason": None,
+            "unverifiable": False,
+            "notes": [],
         }
 
     def test_without_the_flag_anchors_are_reported_unchecked_not_ok(
@@ -217,7 +221,6 @@ class TestReport:
         (tmp_path / "trail.jsonl.anchors").write_text("{not json\n")
         assert main(["report", str(path), "--anchors"]) == 1
         assert "malformed_anchor" in capsys.readouterr().out
-
 
     def test_a_measured_drop_count_reaches_the_report(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -296,7 +299,10 @@ class TestReportSeparationDegree:
 
         state = json.loads(pin.read_text())
         state["declared_topology"] = {
-            "seal_escrow": True, "anchor_sinks": 2, "witness": True, "pin_separate": True,
+            "seal_escrow": True,
+            "anchor_sinks": 2,
+            "witness": True,
+            "pin_separate": True,
         }
         pin.write_text(json.dumps(state))
 
@@ -489,9 +495,7 @@ class TestNarrowConsole:
         assert out.errors == "backslashreplace"
         assert err.errors == "backslashreplace"
 
-    def test_a_capable_console_is_left_untouched(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_capable_console_is_left_untouched(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Reconfiguring a console that can already encode the output would
         # silently change error handling the operator chose.
         out = self.FakeStream("utf-8")

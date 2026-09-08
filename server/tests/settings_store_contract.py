@@ -68,9 +68,7 @@ class SettingsStoreContract:
         store.unset("page_size")
         assert store.unset("page_size") is False
 
-    def test_unsetting_something_never_set_reports_that_it_did_nothing(
-        self, store: Any
-    ) -> None:
+    def test_unsetting_something_never_set_reports_that_it_did_nothing(self, store: Any) -> None:
         assert store.unset("ledger_bond_address") is False
 
     def test_unsetting_one_leaves_the_others(self, store: Any) -> None:
@@ -82,17 +80,13 @@ class SettingsStoreContract:
     # -------------------------------------------------------------- refusals
 
     @pytest.mark.parametrize("key", sorted(FORBIDDEN))
-    def test_an_environment_only_setting_cannot_be_read_here(
-        self, store: Any, key: str
-    ) -> None:
+    def test_an_environment_only_setting_cannot_be_read_here(self, store: Any, key: str) -> None:
         # Answering None would imply such a setting could exist in this store.
         with pytest.raises(NoSuchSetting):
             store.get(key)
 
     @pytest.mark.parametrize("key", sorted(FORBIDDEN))
-    def test_an_environment_only_setting_cannot_be_written_here(
-        self, store: Any, key: str
-    ) -> None:
+    def test_an_environment_only_setting_cannot_be_written_here(self, store: Any, key: str) -> None:
         # The one that matters most: no adapter may accept a credential.
         with pytest.raises(NoSuchSetting):
             store.set(key, "something")
@@ -155,14 +149,10 @@ class SettingsStoreContract:
             "https://b.example.test",
         ]
 
-    def test_an_unset_endpoint_list_is_empty_never_a_one_item_list(
-        self, store: Any
-    ) -> None:
+    def test_an_unset_endpoint_list_is_empty_never_a_one_item_list(self, store: Any) -> None:
         assert rpc_endpoints(store.get("ledger_rpc_urls")) == []
 
-    def test_an_empty_string_is_refused_rather_than_meaning_unset(
-        self, store: Any
-    ) -> None:
+    def test_an_empty_string_is_refused_rather_than_meaning_unset(self, store: Any) -> None:
         # "Back to default" is `unset`. Blanking a value is a different
         # instruction and must not share one.
         with pytest.raises(InvalidIdentifier):

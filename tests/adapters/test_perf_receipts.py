@@ -118,9 +118,7 @@ class _CountingFile:
         return self._fileobj.tell(*args, **kwargs)
 
 
-def _count_reads_of(
-    path: Path, monkeypatch: pytest.MonkeyPatch, sink: list[int]
-) -> None:
+def _count_reads_of(path: Path, monkeypatch: pytest.MonkeyPatch, sink: list[int]) -> None:
     """Patch ``waxseal.adapters.jsonl.open`` so reads of ``path`` are counted."""
     real_open = open
 
@@ -349,9 +347,7 @@ class TestIntegrityScanResume:
             backend._integrity_scan()
         assert exc_info.value.line_no == 4
 
-    def test_a_fresh_backend_scans_the_whole_file_it_did_not_write(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_fresh_backend_scans_the_whole_file_it_did_not_write(self, tmp_path: Path) -> None:
         # The resume point is per-instance in-memory state: a new process
         # (new backend object) has cleared nothing and must scan everything.
         path = tmp_path / "trail.jsonl"
@@ -395,9 +391,7 @@ class TestReportReadsOnce:
             "verifying and summarizing in two separate passes"
         )
 
-    def test_an_unterminated_final_line_is_re_read_by_the_next_scan(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_unterminated_final_line_is_re_read_by_the_next_scan(self, tmp_path: Path) -> None:
         # A tail without its newline is a torn write, not a cleared line: the
         # bytes that complete it have not been seen yet, so clearing the
         # offset past them would skip whatever they turn out to be.
@@ -478,9 +472,7 @@ class TestVerifyReadsHashesOnce:
         assert _anchor_check(log, path).summary.ok
         assert _receipts_check(log, path).summary.ok
         assert _witness_verdicts(log, ["http://127.0.0.1:1"])
-        check, _pending = _pin_check(
-            log, tmp_path / "pin.json", target=str(path), chain_id=None
-        )
+        check, _pending = _pin_check(log, tmp_path / "pin.json", target=str(path), chain_id=None)
         capsys.readouterr()
         assert check.summary.ok
 
@@ -616,5 +608,3 @@ class TestIncrementalMerkleCumulativeCost:
             f"incremental {incremental} hashes vs replayed {replayed}; "
             "appending a leaf must not rehash the whole prefix"
         )
-
-

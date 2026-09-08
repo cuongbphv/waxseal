@@ -233,9 +233,7 @@ class TestCompleteness:
         assert report.drops_source is None
 
     def test_measured_zero_is_distinct_from_unmeasured(self) -> None:
-        report = build_report(
-            replace(OK, dropped_writes=0, drops_source="sidecar"), []
-        )
+        report = build_report(replace(OK, dropped_writes=0, drops_source="sidecar"), [])
         assert report.dropped_writes == 0
         assert report.drops_source == "sidecar"
 
@@ -330,9 +328,7 @@ class TestJsonRendering:
         topology = SeparationTopology(
             seal_escrow=False, anchor_sinks=1, witness=False, pin_separate=True
         )
-        obj = json.loads(
-            build_report(OK, [], declared_topology=topology).to_json()
-        )
+        obj = json.loads(build_report(OK, [], declared_topology=topology).to_json())
         assert obj["separation"]["tau"] == 3
         assert obj["separation"]["counted_authorities"] == [
             {"name": "writer", "count": 1},
@@ -348,8 +344,12 @@ class TestMarkdownRendering:
 
     def test_broken_trail_names_the_row_and_the_reason(self) -> None:
         verdict = VerifyResult(
-            ok=False, checked=1, broken_seq=4, reason="entry_hash_mismatch",
-            unverifiable=(), dropped_writes=None,
+            ok=False,
+            checked=1,
+            broken_seq=4,
+            reason="entry_hash_mismatch",
+            unverifiable=(),
+            dropped_writes=None,
         )
         md = build_report(verdict, []).to_markdown()
         assert "4" in md and "entry_hash_mismatch" in md
@@ -509,9 +509,7 @@ class TestWitnessRendering:
         md = build_report(
             OK,
             [],
-            witnesses=(
-                self.verdict(status=WITNESS_UNREACHABLE, checked=0, reason="timed out"),
-            ),
+            witnesses=(self.verdict(status=WITNESS_UNREACHABLE, checked=0, reason="timed out"),),
         ).to_markdown()
         assert "**unreachable**" in md
         assert "not a pass" in md

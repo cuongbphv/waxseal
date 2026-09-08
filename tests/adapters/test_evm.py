@@ -270,8 +270,9 @@ class TestConstruction:
         # `ledger-status --liveness` without `--registry` must read as
         # "nothing was measured", never as agreement.
         with pytest.raises(LedgerUnreachable, match="no registry contract address"):
-            reader(both(liveness_node()), contracts=EvmContracts(liveness=LIVENESS_ADDRESS)) \
-                .registry_lookup("00" * 32)
+            reader(
+                both(liveness_node()), contracts=EvmContracts(liveness=LIVENESS_ADDRESS)
+            ).registry_lookup("00" * 32)
 
 
 # ============================================================= the read path
@@ -335,9 +336,9 @@ class TestLatestCheckpoint:
         # fallback. Misread as a plain RPC error, an unrecognised revert would
         # be indistinguishable from a rate limit.
         with pytest.raises(LedgerUnreachable, match="custom error 0xdeadbeef"):
-            reader(
-                both(calls({LAST_SEEN: revert("deadbeef", code=-32000)}))
-            ).latest_checkpoint("trail")
+            reader(both(calls({LAST_SEEN: revert("deadbeef", code=-32000)}))).latest_checkpoint(
+                "trail"
+            )
 
     def test_a_recognised_revert_is_absence_however_the_node_codes_it(self) -> None:
         node = calls({LAST_SEEN: revert(code=-32000)})
@@ -373,9 +374,9 @@ class TestDisagreement:
     def test_two_heads_disagreeing_raise_and_name_the_pair(self) -> None:
         other = ok(hexdata(word(9), hex32(ENTRY_HASH), hex32(ROOT), word(1_756_000_000)))
         with pytest.raises(LedgerDisagreement) as caught:
-            reader(
-                {URL_A: liveness_node(), URL_B: calls({LAST_SEEN: other})}
-            ).latest_checkpoint("trail")
+            reader({URL_A: liveness_node(), URL_B: calls({LAST_SEEN: other})}).latest_checkpoint(
+                "trail"
+            )
         message = str(caught.value)
         assert URL_A in message and URL_B in message
         assert "seq=41" in message and "seq=9" in message
@@ -503,9 +504,12 @@ class TestDeadline:
 
 class TestRegistryLookup:
     def test_a_published_descriptor_comes_back_as_bytes(self) -> None:
-        assert reader(
-            both(calls({LOOKUP: ok(dynamic_bytes(b"descriptor bytes"))}))
-        ).registry_lookup("00" * 32) == b"descriptor bytes"
+        assert (
+            reader(both(calls({LOOKUP: ok(dynamic_bytes(b"descriptor bytes"))}))).registry_lookup(
+                "00" * 32
+            )
+            == b"descriptor bytes"
+        )
 
     def test_an_empty_descriptor_is_absence(self) -> None:
         node = both(calls({LOOKUP: ok(dynamic_bytes(b""))}))
@@ -651,9 +655,9 @@ class TestRegistryTernary:
 
     def test_agrees(self) -> None:
         cross, fp, raw = self.known()
-        finding = reader(
-            both(calls({LOOKUP: ok(dynamic_bytes(raw))}))
-        ).registry_agreement(cross, fp)
+        finding = reader(both(calls({LOOKUP: ok(dynamic_bytes(raw))}))).registry_agreement(
+            cross, fp
+        )
         assert finding.status == REGISTRY_AGREES
 
     def test_disagrees_is_unverifiable_never_broken(self) -> None:
@@ -687,12 +691,10 @@ class TestRegistryTernary:
 
     def test_absent_and_unreachable_render_as_different_states(self) -> None:
         cross, fp, _ = self.known()
-        absent = reader(both(calls({LOOKUP: ok(dynamic_bytes(b""))}))).registry_agreement(
+        absent = reader(both(calls({LOOKUP: ok(dynamic_bytes(b""))}))).registry_agreement(cross, fp)
+        unreachable = reader({URL_A: Down("refused"), URL_B: Down("refused")}).registry_agreement(
             cross, fp
         )
-        unreachable = reader(
-            {URL_A: Down("refused"), URL_B: Down("refused")}
-        ).registry_agreement(cross, fp)
         assert absent.status != unreachable.status
         assert absent.reason != unreachable.reason
         # Both are still exit 2 -- never a break -- which is exactly why the
@@ -1081,9 +1083,9 @@ class TestEvmAnchorSink:
     def test_an_injected_proof_fn_supplies_the_consistency_proof(self) -> None:
         chain = FakeChain()
         proof = ["ab" * 32]
-        EvmAnchorSink(
-            sink(chain), "trail", FakeSigner(), proof_fn=lambda _cp: proof
-        ).anchor(CHECKPOINT)
+        EvmAnchorSink(sink(chain), "trail", FakeSigner(), proof_fn=lambda _cp: proof).anchor(
+            CHECKPOINT
+        )
         assert bytes.fromhex("ab" * 32) in bytes.fromhex(chain.calldata[0][2:])
 
     def test_the_sink_names_itself_evm(self) -> None:
@@ -1178,11 +1180,7 @@ class TestTheCoreDoesNotImportTheExtra:
         import subprocess
         import sys
 
-        probe = (
-            "import sys, waxseal;"
-            "loaded=[m for m in sys.modules if 'evm' in m];"
-            "print(loaded)"
-        )
+        probe = "import sys, waxseal;loaded=[m for m in sys.modules if 'evm' in m];print(loaded)"
         out = subprocess.run(
             [sys.executable, "-c", probe], capture_output=True, text=True, check=True
         )

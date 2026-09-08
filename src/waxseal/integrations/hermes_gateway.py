@@ -88,9 +88,7 @@ def handle(event_type: str, context: dict[str, Any] | None) -> None:
         # best-effort (FileDropRecorder.record() never raises).
         from waxseal.adapters.drops import FileDropRecorder
 
-        FileDropRecorder(_trail_path()).record(
-            reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-        )
+        FileDropRecorder(_trail_path()).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
         return
     payload = {"event": event_type, **_sanitize(context or {})}
     if not log.try_append(payload=payload, payload_type=PAYLOAD_TYPE):

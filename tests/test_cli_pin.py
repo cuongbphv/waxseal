@@ -827,9 +827,7 @@ class TestLedgerShortfall:
 
     LIVENESS = "0x" + "33" * 20
 
-    def _two_nodes(
-        self, handler: object
-    ) -> tuple[list[str], tuple[object, object]]:
+    def _two_nodes(self, handler: object) -> tuple[list[str], tuple[object, object]]:
         from tests._fake_evm_rpc import start_fake_node
 
         url_a, server_a = start_fake_node(handler)  # type: ignore[arg-type]
@@ -862,8 +860,16 @@ class TestLedgerShortfall:
         try:
             code = main(
                 [
-                    "verify", str(trail), "--pin", str(pin),
-                    "--liveness", self.LIVENESS, "--rpc", urls[0], "--rpc", urls[1],
+                    "verify",
+                    str(trail),
+                    "--pin",
+                    str(pin),
+                    "--liveness",
+                    self.LIVENESS,
+                    "--rpc",
+                    urls[0],
+                    "--rpc",
+                    urls[1],
                 ]
             )
         finally:
@@ -890,8 +896,16 @@ class TestLedgerShortfall:
         try:
             code = main(
                 [
-                    "verify", str(trail), "--pin", str(pin),
-                    "--liveness", self.LIVENESS, "--rpc", urls[0], "--rpc", urls[1],
+                    "verify",
+                    str(trail),
+                    "--pin",
+                    str(pin),
+                    "--liveness",
+                    self.LIVENESS,
+                    "--rpc",
+                    urls[0],
+                    "--rpc",
+                    urls[1],
                 ]
             )
         finally:
@@ -947,8 +961,16 @@ class TestLedgerShortfall:
         try:
             code = main(
                 [
-                    "verify", str(trail), "--pin", str(pin),
-                    "--liveness", self.LIVENESS, "--rpc", urls[0], "--rpc", urls[1],
+                    "verify",
+                    str(trail),
+                    "--pin",
+                    str(pin),
+                    "--liveness",
+                    self.LIVENESS,
+                    "--rpc",
+                    urls[0],
+                    "--rpc",
+                    urls[1],
                 ]
             )
         finally:
@@ -1091,9 +1113,7 @@ class TestAnchorStaleness:
 
     FIXED = datetime(2026, 8, 29, 12, 0, 0, tzinfo=UTC)
 
-    def _verify_at(
-        self, trail: Path, *, pin: Path, check_anchors: bool = True
-    ) -> int:
+    def _verify_at(self, trail: Path, *, pin: Path, check_anchors: bool = True) -> int:
         from waxseal.cli import _verify
 
         return _verify(
@@ -1320,9 +1340,7 @@ class TestAnchorPolicyDowngrade:
     uncorroborated.
     """
 
-    def _verify_at(
-        self, trail: Path, *, pin: Path, check_anchors: bool = True
-    ) -> int:
+    def _verify_at(self, trail: Path, *, pin: Path, check_anchors: bool = True) -> int:
         from waxseal.cli import _verify
 
         return _verify(
@@ -1564,8 +1582,7 @@ class TestDeclaredTopologySpecParsing:
 
         with pytest.raises(ValueError, match="given more than once"):
             _parse_declared_topology_spec(
-                "seal_escrow=true,seal_escrow=false,anchor_sinks=2,"
-                "witness=true,pin_separate=true"
+                "seal_escrow=true,seal_escrow=false,anchor_sinks=2,witness=true,pin_separate=true"
             )
 
     def test_an_unknown_field_is_rejected(self) -> None:
@@ -1573,8 +1590,7 @@ class TestDeclaredTopologySpecParsing:
 
         with pytest.raises(ValueError, match="unknown declared_topology field"):
             _parse_declared_topology_spec(
-                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
-                "extra=true"
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,extra=true"
             )
 
     def test_a_non_boolean_value_is_rejected(self) -> None:
@@ -1600,8 +1616,7 @@ class TestDeclaredTopologySpecParsing:
         from waxseal.cli import _parse_declared_topology_spec
 
         topology = _parse_declared_topology_spec(
-            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
-            "ledger=true"
+            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,ledger=true"
         )
         assert topology.ledger is True
 
@@ -1609,8 +1624,7 @@ class TestDeclaredTopologySpecParsing:
         from waxseal.cli import _parse_declared_topology_spec
 
         topology = _parse_declared_topology_spec(
-            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
-            "ledger=false"
+            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,ledger=false"
         )
         assert topology.ledger is False
 
@@ -1636,8 +1650,7 @@ class TestDeclaredTopologySpecParsing:
 
         with pytest.raises(ValueError, match="must be 'true' or 'false'"):
             _parse_declared_topology_spec(
-                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
-                "ledger=maybe"
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,ledger=maybe"
             )
 
 
@@ -1649,16 +1662,12 @@ class TestDeclareViaCLI:
     `_add_expect_anchor_binding` as a stand-in for exactly this.
     """
 
-    def test_expect_anchor_binding_alone_is_true_others_omitted(
-        self, tmp_path: Path
-    ) -> None:
+    def test_expect_anchor_binding_alone_is_true_others_omitted(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
         pin = tmp_path / "pin.json"
         make_trail(trail, 2)
 
-        assert (
-            main(["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"]) == 0
-        )
+        assert main(["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"]) == 0
         state = json.loads(pin.read_text())
         assert state["expect_anchor_binding"] is True
         assert "max_anchor_age_s" not in state
@@ -1684,7 +1693,10 @@ class TestDeclareViaCLI:
 
         code = main(
             [
-                "verify", str(trail), "--pin", str(pin),
+                "verify",
+                str(trail),
+                "--pin",
+                str(pin),
                 "--declare-topology",
                 "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false",
             ]
@@ -1711,10 +1723,12 @@ class TestDeclareViaCLI:
 
         code = main(
             [
-                "verify", str(trail), "--pin", str(pin),
+                "verify",
+                str(trail),
+                "--pin",
+                str(pin),
                 "--declare-topology",
-                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false,"
-                "ledger=true",
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false,ledger=true",
             ]
         )
         assert code == 0
@@ -1740,7 +1754,10 @@ class TestDeclareViaCLI:
 
         code = main(
             [
-                "verify", str(trail), "--pin", str(pin),
+                "verify",
+                str(trail),
+                "--pin",
+                str(pin),
                 "--declare-topology",
                 "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false",
             ]
@@ -1759,9 +1776,13 @@ class TestDeclareViaCLI:
         with pytest.raises(SystemExit) as exc:
             main(
                 [
-                    "verify", str(trail), "--pin", str(pin),
+                    "verify",
+                    str(trail),
+                    "--pin",
+                    str(pin),
                     # missing witness/pin_separate — never silently False-filled
-                    "--declare-topology", "seal_escrow=true,anchor_sinks=2",
+                    "--declare-topology",
+                    "seal_escrow=true,anchor_sinks=2",
                 ]
             )
         assert exc.value.code == 2
@@ -1795,9 +1816,7 @@ class TestDeclareViaCLI:
         before = pin.read_text()
         rewrite_whole_trail(trail, 3)
 
-        code = main(
-            ["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"]
-        )
+        code = main(["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"])
         capsys.readouterr()
         assert code == 1
         assert pin.read_text() == before
@@ -1807,9 +1826,7 @@ class TestDeclareViaCLI:
         pin = tmp_path / "pin.json"
         make_trail(trail, 2)
 
-        assert (
-            main(["report", str(trail), "--pin", str(pin), "--expect-anchor-binding"]) == 0
-        )
+        assert main(["report", str(trail), "--pin", str(pin), "--expect-anchor-binding"]) == 0
         assert json.loads(pin.read_text())["expect_anchor_binding"] is True
 
     def test_declaring_again_without_the_flag_preserves_the_prior_declaration(
@@ -1855,9 +1872,7 @@ class TestDeclareViaCLI:
         )
 
         make_trail(trail, 1, start=3)
-        code = main(
-            ["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"]
-        )
+        code = main(["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"])
         assert code == 0
         state = json.loads(pin.read_text())
         assert state["expect_anchor_binding"] is True

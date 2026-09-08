@@ -19,9 +19,7 @@ from waxseal import AuditLog
 
 
 @pytest.fixture()
-def handler(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[types.ModuleType]:
+def handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleType]:
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
     name = "waxseal.integrations.hermes_gateway"
     sys.modules.pop(name, None)

@@ -27,6 +27,7 @@ GREEN = "\033[32m"
 YELLOW = "\033[33m"
 GREY = "\033[90m"
 
+
 def _encodable(probe: str) -> bool:
     """Can this console actually render these characters?
 
@@ -60,12 +61,34 @@ class Glyphs:
 
 
 UNICODE = Glyphs(
-    tl="┌", tr="┐", bl="└", br="┘", h="─", v="│", arrow="▶", check="✓",
-    node="●", tip="◍", link="───", ellipsis="…", spinner="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏",
+    tl="┌",
+    tr="┐",
+    bl="└",
+    br="┘",
+    h="─",
+    v="│",
+    arrow="▶",
+    check="✓",
+    node="●",
+    tip="◍",
+    link="───",
+    ellipsis="…",
+    spinner="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏",
 )
 ASCII = Glyphs(
-    tl="+", tr="+", bl="+", br="+", h="-", v="|", arrow=">", check="*",
-    node="o", tip="@", link="---", ellipsis="...", spinner="|/-\\",
+    tl="+",
+    tr="+",
+    bl="+",
+    br="+",
+    h="-",
+    v="|",
+    arrow=">",
+    check="*",
+    node="o",
+    tip="@",
+    link="---",
+    ellipsis="...",
+    spinner="|/-\\",
 )
 
 

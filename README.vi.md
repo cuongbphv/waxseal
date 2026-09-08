@@ -220,7 +220,7 @@ nguồn duy nhất cho những chuỗi ấy.
 ```python
 from waxseal import AuditLog
 
-log = AuditLog.open("~/.myagent/audit/trail.jsonl")   # hoặc trail.db cho SQLite
+log = AuditLog.open("~/.myagent/audit/trail.jsonl")  # hoặc trail.db cho SQLite
 
 log.append(
     payload={"tool": "bash", "command": "ls -la", "exit_code": 0},
@@ -238,8 +238,10 @@ Redact secret **trước khi** hash và lưu:
 from waxseal.adapters.redactors import RegexRedactor
 
 log = AuditLog.open("trail.jsonl", redactor=RegexRedactor())
-log.append(payload={"cmd": "curl -H 'Authorization: Bearer sk-...'"},
-           payload_type="application/vnd.myagent.toolcall+json")
+log.append(
+    payload={"cmd": "curl -H 'Authorization: Bearer sk-...'"},
+    payload_type="application/vnd.myagent.toolcall+json",
+)
 # cleartext không bao giờ chạm disk; hash cam kết trên payload đã redact
 ```
 
@@ -339,7 +341,7 @@ Ngoài hành động của agent, có thể chain cả lịch sử file/tài li�
 ```python
 from waxseal.sources.files import record_file, current_matches_last
 
-record_file(log, "SPEC.md", doc_id="spec")          # snapshot content hash vào chain
+record_file(log, "SPEC.md", doc_id="spec")  # snapshot content hash vào chain
 current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None (chưa từng ghi)
 ```
 
@@ -362,18 +364,21 @@ from waxseal.sources.decisions import commit_input, record_decision
 redactor = RegexRedactor()
 log = AuditLog.open("decisions.jsonl", redactor=redactor)
 
-record_decision(log, DecisionRecord(
-    decision_id="DEC-1001",
-    decision_type="transaction_approval",
-    system_id="screening-agent",
-    model=ModelRef(name="my-model", version="2026.08.1"),
-    input_commitment=commit_input(model_input, redactor=redactor),  # redact xong mới hash
-    outcome="approve",
-    rationale="dưới ngưỡng, đối tác đã có lịch sử",
-    human_oversight=HumanOversight(mode="automated"),  # None = chưa ghi nhận, KHÁC automated
-    risk_tier="high",           # phân loại của CHÍNH nhà cung cấp; None = chưa khai báo
-    classification_ref="RC-2026-014/v2",   # con trỏ tới hồ sơ, không bao giờ là nội dung hồ sơ
-))
+record_decision(
+    log,
+    DecisionRecord(
+        decision_id="DEC-1001",
+        decision_type="transaction_approval",
+        system_id="screening-agent",
+        model=ModelRef(name="my-model", version="2026.08.1"),
+        input_commitment=commit_input(model_input, redactor=redactor),  # redact xong mới hash
+        outcome="approve",
+        rationale="dưới ngưỡng, đối tác đã có lịch sử",
+        human_oversight=HumanOversight(mode="automated"),  # None = chưa ghi nhận, KHÁC automated
+        risk_tier="high",  # phân loại của CHÍNH nhà cung cấp; None = chưa khai báo
+        classification_ref="RC-2026-014/v2",  # con trỏ tới hồ sơ, không bao giờ là nội dung hồ sơ
+    ),
+)
 ```
 
 `risk_tier` được ghi nguyên văn và không bao giờ được diễn giải: `"high"` và `"cao"`
@@ -415,23 +420,29 @@ from waxseal import IncidentRecord, InterventionRecord
 from waxseal.sources.incidents import record_incident
 from waxseal.sources.interventions import record_intervention
 
-record_incident(log, IncidentRecord(
-    incident_id="INC-2026-0007",
-    system_id="screening-agent",
-    detected_at="2026-09-01T07:10:00+00:00",
-    confirmed_at="2026-09-01T08:00:00+00:00",   # mốc mà một đồng hồ báo cáo bắt đầu chạy từ đó
-    severity="serious",
-    summary="điểm đánh giá lệch sau khi đổi nguồn dữ liệu",  # được redact trước khi hash
-    report_ref=None,          # không có ghi nhận nộp Ở ĐÂY - chưa bao giờ nghĩa là "chưa nộp"
-))
+record_incident(
+    log,
+    IncidentRecord(
+        incident_id="INC-2026-0007",
+        system_id="screening-agent",
+        detected_at="2026-09-01T07:10:00+00:00",
+        confirmed_at="2026-09-01T08:00:00+00:00",  # mốc mà một đồng hồ báo cáo bắt đầu chạy từ đó
+        severity="serious",
+        summary="điểm đánh giá lệch sau khi đổi nguồn dữ liệu",  # được redact trước khi hash
+        report_ref=None,  # không có ghi nhận nộp Ở ĐÂY - chưa bao giờ nghĩa là "chưa nộp"
+    ),
+)
 
-record_intervention(log, InterventionRecord(
-    intervention_id="IV-41",
-    system_id="screening-agent",
-    actor_ref="risk-queue-7",     # giả danh, giống reviewer_ref
-    action="halt",
-    decision_ref="DEC-1001",      # None = không phải hành vi trên một quyết định đã ghi
-))
+record_intervention(
+    log,
+    InterventionRecord(
+        intervention_id="IV-41",
+        system_id="screening-agent",
+        actor_ref="risk-queue-7",  # giả danh, giống reviewer_ref
+        action="halt",
+        decision_ref="DEC-1001",  # None = không phải hành vi trên một quyết định đã ghi
+    ),
+)
 ```
 
 ```bash
@@ -475,8 +486,7 @@ chain không tự đóng được.
 from waxseal import AuditLog
 from waxseal.adapters.anchors import FileAnchorSink
 
-log = AuditLog.open("trail.jsonl",
-                    anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
+log = AuditLog.open("trail.jsonl", anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
 # cứ mỗi 100 lần append, best-effort publish 1 checkpoint ngoài write path;
 # anchor lỗi không bao giờ chặn ghi - chỉ tính vào anchor_failures
 ```
@@ -592,9 +602,8 @@ from waxseal import AuditLog
 from waxseal.adapters.attest import FileAttestor
 from waxseal.domain.sealing import generate_key
 
-k0 = generate_key()                      # gửi A_0 cho verifier, giữ NGOÀI máy này
-log = AuditLog.open("trail.jsonl",
-                    attestor=FileAttestor("trail.jsonl", initial_key=k0))
+k0 = generate_key()  # gửi A_0 cho verifier, giữ NGOÀI máy này
+log = AuditLog.open("trail.jsonl", attestor=FileAttestor("trail.jsonl", initial_key=k0))
 log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 
 log.verify_attestations(initial_key=k0)  # AttestResult(ok=True, checked=1, ...)
@@ -605,8 +614,7 @@ tự import một thư viện crypto nào:
 
 ```python
 # bất kỳ object nào có .algorithm, .key_id, .sign(bytes) -> bytes
-log = AuditLog.open("trail.jsonl",
-                    attestor=FileAttestor("trail.jsonl", signer=my_ed25519_signer))
+log = AuditLog.open("trail.jsonl", attestor=FileAttestor("trail.jsonl", signer=my_ed25519_signer))
 log.verify_attestations(verifier=my_ed25519_verifier)
 ```
 

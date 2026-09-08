@@ -195,9 +195,13 @@ def _pin_check(
 
     reason = check_pin(hashes, stored.checkpoint)
     if reason is not None:
-        return (_Check(CheckSummary(ok=False, checked=0, reason=reason), _pin_break_line(
-            reason, stored.checkpoint.seq
-        )), None)
+        return (
+            _Check(
+                CheckSummary(ok=False, checked=0, reason=reason),
+                _pin_break_line(reason, stored.checkpoint.seq),
+            ),
+            None,
+        )
 
     head = checkpoint_for(hashes)
 
@@ -244,8 +248,12 @@ def _pin_check(
             # evidence the trail itself was tampered with.
             return (
                 _Check(
-                    CheckSummary(ok=True, checked=stored.checkpoint.seq + 1,
-                                 reason=downgrade, unverifiable=True),
+                    CheckSummary(
+                        ok=True,
+                        checked=stored.checkpoint.seq + 1,
+                        reason=downgrade,
+                        unverifiable=True,
+                    ),
                     f"pin ok but {downgrade}: {detail} — NOT evidence of tampering, "
                     "the trail itself still verifies",
                 ),
@@ -284,8 +292,12 @@ def _pin_check(
             # not evidence the trail itself was tampered with.
             return (
                 _Check(
-                    CheckSummary(ok=True, checked=stored.checkpoint.seq + 1,
-                                 reason=staleness, unverifiable=True),
+                    CheckSummary(
+                        ok=True,
+                        checked=stored.checkpoint.seq + 1,
+                        reason=staleness,
+                        unverifiable=True,
+                    ),
                     f"pin ok but {staleness}: {detail} — NOT evidence of tampering, "
                     "the trail itself still verifies",
                 ),
@@ -318,8 +330,12 @@ def _pin_check(
         # ledger authority, not evidence the trail itself was tampered with.
         return (
             _Check(
-                CheckSummary(ok=True, checked=stored.checkpoint.seq + 1,
-                             reason="ledger_shortfall", unverifiable=True),
+                CheckSummary(
+                    ok=True,
+                    checked=stored.checkpoint.seq + 1,
+                    reason="ledger_shortfall",
+                    unverifiable=True,
+                ),
                 f"pin ok but ledger_shortfall: declared ledger=true, this run "
                 f"observed ledger_ok={observed_ledger_ok} — NOT evidence of "
                 "tampering, the trail itself still verifies",
@@ -355,8 +371,12 @@ def _pin_check(
         # topology, not evidence the trail itself was tampered with.
         return (
             _Check(
-                CheckSummary(ok=True, checked=stored.checkpoint.seq + 1,
-                             reason="separation_shortfall", unverifiable=True),
+                CheckSummary(
+                    ok=True,
+                    checked=stored.checkpoint.seq + 1,
+                    reason="separation_shortfall",
+                    unverifiable=True,
+                ),
                 f"pin ok but separation_shortfall: declared "
                 f"anchor_sinks={stored.declared_topology.anchor_sinks} witness="
                 f"{stored.declared_topology.witness}, this run observed "
@@ -395,9 +415,7 @@ def _pin_check(
 
 def _pin_break_line(reason: str, pinned_seq: int) -> str:
     explanations = {
-        "pin_mismatch": (
-            "history this verifier previously confirmed has been rewritten"
-        ),
+        "pin_mismatch": ("history this verifier previously confirmed has been rewritten"),
         "pin_beyond_head": (
             "the trail is shorter than what was already verified — a rollback "
             "or truncation of confirmed history"

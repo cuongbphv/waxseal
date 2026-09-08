@@ -93,9 +93,11 @@ class TestDecodeDescriptor:
 
     def test_a_field_count_that_lies_decodes_to_nothing(self) -> None:
         frame = descriptor_frame(HEADER_FIELDS)
-        lying = frame[: len(DESCRIPTOR_PREFIX)] + struct.pack(">Q", 99) + frame[
-            len(DESCRIPTOR_PREFIX) + 8 :
-        ]
+        lying = (
+            frame[: len(DESCRIPTOR_PREFIX)]
+            + struct.pack(">Q", 99)
+            + frame[len(DESCRIPTOR_PREFIX) + 8 :]
+        )
         assert decode_descriptor(lying) is None
 
     def test_trailing_bytes_decode_to_nothing(self) -> None:

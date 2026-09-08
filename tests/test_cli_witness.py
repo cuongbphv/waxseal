@@ -289,9 +289,7 @@ class TestVerifyCrossChecks:
             main(["anchor", str(trail), "--witness", u1])
             # The second witness holds a checkpoint from a history this trail
             # does not extend — the split-view signature.
-            forked.records.append(
-                {"seq": 2, "entry_hash": "f" * 64, "root": "e" * 64}
-            )
+            forked.records.append({"seq": 2, "entry_hash": "f" * 64, "root": "e" * 64})
             capsys.readouterr()
 
             assert main(["verify", str(trail), "--witness", u1, "--witness", u2]) == 1
@@ -396,9 +394,9 @@ class TestRemoteTrailWithWitness:
                 {
                     "seq": 2,
                     "entry_hash": log.entry_hashes()[-1],
-                    "root": __import__(
-                        "waxseal.domain.checkpoint", fromlist=["checkpoint_for"]
-                    ).checkpoint_for(log.entry_hashes()).root,
+                    "root": __import__("waxseal.domain.checkpoint", fromlist=["checkpoint_for"])
+                    .checkpoint_for(log.entry_hashes())
+                    .root,
                 }
             )
             capsys.readouterr()

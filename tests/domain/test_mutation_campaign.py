@@ -210,9 +210,7 @@ def _insert_record_cases() -> list[MutationCase]:
                 payload_hash=compute_payload_hash(payload),
                 prev_hash=prev,
             )
-            forged = Entry(
-                header=header, entry_hash=compute_entry_hash(header), payload=payload
-            )
+            forged = Entry(header=header, entry_hash=compute_entry_hash(header), payload=payload)
             chain.insert(i, forged)
             return chain
 
@@ -301,9 +299,7 @@ def _whole_trail_rewrite_cases() -> list[MutationCase]:
             tampered = replace(
                 chain[i].header, ts="2027-01-01T00:00:00+00:00", prev_hash=prev_before
             )
-            chain[i] = replace(
-                chain[i], header=tampered, entry_hash=compute_entry_hash(tampered)
-            )
+            chain[i] = replace(chain[i], header=tampered, entry_hash=compute_entry_hash(tampered))
             _relink_from(chain, i + 1, chain[i].entry_hash)
             return chain
 

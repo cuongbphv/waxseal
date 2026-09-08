@@ -160,8 +160,10 @@ def _is_entry_point(name: str, func: object) -> bool:
     if name.startswith("_") or not inspect.isfunction(func):
         return False
     doc = inspect.getdoc(func) or ""
-    return bool(_NAME_PATTERN.match(name)) or name.endswith("_from_json") or bool(
-        _DOC_PATTERN.search(doc)
+    return (
+        bool(_NAME_PATTERN.match(name))
+        or name.endswith("_from_json")
+        or bool(_DOC_PATTERN.search(doc))
     )
 
 
@@ -372,9 +374,7 @@ def _hostile_attestation() -> st.SearchStrategy[Attestation]:
     )
 
 
-_JSON_LEAF = st.one_of(
-    st.none(), st.booleans(), st.integers(-1000, 1000), st.text(max_size=20)
-)
+_JSON_LEAF = st.one_of(st.none(), st.booleans(), st.integers(-1000, 1000), st.text(max_size=20))
 _JSON_HOSTILE_VALUE = st.recursive(
     _JSON_LEAF,
     lambda children: st.one_of(
@@ -552,9 +552,7 @@ class TestBindingHoldsNeverRaises:
         head_hash=st.text(min_size=64, max_size=64, alphabet="0123456789abcdef"),
         origin_entry_hashes=st.lists(_HEXLIKE, max_size=10),
     )
-    def test_never_raises(
-        self, seq: int, head_hash: str, origin_entry_hashes: list[str]
-    ) -> None:
+    def test_never_raises(self, seq: int, head_hash: str, origin_entry_hashes: list[str]) -> None:
         binding = HandoffBinding(chain_id="fuzz-origin", seq=seq, head_hash=head_hash)
         binding_holds(binding, origin_entry_hashes)
 
@@ -590,9 +588,7 @@ def _hostile_segment_read() -> st.SearchStrategy[SegmentRead]:
         identity=_HOSTILE_TEXT,
         chain=st.one_of(st.none(), st.builds(_verify_result_from, st.booleans())),
         entry_hashes=st.lists(_HEXLIKE, max_size=4).map(tuple),
-        genesis_payload_type=st.one_of(
-            st.none(), st.just(ROTATION_PAYLOAD_TYPE), _HOSTILE_TEXT
-        ),
+        genesis_payload_type=st.one_of(st.none(), st.just(ROTATION_PAYLOAD_TYPE), _HOSTILE_TEXT),
         genesis_payload=_hostile_genesis_payload(),
     )
 
@@ -769,9 +765,7 @@ class TestSealingNeverRaises:
         attestations=st.lists(_hostile_attestation(), max_size=6),
         key=st.binary(min_size=32, max_size=32),
     )
-    def test_verify_seals_never_raises(
-        self, attestations: list[Attestation], key: bytes
-    ) -> None:
+    def test_verify_seals_never_raises(self, attestations: list[Attestation], key: bytes) -> None:
         verify_seals(attestations, key)
 
     @_FUZZ_SETTINGS
@@ -851,11 +845,7 @@ class TestReadAnchorRecordsOnlyRaisesDocumentedTypes:
             return '{"v": 999}'
 
     @_FUZZ_SETTINGS
-    @given(
-        lines=st.lists(
-            st.one_of(_hostile_sidecar_line(), st.text(max_size=100)), max_size=5
-        )
-    )
+    @given(lines=st.lists(st.one_of(_hostile_sidecar_line(), st.text(max_size=100)), max_size=5))
     def test_hostile_sidecar_only_raises_documented_types(self, lines: list[str]) -> None:
         # A fresh temp dir per example (not a pytest fixture, which hypothesis
         # flags as function-scoped and shared across examples) -- this test
@@ -904,9 +894,7 @@ class TestParseReceiptLineNeverRaises:
 
     @_FUZZ_SETTINGS
     @given(
-        lines=st.lists(
-            st.one_of(_hostile_receipt_line(), st.text(max_size=100)), max_size=5
-        ),
+        lines=st.lists(st.one_of(_hostile_receipt_line(), st.text(max_size=100)), max_size=5),
         entry_hashes=st.lists(_HEXLIKE, max_size=4),
     )
     def test_hostile_records_become_verdicts_never_exceptions(
@@ -1104,7 +1092,5 @@ class TestWindowStatusNeverRaises:
             st.datetimes(timezones=st.just(timezone(timedelta(hours=7)))),
         ),
     )
-    def test_never_raises(
-        self, view: IncidentView, window: timedelta, now: datetime
-    ) -> None:
+    def test_never_raises(self, view: IncidentView, window: timedelta, now: datetime) -> None:
         window_status(view, window=window, now=now)

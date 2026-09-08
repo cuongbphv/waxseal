@@ -348,9 +348,7 @@ class ChainStore:
         try:
             records = self.receipt_records(chain_id)
         except DamagedReceiptLog:
-            return ReceiptCrossCheck(
-                Verdict.BROKEN, checked=0, reason="malformed_receipt_record"
-            )
+            return ReceiptCrossCheck(Verdict.BROKEN, checked=0, reason="malformed_receipt_record")
         return cross_check_receipt_records(records, self._stored_envelopes(chain_id))
 
     # -------------------------------------------------------------- private

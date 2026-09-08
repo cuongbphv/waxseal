@@ -49,8 +49,7 @@ def test_event_is_appended_and_verifies(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     trail = tmp_path / "trail.jsonl"
-    event = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
-             "tool_input": {"command": "ls"}}
+    event = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}
     assert run_main(monkeypatch, hook, json.dumps(event), trail) == 0
     # stdout is parsed by the hosts as decision JSON — must stay empty.
     assert capsys.readouterr().out == ""
@@ -64,8 +63,11 @@ def test_secret_is_redacted_before_disk(
 ) -> None:
     trail = tmp_path / "trail.jsonl"
     secret = "sk-abcdef1234567890abcdef"
-    event = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
-             "tool_input": {"command": f"export KEY={secret}"}}
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": f"export KEY={secret}"},
+    }
     run_main(monkeypatch, hook, json.dumps(event), trail)
     assert secret.encode() not in trail.read_bytes()
 
@@ -188,9 +190,7 @@ class TestClaudeCodeRemoteTargetInProcess:
 
     @pytest.fixture()
     def claude(self) -> types.ModuleType:
-        module: types.ModuleType = importlib.import_module(
-            "waxseal.integrations.claude_code"
-        )
+        module: types.ModuleType = importlib.import_module("waxseal.integrations.claude_code")
         return module
 
     def test_an_http_trail_is_kept_as_a_string(

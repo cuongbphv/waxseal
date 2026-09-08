@@ -55,9 +55,7 @@ NEEDS_CAST = _foundry.skip_without_foundry(
 
 def cast_out(*args: str) -> str:
     assert CAST is not None
-    return subprocess.run(
-        [CAST, *args], capture_output=True, text=True, check=True
-    ).stdout.strip()
+    return subprocess.run([CAST, *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
 class TestUint:

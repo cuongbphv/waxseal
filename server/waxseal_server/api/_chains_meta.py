@@ -62,9 +62,7 @@ def router(services: Services, authz: Authorizer) -> APIRouter:
         # `configured` here, and re-parsing a rendered response to nest it would
         # be serialising a body just to take it apart again.
         outcome = outcome_json(services.cli.run("ledger-status", trail, *args, "--json"))
-        return JSONResponse(
-            {"configured": True, "reason": None, "missing": [], "outcome": outcome}
-        )
+        return JSONResponse({"configured": True, "reason": None, "missing": [], "outcome": outcome})
 
     @api.get("/cadence")
     def get_cadence(

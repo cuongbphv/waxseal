@@ -167,9 +167,7 @@ def router(services: Services, authz: Authorizer) -> APIRouter:
             trail = trail_for(chain_id)
         except InvalidIdentifier as exc:
             return error_for(exc, "invalid_chain_id")
-        return cli_read_body(
-            services, trail, "consistency", "--old-seq", seq, "--old-root", root
-        )
+        return cli_read_body(services, trail, "consistency", "--old-seq", seq, "--old-root", root)
 
     @api.get("/chains/{chain_id}/verify-handoff")
     def get_verify_handoff(

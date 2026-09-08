@@ -82,8 +82,14 @@ class TestMissingTrail:
     def test_nonexistent_trail_exits_3(self, tmp_path: Path) -> None:
         code = main(
             [
-                "ledger-status", str(tmp_path / "nope.jsonl"),
-                "--liveness", LIVENESS_ADDR, "--rpc", "http://a", "--rpc", "http://b",
+                "ledger-status",
+                str(tmp_path / "nope.jsonl"),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--rpc",
+                "http://a",
+                "--rpc",
+                "http://b",
             ]
         )
         assert code == 3
@@ -96,9 +102,16 @@ class TestUsageErrors:
         with pytest.raises(SystemExit) as exc:
             main(
                 [
-                    "ledger-status", str(path),
-                    "--liveness", LIVENESS_ADDR, "--bond", BOND_ADDR,
-                    "--rpc", "http://a", "--rpc", "http://b",
+                    "ledger-status",
+                    str(path),
+                    "--liveness",
+                    LIVENESS_ADDR,
+                    "--bond",
+                    BOND_ADDR,
+                    "--rpc",
+                    "http://a",
+                    "--rpc",
+                    "http://b",
                 ]
             )
         assert exc.value.code == 2
@@ -122,13 +135,24 @@ class TestLivenessOnly:
 
         path = tmp_path / "t.jsonl"
         make_trail(path)
-        urls = two_nodes(liveness_node(head=head_return(
-            seq=1, entry_hash="ab" * 32, root="cd" * 32, block_time=int(time.time())
-        ), deadline=3600))
+        urls = two_nodes(
+            liveness_node(
+                head=head_return(
+                    seq=1, entry_hash="ab" * 32, root="cd" * 32, block_time=int(time.time())
+                ),
+                deadline=3600,
+            )
+        )
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -144,14 +168,24 @@ class TestLivenessOnly:
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
-        urls = two_nodes(liveness_node(
-            head=head_return(seq=1, entry_hash="ab" * 32, root="cd" * 32, block_time=1_000_000_000),
-            deadline=1,
-        ))
+        urls = two_nodes(
+            liveness_node(
+                head=head_return(
+                    seq=1, entry_hash="ab" * 32, root="cd" * 32, block_time=1_000_000_000
+                ),
+                deadline=1,
+            )
+        )
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -170,8 +204,14 @@ class TestLivenessOnly:
         urls = two_nodes(liveness_node(deadline=0))  # deadlineOf returns 0 -> None
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -211,8 +251,14 @@ class TestLivenessOnly:
         try:
             code = main(
                 [
-                    "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                    "--rpc", url_a, "--rpc", url_b,
+                    "ledger-status",
+                    str(path),
+                    "--liveness",
+                    LIVENESS_ADDR,
+                    "--rpc",
+                    url_a,
+                    "--rpc",
+                    url_b,
                 ]
             )
         finally:
@@ -234,8 +280,15 @@ class TestLivenessOnly:
         urls = two_nodes(liveness_node(deadline=3600))
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1], "--json",
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
+                "--json",
             ]
         )
         payload = json.loads(capsys.readouterr().out)
@@ -257,8 +310,17 @@ class TestLivenessOnly:
         urls = two_nodes(liveness_node(deadline=3600))
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1], "--trail-id", "custom-trail", "--json",
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
+                "--trail-id",
+                "custom-trail",
+                "--json",
             ]
         )
         payload = json.loads(capsys.readouterr().out)
@@ -279,8 +341,16 @@ class TestRegistry:
         urls = two_nodes(full_node(deadline=3600, lookup=lookup))
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--registry", REGISTRY_ADDR, "--rpc", urls[0], "--rpc", urls[1],
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--registry",
+                REGISTRY_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -299,8 +369,16 @@ class TestRegistry:
         urls = two_nodes(full_node(deadline=3600, lookup=wrong))
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--registry", REGISTRY_ADDR, "--rpc", urls[0], "--rpc", urls[1],
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--registry",
+                REGISTRY_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -323,8 +401,16 @@ class TestRegistry:
         try:
             code = main(
                 [
-                    "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                    "--registry", REGISTRY_ADDR, "--rpc", url_a, "--rpc", url_b,
+                    "ledger-status",
+                    str(path),
+                    "--liveness",
+                    LIVENESS_ADDR,
+                    "--registry",
+                    REGISTRY_ADDR,
+                    "--rpc",
+                    url_a,
+                    "--rpc",
+                    url_b,
                 ]
             )
         finally:
@@ -345,8 +431,16 @@ class TestRegistry:
         urls = two_nodes(full_node(deadline=3600))
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--registry", REGISTRY_ADDR, "--rpc", urls[0], "--rpc", urls[1],
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--registry",
+                REGISTRY_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -371,8 +465,18 @@ class TestBond:
         urls = two_nodes(full_node(deadline=3600, bond=rpc_ok(hexdata(word(1)))))
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--bond", BOND_ADDR, "--writer", WRITER, "--rpc", urls[0], "--rpc", urls[1],
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--bond",
+                BOND_ADDR,
+                "--writer",
+                WRITER,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -391,8 +495,18 @@ class TestBond:
         urls = two_nodes(full_node(deadline=3600, bond=bond_return(amount_wei=10**18)))
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--bond", BOND_ADDR, "--writer", WRITER, "--rpc", urls[0], "--rpc", urls[1],
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--bond",
+                BOND_ADDR,
+                "--writer",
+                WRITER,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -411,8 +525,18 @@ class TestBond:
         urls = two_nodes(full_node(deadline=3600, bond=bond_return(amount_wei=5, slashed=True)))
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--bond", BOND_ADDR, "--writer", WRITER, "--rpc", urls[0], "--rpc", urls[1],
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--bond",
+                BOND_ADDR,
+                "--writer",
+                WRITER,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -430,8 +554,18 @@ class TestBond:
         urls = two_nodes(full_node(deadline=3600, bond=bond_return(amount_wei=0)))
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--bond", BOND_ADDR, "--writer", WRITER, "--rpc", urls[0], "--rpc", urls[1],
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--bond",
+                BOND_ADDR,
+                "--writer",
+                WRITER,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -443,17 +577,23 @@ class TestBond:
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
-        url_a, server_a = start_fake_node(
-            full_node(deadline=3600, bond=bond_return(amount_wei=1))
-        )
-        url_b, server_b = start_fake_node(
-            full_node(deadline=3600, bond=bond_return(amount_wei=2))
-        )
+        url_a, server_a = start_fake_node(full_node(deadline=3600, bond=bond_return(amount_wei=1)))
+        url_b, server_b = start_fake_node(full_node(deadline=3600, bond=bond_return(amount_wei=2)))
         try:
             code = main(
                 [
-                    "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                    "--bond", BOND_ADDR, "--writer", WRITER, "--rpc", url_a, "--rpc", url_b,
+                    "ledger-status",
+                    str(path),
+                    "--liveness",
+                    LIVENESS_ADDR,
+                    "--bond",
+                    BOND_ADDR,
+                    "--writer",
+                    WRITER,
+                    "--rpc",
+                    url_a,
+                    "--rpc",
+                    url_b,
                 ]
             )
         finally:
@@ -477,15 +617,27 @@ class TestCombinedFindingsUseWorstVerdict:
         path = tmp_path / "t.jsonl"
         make_trail(path)
         wrong = rpc_ok(dynamic_bytes(b"not-the-real-descriptor"))
-        urls = two_nodes(full_node(
-            head=head_return(seq=1, entry_hash="ab" * 32, root="cd" * 32, block_time=1_000_000_000),
-            deadline=1,
-            lookup=wrong,
-        ))
+        urls = two_nodes(
+            full_node(
+                head=head_return(
+                    seq=1, entry_hash="ab" * 32, root="cd" * 32, block_time=1_000_000_000
+                ),
+                deadline=1,
+                lookup=wrong,
+            )
+        )
         code = main(
             [
-                "ledger-status", str(path), "--liveness", LIVENESS_ADDR,
-                "--registry", REGISTRY_ADDR, "--rpc", urls[0], "--rpc", urls[1],
+                "ledger-status",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--registry",
+                REGISTRY_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out

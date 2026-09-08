@@ -57,9 +57,17 @@ _sanitize = _sanitize_impl.sanitize
 PAYLOAD_TYPE = "application/vnd.codex.hook-event+json"
 
 _COMMON_FIELDS = (
-    "session_id", "turn_id", "cwd", "model", "permission_mode",
-    "tool_name", "tool_input", "tool_use_id", "prompt",
-    "agent_id", "agent_type",
+    "session_id",
+    "turn_id",
+    "cwd",
+    "model",
+    "permission_mode",
+    "tool_name",
+    "tool_input",
+    "tool_use_id",
+    "prompt",
+    "agent_id",
+    "agent_type",
 )
 
 

@@ -33,6 +33,7 @@ class TestAppendAndVerify:
         path = tmp_path / "trail.jsonl"
         open_log(path).append(payload={"b": 1, "a": 2}, payload_type=PT)
         import base64
+
         obj = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
         # sorted keys, compact separators, ascii — deterministic across runs
         assert base64.b64decode(obj["payload_b64"]) == b'{"a":2,"b":1}'
@@ -59,9 +60,7 @@ class TestAppendAndVerify:
 
 
 class TestTamperEndToEnd:
-    def test_one_flipped_byte_on_disk_is_detected_at_the_right_seq(
-        self, tmp_path: Path
-    ) -> None:
+    def test_one_flipped_byte_on_disk_is_detected_at_the_right_seq(self, tmp_path: Path) -> None:
         path = tmp_path / "trail.jsonl"
         log = open_log(path)
         for i in range(4):
@@ -220,9 +219,7 @@ class TestLp64v2IsTheWiredDefault:
         entry = log.append(payload={"i": 0}, payload_type=PT)
         assert entry.header.hash_version == fingerprint()
 
-    def test_v2_only_trail_verifies_ok_through_the_public_api(
-        self, tmp_path: Path
-    ) -> None:
+    def test_v2_only_trail_verifies_ok_through_the_public_api(self, tmp_path: Path) -> None:
         log = open_log(tmp_path / "trail.jsonl")
         for i in range(5):
             log.append(payload={"i": i}, payload_type=PT)

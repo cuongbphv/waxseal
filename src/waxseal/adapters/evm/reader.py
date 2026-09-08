@@ -73,7 +73,6 @@ vs the deployed `deadlineOf(bytes32)`, a five-argument `submit`, a flattened
 asserts that split rather than leaving it to a reader's memory.
 """
 
-
 from __future__ import annotations
 
 import itertools
@@ -436,9 +435,7 @@ def _words(what: str, raw: bytes, expected: int) -> tuple[bytes, ...]:
     return words
 
 
-def _checkpoints_agree(
-    a: OnChainCheckpoint | None, b: OnChainCheckpoint | None
-) -> bool:
+def _checkpoints_agree(a: OnChainCheckpoint | None, b: OnChainCheckpoint | None) -> bool:
     """`_agree`'s comparator for `latest_checkpoint` (fg4.42).
 
     `OnChainCheckpoint.block_time`'s own docstring (domain/liveness.py) calls

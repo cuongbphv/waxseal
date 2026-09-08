@@ -162,7 +162,7 @@ class TestIterInterventions:
         log = open_log(trail)
         record_intervention(log, a_record())
         record_intervention(log, a_record(intervention_id="iv-2"))
-        tamper_payload(trail, 1, b'"iv-2"', b'123456')
+        tamper_payload(trail, 1, b'"iv-2"', b"123456")
 
         reopened = open_log(trail)
         found = list(iter_interventions(reopened))
@@ -207,9 +207,7 @@ class TestIterInterventions:
         self, tmp_path: Path, name: str
     ) -> None:
         log = open_log(tmp_path / name)
-        record = a_record(
-            decision_ref="d-88", rationale="threshold drift", trace_id="trace-3"
-        )
+        record = a_record(decision_ref="d-88", rationale="threshold drift", trace_id="trace-3")
         record_intervention(log, record)
         _, read_back = next(iter(iter_interventions(log)))
         assert read_back == record

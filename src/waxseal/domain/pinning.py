@@ -330,4 +330,3 @@ def _optional_topology(obj: dict[str, Any], key: str) -> SeparationTopology | No
         pin_separate=_require_bool(value, "pin_separate"),
         ledger=_optional_bool_or_none(value, "ledger"),
     )
-

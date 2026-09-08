@@ -49,9 +49,7 @@ def write_trail(path: Path, payloads: list[dict[str, object]]) -> AuditLog:
     return log
 
 
-def acknowledged_trail(
-    tmp_path: Path, payloads: list[dict[str, object]] | None = None
-) -> Path:
+def acknowledged_trail(tmp_path: Path, payloads: list[dict[str, object]] | None = None) -> Path:
     """Append through a remote backend that issues receipts, then mirror what
     the server holds into a local trail beside the sidecar it just wrote.
 
@@ -70,8 +68,7 @@ def acknowledged_trail(
         remote.append(payload=payload, payload_type=PT)
     trail.write_text(
         "".join(
-            json.dumps(to_obj(entry, backend="JSONL"), sort_keys=True, separators=(",", ":"))
-            + "\n"
+            json.dumps(to_obj(entry, backend="JSONL"), sort_keys=True, separators=(",", ":")) + "\n"
             for entry in remote.entries()
         )
     )
@@ -199,9 +196,7 @@ class TestTheAsymmetryIsNotCollapsed:
         rewrite_sidecar(trail, corrupt)
         assert main(["verify", str(trail)]) == expected_code
 
-    def test_a_real_break_is_never_masked_by_an_unreadable_record(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_real_break_is_never_masked_by_an_unreadable_record(self, tmp_path: Path) -> None:
         # Verdict.join in severity order: 2 is the larger exit code and the
         # weaker finding, and it must never override a detected rewrite.
         trail = acknowledged_trail(tmp_path)
@@ -282,6 +277,7 @@ class TestHonestLimit:
         forged = tmp_path / "forged.jsonl"
         write_trail(forged, [{"i": 0}, {"i": "tampered"}, {"i": 2}])
         trail.write_text(forged.read_text())
+
         def curate(records: list[dict[str, object]]) -> None:
             for record, entry in zip(records, AuditLog.open(forged).entries(), strict=True):
                 record.update(entry_hash=entry.entry_hash)

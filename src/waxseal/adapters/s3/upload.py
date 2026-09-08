@@ -58,6 +58,8 @@ def _resolve_client(client: Any | None) -> tuple[Any | None, str]:
             f"no lock state could be asked for: {exc}"
         )
     return boto3.client("s3"), "client built from the installed 's3' extra (boto3)"
+
+
 def upload_sealed_segment(
     client: Any | None,
     *,

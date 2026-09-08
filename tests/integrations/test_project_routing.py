@@ -61,7 +61,11 @@ def run(
     stdin = event if isinstance(event, str) else json.dumps(event)
     return subprocess.run(
         [sys.executable, str(HOOKS[hook])],
-        input=stdin, capture_output=True, text=True, env=env, timeout=60,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
     )
 
 
@@ -210,9 +214,7 @@ class TestWaxsealTrailStillRotates:
         adopted = tmp_path / "named.00000.jsonl"
         assert adopted.exists(), proc.stderr
         entries = list(AuditLog.open(adopted).entries())
-        assert entries[0].header.payload_type == (
-            "application/vnd.waxseal.rotation-binding+json"
-        )
+        assert entries[0].header.payload_type == ("application/vnd.waxseal.rotation-binding+json")
         assert entries[0].payload is not None
         assert json.loads(entries[0].payload)["head_hash"] == tail_hash
         assert json.loads(entries[0].payload)["chain_id"].endswith("/named")
@@ -250,9 +252,7 @@ class TestInProcessRouting:
     """
 
     @pytest.fixture(params=HOOK_NAMES)
-    def hook_module(
-        self, request: pytest.FixtureRequest
-    ) -> tuple[types.ModuleType, str]:
+    def hook_module(self, request: pytest.FixtureRequest) -> tuple[types.ModuleType, str]:
         import importlib
 
         return importlib.import_module(f"waxseal.integrations.{request.param}"), request.param
@@ -343,9 +343,7 @@ class TestInProcessRouting:
         }
         assert self.drive(monkeypatch, module, event, tmp_path) == 0
         assert (routed_dir("cursor", tmp_path) / "trail.00000.jsonl").exists()
-        assert not (
-            routed_dir("cursor", tmp_path, "/work/other") / "trail.00000.jsonl"
-        ).exists()
+        assert not (routed_dir("cursor", tmp_path, "/work/other") / "trail.00000.jsonl").exists()
 
     def test_cursor_prefers_cwd_over_workspace_roots(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -396,8 +394,12 @@ class TestInProcessRouting:
         monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(event_for("codex"))))
         assert module.main() == 0
         assert (
-            tmp_path / "relocated" / "waxseal" / "trails"
-            / project_slug(PROJECT) / "trail.00000.jsonl"
+            tmp_path
+            / "relocated"
+            / "waxseal"
+            / "trails"
+            / project_slug(PROJECT)
+            / "trail.00000.jsonl"
         ).exists()
 
     def test_an_unopenable_trail_records_its_drop_beside_the_active_segment(
@@ -423,9 +425,7 @@ class TestInProcessRouting:
 
 class TestDropsDuringRotation:
     @pytest.fixture(params=HOOK_NAMES)
-    def hook_module(
-        self, request: pytest.FixtureRequest
-    ) -> tuple[types.ModuleType, str]:
+    def hook_module(self, request: pytest.FixtureRequest) -> tuple[types.ModuleType, str]:
         import importlib
 
         return importlib.import_module(f"waxseal.integrations.{request.param}"), request.param

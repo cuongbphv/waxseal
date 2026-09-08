@@ -106,9 +106,7 @@ def cli_read_body(services: Services, trail: str, command: str, *args: str) -> J
 PARSED_READS: Final[dict[str, str]] = {"reconcile-tickets": "reconciliation"}
 
 
-def parsed_cli_body(
-    services: Services, trail: str, command: str, *args: str
-) -> JSONResponse:
+def parsed_cli_body(services: Services, trail: str, command: str, *args: str) -> JSONResponse:
     """`cli_read_body` for a read whose stdout is JSON, parsed alongside it.
 
     The raw stdout stays in the body next to the parsed form. An operator being

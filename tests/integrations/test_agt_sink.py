@@ -64,9 +64,7 @@ def read_line(trail: Path, line_no: int = 0) -> dict[str, Any]:
 
 
 def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
-    result: dict[str, Any] = json.loads(
-        base64.b64decode(read_line(trail, line_no)["payload_b64"])
-    )
+    result: dict[str, Any] = json.loads(base64.b64decode(read_line(trail, line_no)["payload_b64"]))
     return result
 
 
@@ -122,9 +120,7 @@ class TestRedactionAndClipping:
 
     def test_huge_data_field_is_clipped_with_visible_marker(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
-        WaxsealAuditSink(trail).write(
-            audit_entry(data={"excerpt": "y" * 1_000_000})
-        )
+        WaxsealAuditSink(trail).write(audit_entry(data={"excerpt": "y" * 1_000_000}))
         assert len(trail.read_bytes()) < 100_000
         assert "truncated" in read_payload(trail)["data"]["excerpt"]
 
@@ -133,9 +129,7 @@ class TestSanitizeShapes:
     def test_list_values_are_sanitized_recursively(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
         secret = "sk-abcdef1234567890abcdef"
-        WaxsealAuditSink(trail).write(
-            audit_entry(data={"headers": [f"Bearer {secret}", "ok"]})
-        )
+        WaxsealAuditSink(trail).write(audit_entry(data={"headers": [f"Bearer {secret}", "ok"]}))
         assert secret.encode() not in trail.read_bytes()
         assert read_payload(trail)["data"]["headers"] == ["Bearer ***REDACTED***", "ok"]
 
@@ -181,7 +175,9 @@ class TestDecisionMapping:
         )
         oversight = read_payload(trail)["human_oversight"]
         assert oversight == {
-            "mode": "agt_approval", "reviewer_ref": "did:web:reviewer-1", "action": None,
+            "mode": "agt_approval",
+            "reviewer_ref": "did:web:reviewer-1",
+            "action": None,
         }
 
     def test_missing_action_falls_back_to_agt_event(self, tmp_path: Path) -> None:
@@ -216,7 +212,8 @@ class TestNeverVetoesAGT:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
-            AuditLog, "open",
+            AuditLog,
+            "open",
             staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
         )
         trail = tmp_path / "trail.jsonl"
@@ -272,7 +269,8 @@ class TestVerifyIntegrityAndClose:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            AuditLog, "open",
+            AuditLog,
+            "open",
             staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom"))),
         )
         ok, reason = WaxsealAuditSink(tmp_path / "trail.jsonl").verify_integrity()

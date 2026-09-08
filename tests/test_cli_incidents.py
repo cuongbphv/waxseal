@@ -33,7 +33,7 @@ from waxseal.domain.incident import INCIDENT_PAYLOAD_TYPE, IncidentRecord
 from waxseal.sources.incidents import record_incident
 
 CONFIRMED = "2026-09-01T08:00:00+00:00"
-AS_OF_INSIDE = "2026-09-02T08:00:00+00:00"   # +24h
+AS_OF_INSIDE = "2026-09-02T08:00:00+00:00"  # +24h
 AS_OF_OUTSIDE = "2026-09-05T08:00:00+00:00"  # +96h
 
 
@@ -94,9 +94,7 @@ class TestWindowReadings:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = trail(tmp_path, incident())
-        code = main(
-            ["incidents", str(path), "--as-of", AS_OF_OUTSIDE, "--report-window-h", "120"]
-        )
+        code = main(["incidents", str(path), "--as-of", AS_OF_OUTSIDE, "--report-window-h", "120"])
         assert code == 0
         assert "window_open" in capsys.readouterr().out
 
@@ -240,8 +238,14 @@ class TestSinceFilter:
             incident(incident_id="new", confirmed_at=CONFIRMED),
         )
         code = main(
-            ["incidents", str(path), "--since", "2026-08-15T00:00:00+00:00",
-             "--as-of", AS_OF_OUTSIDE]
+            [
+                "incidents",
+                str(path),
+                "--since",
+                "2026-08-15T00:00:00+00:00",
+                "--as-of",
+                AS_OF_OUTSIDE,
+            ]
         )
         out = capsys.readouterr().out
         assert code == 0
@@ -256,8 +260,14 @@ class TestSinceFilter:
         # could not be applied to it.
         path = trail(tmp_path, incident(incident_id="noconf", confirmed_at=None))
         code = main(
-            ["incidents", str(path), "--since", "2026-08-15T00:00:00+00:00",
-             "--as-of", AS_OF_OUTSIDE]
+            [
+                "incidents",
+                str(path),
+                "--since",
+                "2026-08-15T00:00:00+00:00",
+                "--as-of",
+                AS_OF_OUTSIDE,
+            ]
         )
         out = capsys.readouterr().out
         assert code == 0
@@ -269,8 +279,14 @@ class TestSinceFilter:
     ) -> None:
         path = trail(tmp_path, incident(incident_id="bad", confirmed_at="whenever"))
         code = main(
-            ["incidents", str(path), "--since", "2026-08-15T00:00:00+00:00",
-             "--as-of", AS_OF_OUTSIDE]
+            [
+                "incidents",
+                str(path),
+                "--since",
+                "2026-08-15T00:00:00+00:00",
+                "--as-of",
+                AS_OF_OUTSIDE,
+            ]
         )
         out = capsys.readouterr().out
         assert code == 0
@@ -286,8 +302,15 @@ class TestSinceFilter:
             incident(incident_id="noconf", confirmed_at=None),
         )
         code = main(
-            ["incidents", str(path), "--json", "--since", "2026-08-15T00:00:00+00:00",
-             "--as-of", AS_OF_OUTSIDE]
+            [
+                "incidents",
+                str(path),
+                "--json",
+                "--since",
+                "2026-08-15T00:00:00+00:00",
+                "--as-of",
+                AS_OF_OUTSIDE,
+            ]
         )
         obj = json.loads(capsys.readouterr().out)
         assert code == 0

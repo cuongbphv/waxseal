@@ -252,8 +252,7 @@ def _consistency(log: AuditLog, *, old_seq: int, old_root: str) -> int:
         return 2
     if len(old_root) != 64 or not _is_hex(old_root):
         print(
-            "unverifiable: --old-root is not a 64-character hex SHA-256 root — "
-            "nothing was checked"
+            "unverifiable: --old-root is not a 64-character hex SHA-256 root — nothing was checked"
         )
         return 2
 

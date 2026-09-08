@@ -50,9 +50,7 @@ def stub_openclaw(bin_dir: Path, body: str, *, exit_code: int = 0) -> None:
     # buffer.write, not stdout.write: the child's text layer defaults to the
     # locale encoding (cp1252 on Windows) and would mangle the export.
     script.write_text(
-        "import sys\n"
-        f"sys.stdout.buffer.write({body.encode()!r})\n"
-        f"sys.exit({exit_code})\n",
+        f"import sys\nsys.stdout.buffer.write({body.encode()!r})\nsys.exit({exit_code})\n",
         encoding="utf-8",
     )
     if sys.platform == "win32":
@@ -100,7 +98,8 @@ class TestRunner:
 
         log = AuditLog.open(trail)
         stored = [
-            e for e in log._backend.entries()
+            e
+            for e in log._backend.entries()
             if e.header.payload_type == OPENCLAW_AUDIT_PAYLOAD_TYPE
         ]
         assert len(stored) == 1

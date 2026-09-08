@@ -84,7 +84,8 @@ class TestRealLocalhostServer:
             first = backend.append(lambda seq, prev: build_entry(seq, prev))
             second = backend.append(lambda seq, prev: build_entry(seq, prev))
             assert [e.entry_hash for e in backend.entries()] == [
-                first.entry_hash, second.entry_hash,
+                first.entry_hash,
+                second.entry_hash,
             ]
         finally:
             httpd.shutdown()
@@ -263,7 +264,9 @@ class TestReentrantBuild:
                     # (built against the tail it read before the race) is
                     # rejected — never accepted alongside it.
                     server.handle(
-                        "POST", request.url, {},
+                        "POST",
+                        request.url,
+                        {},
                         json.dumps(
                             to_obj(build_entry(0, GENESIS_PREV_HASH), backend="Remote")
                         ).encode(),
@@ -299,9 +302,7 @@ class TestEntryHashParity:
                     return build_entry(seq, prev, f'{{"i":{i}}}'.encode())
 
                 backend.append(build)
-        assert [e.entry_hash for e in jsonl.entries()] == [
-            e.entry_hash for e in remote.entries()
-        ]
+        assert [e.entry_hash for e in jsonl.entries()] == [e.entry_hash for e in remote.entries()]
 
 
 class TestPayloadRejection:
@@ -558,7 +559,9 @@ class TestConcurrencyFalsifiability:
         second = build_entry(0, GENESIS_PREV_HASH)  # same (seq, prev_hash) as first
         for entry in (first, second):
             server.handle(
-                "POST", "http://fake.local/v1/chains/default/entries", {},
+                "POST",
+                "http://fake.local/v1/chains/default/entries",
+                {},
                 json.dumps(to_obj(entry, backend="Remote")).encode(),
             )
         result = verify_chain(_read_back(server), VersionRegistry())

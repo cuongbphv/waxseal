@@ -298,9 +298,7 @@ class RegistryCrossCheck:
 
 class ReceiptFrameRegistry:
     def __init__(self) -> None:
-        self._schemas: dict[str, tuple[str, ...]] = {
-            receipt_fingerprint(): RECEIPT_FRAME_FIELDS
-        }
+        self._schemas: dict[str, tuple[str, ...]] = {receipt_fingerprint(): RECEIPT_FRAME_FIELDS}
 
     def knows(self, fingerprint_: str) -> bool:
         return fingerprint_ in self._schemas

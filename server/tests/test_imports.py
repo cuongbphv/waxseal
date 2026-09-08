@@ -52,16 +52,12 @@ class TestImportStore:
         assert record.sha256 == hashlib.sha256(data).hexdigest()
         assert record.size == len(data)
 
-    def test_the_stored_copy_is_byte_identical(
-        self, store: ImportStore, tmp_path: Path
-    ) -> None:
+    def test_the_stored_copy_is_byte_identical(self, store: ImportStore, tmp_path: Path) -> None:
         data = foreign_trail(tmp_path)
         record = store.create("foreign.jsonl", data)
         assert store.trail_path(record.import_id).read_bytes() == data
 
-    def test_the_stored_copy_is_not_writable(
-        self, store: ImportStore, tmp_path: Path
-    ) -> None:
+    def test_the_stored_copy_is_not_writable(self, store: ImportStore, tmp_path: Path) -> None:
         # An imported trail is evidence, not a live trail. Read-only on disk is
         # the statement that survives someone adding a handler later.
         record = store.create("foreign.jsonl", foreign_trail(tmp_path))
@@ -78,9 +74,7 @@ class TestImportStore:
         second = store.create("b.jsonl", data)
         assert first.import_id != second.import_id
 
-    def test_records_are_listed_newest_first(
-        self, store: ImportStore, tmp_path: Path
-    ) -> None:
+    def test_records_are_listed_newest_first(self, store: ImportStore, tmp_path: Path) -> None:
         first = store.create("a.jsonl", foreign_trail(tmp_path, name="a.jsonl"))
         second = store.create("b.jsonl", foreign_trail(tmp_path, name="b.jsonl"))
         assert [r.import_id for r in store.records()][:2] == [
@@ -101,9 +95,7 @@ class TestImportStore:
         assert store.create(f"trail{suffix}", b"x").filename == f"trail{suffix}"
 
     @pytest.mark.parametrize("name", ["trail.txt", "trail", "trail.json", "trail.jsonl.gz"])
-    def test_a_format_waxseal_cannot_open_is_refused(
-        self, store: ImportStore, name: str
-    ) -> None:
+    def test_a_format_waxseal_cannot_open_is_refused(self, store: ImportStore, name: str) -> None:
         # Accepting it would produce an import whose every verdict is "no
         # backend for this suffix" — a stored file that can never be evidence.
         with pytest.raises(UnsupportedTrailFormat):
@@ -116,9 +108,7 @@ class TestImportStore:
         assert store.trail_path(record.import_id).parent.parent == store.root
         assert store.trail_path(record.import_id).name == "evil.jsonl"
 
-    def test_an_id_that_is_not_a_safe_segment_never_builds_a_path(
-        self, store: ImportStore
-    ) -> None:
+    def test_an_id_that_is_not_a_safe_segment_never_builds_a_path(self, store: ImportStore) -> None:
         with pytest.raises(ValueError):
             store.trail_path("../escape")
 
@@ -138,9 +128,7 @@ class TestImportEndpoints:
         assert resp.json()["filename"] == "foreign.jsonl"
 
     def test_an_unsupported_format_is_400(self, client: TestClient) -> None:
-        resp = client.post(
-            "/v1/imports", files={"file": ("notes.txt", b"hello", "text/plain")}
-        )
+        resp = client.post("/v1/imports", files={"file": ("notes.txt", b"hello", "text/plain")})
         assert resp.status_code == 400
 
     def test_an_empty_upload_is_400(self, client: TestClient) -> None:
@@ -157,9 +145,7 @@ class TestImportEndpoints:
         assert body["status"] == "ok"
         assert body["verdict"] == "ok"
 
-    def test_a_tampered_import_verifies_as_broken(
-        self, client: TestClient, tmp_path: Path
-    ) -> None:
+    def test_a_tampered_import_verifies_as_broken(self, client: TestClient, tmp_path: Path) -> None:
         raw = foreign_trail(tmp_path).decode().splitlines()
         record = json.loads(raw[2])
         record["header"]["ts"] = "2000-01-01T00:00:00+00:00"
@@ -283,9 +269,7 @@ class TestImportEndpoints:
         assert client.get("/public/v1/chains").json()["chains"] == []
         assert client.get(f"/v1/chains/{import_id}/head").status_code == 404
 
-    def test_the_only_import_route_that_writes_is_the_upload(
-        self, client: TestClient
-    ) -> None:
+    def test_the_only_import_route_that_writes_is_the_upload(self, client: TestClient) -> None:
         paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
         mutating = {
             (path, method)

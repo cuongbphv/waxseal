@@ -165,6 +165,7 @@ An `AnchorSink` is one method (see `src/waxseal/ports/anchor.py`):
 ```python
 class AnchorSink(Protocol):
     name: str
+
     def anchor(self, checkpoint: Checkpoint) -> str | SinkReceipt | None: ...
 ```
 

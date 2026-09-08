@@ -33,16 +33,12 @@ SECRET_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"),
     # PGP private key blocks (the PEM pattern above requires "PRIVATE KEY-----"
     # flush against the delimiter, which this form does not)
-    re.compile(
-        r"-----BEGIN PGP PRIVATE KEY BLOCK-----[\s\S]*?-----END PGP PRIVATE KEY BLOCK-----"
-    ),
+    re.compile(r"-----BEGIN PGP PRIVATE KEY BLOCK-----[\s\S]*?-----END PGP PRIVATE KEY BLOCK-----"),
     # Slack tokens, app tokens, and incoming webhooks
     re.compile(r"(?<![A-Za-z0-9])xox[baprs]-[A-Za-z0-9-]{10,}"),
     re.compile(r"(?<![A-Za-z0-9])xoxe-[A-Za-z0-9-]+"),
     re.compile(r"(?<![A-Za-z0-9])xapp-[A-Za-z0-9-]+"),
-    re.compile(
-        r"https://hooks\.slack\.com/(?:services|workflows|triggers)/[A-Za-z0-9/_+]+"
-    ),
+    re.compile(r"https://hooks\.slack\.com/(?:services|workflows|triggers)/[A-Za-z0-9/_+]+"),
     # GitLab personal access tokens and the 2026 deploy/runner/project/CI prefixes
     re.compile(r"(?<![A-Za-z0-9])glpat-[A-Za-z0-9_-]{20,}"),
     re.compile(r"(?<![A-Za-z0-9])gl(?:dt|rt|ptt|cbt)-[A-Za-z0-9_-]{16,}"),
@@ -74,14 +70,39 @@ SECRET_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
 # Exact-name matching only: substring rules would eat "tokenizer"/"authors"
 # and destroy audit value (over-redaction is its own failure mode).
 SENSITIVE_KEYS: Final = frozenset(
-    {"password", "passwd", "secret", "token", "api_key", "apikey", "access_key",
-     "private_key", "credentials", "authorization", "auth",
-     # OAuth/OIDC and cloud-SDK field names seen in agent tool args
-     "access_token", "refresh_token", "id_token", "session_token",
-     "client_secret", "aws_secret_access_key", "aws_session_token",
-     "x-api-key", "api-key", "secret_key", "auth_token", "bearer_token",
-     "database_url", "db_url", "mongodb_uri", "postgres_url", "redis_url",
-     "aws_access_key_id", "private-key"}
+    {
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "api_key",
+        "apikey",
+        "access_key",
+        "private_key",
+        "credentials",
+        "authorization",
+        "auth",
+        # OAuth/OIDC and cloud-SDK field names seen in agent tool args
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "session_token",
+        "client_secret",
+        "aws_secret_access_key",
+        "aws_session_token",
+        "x-api-key",
+        "api-key",
+        "secret_key",
+        "auth_token",
+        "bearer_token",
+        "database_url",
+        "db_url",
+        "mongodb_uri",
+        "postgres_url",
+        "redis_url",
+        "aws_access_key_id",
+        "private-key",
+    }
 )
 
 

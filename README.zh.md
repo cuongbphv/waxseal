@@ -252,7 +252,7 @@ anvil 链、跑真实 Foundry 合约做过端到端核验
 ```python
 from waxseal import AuditLog
 
-log = AuditLog.open("~/.myagent/audit/trail.jsonl")   # SQLite 则用 trail.db
+log = AuditLog.open("~/.myagent/audit/trail.jsonl")  # SQLite 则用 trail.db
 
 log.append(
     payload={"tool": "bash", "command": "ls -la", "exit_code": 0},
@@ -270,8 +270,10 @@ result = log.verify()
 from waxseal.adapters.redactors import RegexRedactor
 
 log = AuditLog.open("trail.jsonl", redactor=RegexRedactor())
-log.append(payload={"cmd": "curl -H 'Authorization: Bearer sk-...'"},
-           payload_type="application/vnd.myagent.toolcall+json")
+log.append(
+    payload={"cmd": "curl -H 'Authorization: Bearer sk-...'"},
+    payload_type="application/vnd.myagent.toolcall+json",
+)
 # 明文永远不落盘；哈希承诺的是脱敏后的 payload
 ```
 
@@ -366,7 +368,7 @@ log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 ```python
 from waxseal.sources.files import record_file, current_matches_last
 
-record_file(log, "SPEC.md", doc_id="spec")          # 把内容哈希快照进链
+record_file(log, "SPEC.md", doc_id="spec")  # 把内容哈希快照进链
 current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None（从未记录）
 ```
 
@@ -388,18 +390,21 @@ from waxseal.sources.decisions import commit_input, record_decision
 redactor = RegexRedactor()
 log = AuditLog.open("decisions.jsonl", redactor=redactor)
 
-record_decision(log, DecisionRecord(
-    decision_id="DEC-1001",
-    decision_type="transaction_approval",
-    system_id="screening-agent",
-    model=ModelRef(name="my-model", version="2026.08.1"),
-    input_commitment=commit_input(model_input, redactor=redactor),  # 先脱敏，再哈希
-    outcome="approve",
-    rationale="低于阈值，且为已有往来的交易对手",
-    human_oversight=HumanOversight(mode="automated"),  # None = 未记录，不等于 automated
-    risk_tier="high",           # 提供者自己的风险分级；None = 未申报
-    classification_ref="RC-2026-014/v2",   # 指向分级档案的指针，绝不是档案内容
-))
+record_decision(
+    log,
+    DecisionRecord(
+        decision_id="DEC-1001",
+        decision_type="transaction_approval",
+        system_id="screening-agent",
+        model=ModelRef(name="my-model", version="2026.08.1"),
+        input_commitment=commit_input(model_input, redactor=redactor),  # 先脱敏，再哈希
+        outcome="approve",
+        rationale="低于阈值，且为已有往来的交易对手",
+        human_oversight=HumanOversight(mode="automated"),  # None = 未记录，不等于 automated
+        risk_tier="high",  # 提供者自己的风险分级；None = 未申报
+        classification_ref="RC-2026-014/v2",  # 指向分级档案的指针，绝不是档案内容
+    ),
+)
 ```
 
 `risk_tier` 按原样记录，绝不做解释：`"high"` 与 `"cao"` 是两条不同的申报，
@@ -438,23 +443,29 @@ from waxseal import IncidentRecord, InterventionRecord
 from waxseal.sources.incidents import record_incident
 from waxseal.sources.interventions import record_intervention
 
-record_incident(log, IncidentRecord(
-    incident_id="INC-2026-0007",
-    system_id="screening-agent",
-    detected_at="2026-09-01T07:10:00+00:00",
-    confirmed_at="2026-09-01T08:00:00+00:00",   # 报告时限从这一刻开始起算
-    severity="serious",
-    summary="更换数据源后评分发生漂移",  # 先脱敏，再参与哈希
-    report_ref=None,          # 此处没有提交记录 —— 绝不等于「未上报」
-))
+record_incident(
+    log,
+    IncidentRecord(
+        incident_id="INC-2026-0007",
+        system_id="screening-agent",
+        detected_at="2026-09-01T07:10:00+00:00",
+        confirmed_at="2026-09-01T08:00:00+00:00",  # 报告时限从这一刻开始起算
+        severity="serious",
+        summary="更换数据源后评分发生漂移",  # 先脱敏，再参与哈希
+        report_ref=None,  # 此处没有提交记录 —— 绝不等于「未上报」
+    ),
+)
 
-record_intervention(log, InterventionRecord(
-    intervention_id="IV-41",
-    system_id="screening-agent",
-    actor_ref="risk-queue-7",     # 化名，与 reviewer_ref 一致
-    action="halt",
-    decision_ref="DEC-1001",      # None = 并非针对某一条已记录决策的动作
-))
+record_intervention(
+    log,
+    InterventionRecord(
+        intervention_id="IV-41",
+        system_id="screening-agent",
+        actor_ref="risk-queue-7",  # 化名，与 reviewer_ref 一致
+        action="halt",
+        decision_ref="DEC-1001",  # None = 并非针对某一条已记录决策的动作
+    ),
+)
 ```
 
 ```bash
@@ -492,8 +503,7 @@ waxseal incidents decisions.jsonl --report-window-h 72 --as-of 2026-09-05T08:00:
 from waxseal import AuditLog
 from waxseal.adapters.anchors import FileAnchorSink
 
-log = AuditLog.open("trail.jsonl",
-                    anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
+log = AuditLog.open("trail.jsonl", anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
 # 每追加 100 次，就在写入路径之外尽力发布一次 checkpoint；
 # 锚定失败永远不会阻塞写入 —— 只会计入 anchor_failures
 ```
@@ -600,9 +610,8 @@ from waxseal import AuditLog
 from waxseal.adapters.attest import FileAttestor
 from waxseal.domain.sealing import generate_key
 
-k0 = generate_key()                      # 把 A_0 托管给验证方，离开这台机器
-log = AuditLog.open("trail.jsonl",
-                    attestor=FileAttestor("trail.jsonl", initial_key=k0))
+k0 = generate_key()  # 把 A_0 托管给验证方，离开这台机器
+log = AuditLog.open("trail.jsonl", attestor=FileAttestor("trail.jsonl", initial_key=k0))
 log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 
 log.verify_attestations(initial_key=k0)  # AttestResult(ok=True, checked=1, ...)
@@ -613,8 +622,7 @@ log.verify_attestations(initial_key=k0)  # AttestResult(ok=True, checked=1, ...)
 
 ```python
 # 任何具有 .algorithm、.key_id、.sign(bytes) -> bytes 的对象
-log = AuditLog.open("trail.jsonl",
-                    attestor=FileAttestor("trail.jsonl", signer=my_ed25519_signer))
+log = AuditLog.open("trail.jsonl", attestor=FileAttestor("trail.jsonl", signer=my_ed25519_signer))
 log.verify_attestations(verifier=my_ed25519_verifier)
 ```
 

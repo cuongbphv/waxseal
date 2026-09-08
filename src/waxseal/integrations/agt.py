@@ -287,9 +287,7 @@ class WaxsealAuditSink:
             # best-effort (FileDropRecorder.record() never raises).
             from waxseal.adapters.drops import FileDropRecorder
 
-            FileDropRecorder(self._trail).record(
-                reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-            )
+            FileDropRecorder(self._trail).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
             return None
         return self._log
 
@@ -306,9 +304,7 @@ class WaxsealAuditSink:
             )
             from waxseal.adapters.drops import FileDropRecorder
 
-            FileDropRecorder(self._trail).record(
-                reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-            )
+            FileDropRecorder(self._trail).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
             return
         log = self._open_log()
         if log is None:

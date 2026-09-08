@@ -79,9 +79,7 @@ class TestMonotonicity:
 
     def test_flipping_any_single_field_never_decreases_degree(self) -> None:
         for anchor_sinks in range(0, 4):
-            for seal_escrow, witness, pin_separate in itertools.product(
-                [False, True], repeat=3
-            ):
+            for seal_escrow, witness, pin_separate in itertools.product([False, True], repeat=3):
                 base = SeparationTopology(
                     seal_escrow=seal_escrow,
                     anchor_sinks=anchor_sinks,
@@ -395,14 +393,20 @@ class TestLedgerShortfall:
 
     def test_shortfall_when_declared_but_not_corroborated(self) -> None:
         declared = SeparationTopology(
-            seal_escrow=False, anchor_sinks=0, witness=False, pin_separate=False,
+            seal_escrow=False,
+            anchor_sinks=0,
+            witness=False,
+            pin_separate=False,
             ledger=True,
         )
         assert ledger_shortfall(declared, observed_ledger_ok=False) is True
 
     def test_no_shortfall_when_declared_and_corroborated(self) -> None:
         declared = SeparationTopology(
-            seal_escrow=False, anchor_sinks=0, witness=False, pin_separate=False,
+            seal_escrow=False,
+            anchor_sinks=0,
+            witness=False,
+            pin_separate=False,
             ledger=True,
         )
         assert ledger_shortfall(declared, observed_ledger_ok=True) is False
@@ -418,7 +422,10 @@ class TestLedgerShortfall:
 
     def test_no_shortfall_when_declared_false_even_if_observed_false(self) -> None:
         declared_false = SeparationTopology(
-            seal_escrow=False, anchor_sinks=0, witness=False, pin_separate=False,
+            seal_escrow=False,
+            anchor_sinks=0,
+            witness=False,
+            pin_separate=False,
             ledger=False,
         )
         assert ledger_shortfall(declared_false, observed_ledger_ok=False) is False

@@ -121,8 +121,9 @@ class TestVerifySeals:
         k0 = b"\x08" * 32
         seals = self.make(4, k0)
         agg_seals = [
-            Attestation(seq=a.seq, entry_hash=a.entry_hash, scheme=FS_HMAC_AGG_SCHEME,
-                        value=a.value)
+            Attestation(
+                seq=a.seq, entry_hash=a.entry_hash, scheme=FS_HMAC_AGG_SCHEME, value=a.value
+            )
             for a in seals
         ]
         result = verify_seals(agg_seals, k0)
@@ -133,12 +134,15 @@ class TestVerifySeals:
         k0 = b"\x09" * 32
         seals = self.make(3, k0)
         agg_seals = [
-            Attestation(seq=a.seq, entry_hash=a.entry_hash, scheme=FS_HMAC_AGG_SCHEME,
-                        value=a.value)
+            Attestation(
+                seq=a.seq, entry_hash=a.entry_hash, scheme=FS_HMAC_AGG_SCHEME, value=a.value
+            )
             for a in seals
         ]
         agg_seals[1] = Attestation(
-            seq=1, entry_hash=agg_seals[1].entry_hash, scheme=FS_HMAC_AGG_SCHEME,
+            seq=1,
+            entry_hash=agg_seals[1].entry_hash,
+            scheme=FS_HMAC_AGG_SCHEME,
             value="00" * 32,
         )
         result = verify_seals(agg_seals, k0)
@@ -293,7 +297,9 @@ class TestVerifyAggregate:
             key_after_3 = evolve_key(key_after_3)
         plain_atts = [
             Attestation(
-                seq=3, entry_hash=("e" * 63) + "3", scheme=FS_HMAC_SCHEME,
+                seq=3,
+                entry_hash=("e" * 63) + "3",
+                scheme=FS_HMAC_SCHEME,
                 value=seal_entry(key_after_3, ("e" * 63) + "3"),
             )
         ]
@@ -335,9 +341,7 @@ class TestVerifySealsMalformedValue:
         # UnicodeEncodeError guard three lines above it in verify_seals).
         k0 = b"\x19" * 32
         entry_hash = hashlib.sha256(b"e0").hexdigest()
-        atts = [
-            Attestation(seq=0, entry_hash=entry_hash, scheme=FS_HMAC_SCHEME, value="\ud800")
-        ]
+        atts = [Attestation(seq=0, entry_hash=entry_hash, scheme=FS_HMAC_SCHEME, value="\ud800")]
         result = verify_seals(atts, k0)
         assert not result.ok
         assert result.reason == "malformed_attestation"

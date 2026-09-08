@@ -43,8 +43,7 @@ OVER_LIMIT: dict[str, str] = {
         "CLI surface, frozen by the CLI contract."
     ),
     "src/waxseal/cli/_parser.py": (
-        "Argparse table: every subcommand and frozen help string in one "
-        "build_parser() artifact."
+        "Argparse table: every subcommand and frozen help string in one build_parser() artifact."
     ),
     "src/waxseal/cli/pin.py": (
         "CLI pin command: exit 2 advances the pin because unverifiable is "
@@ -121,6 +120,5 @@ def test_allowlist_entries_still_exceed_the_hard_limit() -> None:
         if n <= HARD_LIMIT:
             stale.append(f"{rel}: {n}")
     assert stale == [], (
-        "allowlist is a ratchet: a file at or under 500 must leave it:\n"
-        + "\n".join(stale)
+        "allowlist is a ratchet: a file at or under 500 must leave it:\n" + "\n".join(stale)
     )

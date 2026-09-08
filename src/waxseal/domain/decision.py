@@ -177,9 +177,7 @@ class DecisionRecord:
             # as bare NaN/Infinity, which is not JSON, so the payload would
             # hash perfectly well and be unreadable to any conforming auditor
             # tool, which is a silently useless record.
-            if isinstance(self.confidence, bool) or not isinstance(
-                self.confidence, (int, float)
-            ):
+            if isinstance(self.confidence, bool) or not isinstance(self.confidence, (int, float)):
                 raise ValueError("confidence must be a number between 0 and 1, or null")
             if not math.isfinite(self.confidence) or not 0.0 <= self.confidence <= 1.0:
                 raise ValueError("confidence must be a number between 0 and 1, or null")

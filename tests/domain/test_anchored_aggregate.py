@@ -168,9 +168,7 @@ class TestCheckpointV2:
         b = checkpoint_frame(Checkpoint(**base, agg_commit="bb" * 32))  # type: ignore[arg-type]
         assert a != b
 
-    @pytest.mark.parametrize(
-        "commit,epoch", [("ab" * 32, None), (None, 3)]
-    )
+    @pytest.mark.parametrize("commit,epoch", [("ab" * 32, None), (None, 3)])
     def test_half_a_binding_is_refused(self, commit: str | None, epoch: int | None) -> None:
         # Either field alone would produce a frame that claims an aggregate
         # nobody can check, or an epoch that commits to nothing. Refused at
@@ -228,8 +226,11 @@ class TestVerifyAnchoredAggregate:
     def test_catches_a_rewritten_row_inside_the_anchored_prefix(self) -> None:
         atts = sealed(4)
         anchored = aggregate_commit(4, fold(atts, upto=4))
-        forged = [*atts[:2], Attestation(seq=2, entry_hash=HASHES[2], scheme=FS_HMAC_AGG_SCHEME,
-                                         value="ff" * 32), atts[3]]
+        forged = [
+            *atts[:2],
+            Attestation(seq=2, entry_hash=HASHES[2], scheme=FS_HMAC_AGG_SCHEME, value="ff" * 32),
+            atts[3],
+        ]
         assert (
             verify_anchored_aggregate(
                 forged, KEY, agg_start=0, anchored_epoch=4, anchored_commit=anchored
@@ -268,13 +269,14 @@ class TestVerifyAnchoredAggregate:
             is None
         )
 
-    @pytest.mark.parametrize(
-        "agg_start,epoch", [(-1, 3), (4, 3)]
-    )
+    @pytest.mark.parametrize("agg_start,epoch", [(-1, 3), (4, 3)])
     def test_impossible_bounds_are_malformed(self, agg_start: int, epoch: int) -> None:
         assert (
             verify_anchored_aggregate(
-                sealed(5), KEY, agg_start=agg_start, anchored_epoch=epoch,
+                sealed(5),
+                KEY,
+                agg_start=agg_start,
+                anchored_epoch=epoch,
                 anchored_commit="ab" * 32,
             )
             == "malformed_anchored_aggregate"
@@ -301,15 +303,19 @@ class TestVerifyAnchoredAggregate:
 
     def test_never_raises_on_hostile_input(self) -> None:
         atts = [Attestation(seq=0, entry_hash="", scheme="who-knows", value="")]
-        assert verify_anchored_aggregate(
-            atts, KEY, agg_start=0, anchored_epoch=1, anchored_commit=""
-        ) is not None
+        assert (
+            verify_anchored_aggregate(atts, KEY, agg_start=0, anchored_epoch=1, anchored_commit="")
+            is not None
+        )
 
     def test_zero_epoch_commits_to_the_genesis_accumulator(self) -> None:
         atts = sealed(3)
         assert (
             verify_anchored_aggregate(
-                atts, KEY, agg_start=0, anchored_epoch=0,
+                atts,
+                KEY,
+                agg_start=0,
+                anchored_epoch=0,
                 anchored_commit=aggregate_commit(0, "0" * 64),
             )
             is None

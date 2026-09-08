@@ -34,6 +34,7 @@ from waxseal.domain.checkpoint import Checkpoint
 # `submit`-shaped calls in this file is meant, at the call site.
 SELECTOR_SUBMIT_HEAD: Final = SELECTOR_SUBMIT
 
+
 @dataclass(frozen=True, slots=True)
 class EvmContracts:
     """Deployed addresses. Each is optional because an operator may run the

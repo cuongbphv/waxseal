@@ -450,16 +450,12 @@ class TestAgreementAcrossTwoRealChains:
         assert verdict.status == LIVE
         assert verdict.deadline_s == DEADLINE_S
 
-    def test_the_chains_own_verdict_agrees_that_the_trail_is_live(
-        self, chain: Deployment
-    ) -> None:
+    def test_the_chains_own_verdict_agrees_that_the_trail_is_live(self, chain: Deployment) -> None:
         assert _reader(chain).on_chain_delinquency(TRAIL) is False
 
 
 class TestTheRevertIsAnAnswer:
-    def test_an_unregistered_trail_reverts_and_is_read_as_absence(
-        self, chain: Deployment
-    ) -> None:
+    def test_an_unregistered_trail_reverts_and_is_read_as_absence(self, chain: Deployment) -> None:
         # The four bytes come from the compiled contract, not from this file.
         # A wrong ERROR_TRAIL_NOT_REGISTERED would make this `unreachable`.
         assert _reader(chain).latest_checkpoint("no-such-trail") is None
@@ -470,9 +466,7 @@ class TestTheRevertIsAnAnswer:
         # contract refuses to answer, and the adapter reports the third value.
         assert _reader(chain).on_chain_delinquency("no-such-trail") is None
 
-    def test_an_unregistered_trail_has_nothing_to_be_late_against(
-        self, chain: Deployment
-    ) -> None:
+    def test_an_unregistered_trail_has_nothing_to_be_late_against(self, chain: Deployment) -> None:
         verdict = _reader(chain).liveness("no-such-trail", now=datetime.now(UTC))
         assert verdict.status == UNREACHABLE
 
@@ -532,9 +526,7 @@ class TestTheRegistry:
         assert finding.status == REGISTRY_ABSENT
         assert finding.reason == REGISTRY_NOT_REGISTERED
 
-    def test_a_duplicate_registration_is_rejected_by_the_contract(
-        self, chain: Deployment
-    ) -> None:
+    def test_a_duplicate_registration_is_rejected_by_the_contract(self, chain: Deployment) -> None:
         # Append-only is the feature. On the WRITE path a revert is the
         # contract saying no — a positive rejection, not unreachability.
         with pytest.raises(LedgerError, match="the contract rejected this call"):

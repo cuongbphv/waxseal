@@ -66,9 +66,20 @@ DEFAULT_TRAIL = "~/.waxseal/crewai-trail.jsonl"
 # events also carry live agent/task/crew objects, which are neither
 # serializable nor audit data.
 _EVENT_ATTRS = (
-    "tool_name", "tool_args", "agent_role", "agent_id", "agent_key",
-    "task_id", "task_name", "crew_name", "inputs", "output", "from_cache",
-    "error", "total_tokens", "event_id",
+    "tool_name",
+    "tool_args",
+    "agent_role",
+    "agent_id",
+    "agent_key",
+    "task_id",
+    "task_name",
+    "crew_name",
+    "inputs",
+    "output",
+    "from_cache",
+    "error",
+    "total_tokens",
+    "event_id",
 )
 
 
@@ -98,18 +109,14 @@ class WaxsealEventListener(BaseEventListener):
                 payload[name] = _sanitize(getattr(event, name))
         try:
             if self._log is None:
-                self._log = AuditLog.open(
-                    self._trail, redactor=RegexRedactor(), record_drops=True
-                )
+                self._log = AuditLog.open(self._trail, redactor=RegexRedactor(), record_drops=True)
         except Exception as e:  # broken environment: never block the crew
             print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
             # No AuditLog to route this through, so record it directly,
             # best-effort (FileDropRecorder.record() never raises).
             from waxseal.adapters.drops import FileDropRecorder
 
-            FileDropRecorder(self._trail).record(
-                reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-            )
+            FileDropRecorder(self._trail).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
             return
         if not self._log.try_append(payload=payload, payload_type=PAYLOAD_TYPE):
             # Labelled fail-open: the bus swallows raises silently, so the
@@ -122,11 +129,18 @@ class WaxsealEventListener(BaseEventListener):
 
     def setup_listeners(self, crewai_event_bus: Any) -> None:
         audited = (
-            ToolUsageStartedEvent, ToolUsageFinishedEvent, ToolUsageErrorEvent,
-            TaskStartedEvent, TaskCompletedEvent, TaskFailedEvent,
-            CrewKickoffStartedEvent, CrewKickoffCompletedEvent, CrewKickoffFailedEvent,
+            ToolUsageStartedEvent,
+            ToolUsageFinishedEvent,
+            ToolUsageErrorEvent,
+            TaskStartedEvent,
+            TaskCompletedEvent,
+            TaskFailedEvent,
+            CrewKickoffStartedEvent,
+            CrewKickoffCompletedEvent,
+            CrewKickoffFailedEvent,
         )
         for event_class in audited:
+
             @crewai_event_bus.on(event_class)
             def _handler(source: Any, event: Any) -> None:
                 self._record(event)

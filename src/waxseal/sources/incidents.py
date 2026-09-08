@@ -68,8 +68,6 @@ def iter_incidents(
                 record = from_payload(json.loads(entry.payload))
             except (ValueError, TypeError, UnicodeDecodeError):
                 record = None
-        if incident_id is not None and (
-            record is None or record.incident_id != incident_id
-        ):
+        if incident_id is not None and (record is None or record.incident_id != incident_id):
             continue
         yield entry, record

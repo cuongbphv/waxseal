@@ -44,8 +44,6 @@ def _default_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-
-
 @dataclass(frozen=True, slots=True)
 class AnchorRecord:
     """One line of the `.anchors` sidecar.
@@ -149,9 +147,7 @@ def _optional_int(obj: dict[str, Any], key: str) -> int | None:
 class FileAnchorSink:
     name = "file"
 
-    def __init__(
-        self, trail_path: Path | str, *, now_fn: Callable[[], str] | None = None
-    ) -> None:
+    def __init__(self, trail_path: Path | str, *, now_fn: Callable[[], str] | None = None) -> None:
         self._trail = Path(trail_path).expanduser()
         self._path = _sidecar_path(self._trail)
         self._now = now_fn or _default_now
@@ -160,8 +156,9 @@ class FileAnchorSink:
         # No receipt of its own to give: a local file is not an external
         # witness (see module docstring); a real sink (HTTPAnchorSink and
         # friends) returns whatever its service hands back.
-        _append_record(self._path, _record_obj(checkpoint, sink=self.name, receipt=None,
-                                               ts=self._now()))
+        _append_record(
+            self._path, _record_obj(checkpoint, sink=self.name, receipt=None, ts=self._now())
+        )
         return None
 
     def records(self) -> Iterator[Checkpoint]:
@@ -226,9 +223,7 @@ class RecordingAnchorSink:
             receipt, nonce = result, None
         _append_record(
             self._path,
-            _record_obj(
-                checkpoint, sink=self.name, receipt=receipt, ts=self._now(), nonce=nonce
-            ),
+            _record_obj(checkpoint, sink=self.name, receipt=receipt, ts=self._now(), nonce=nonce),
         )
         return receipt
 

@@ -93,9 +93,7 @@ class S3Backend:
         entry_hash = GENESIS_PREV_HASH
         try:
             head = json.loads(
-                self._client.get_object(Bucket=self._bucket, Key=self._head_key())[
-                    "Body"
-                ].read()
+                self._client.get_object(Bucket=self._bucket, Key=self._head_key())["Body"].read()
             )
             candidate, entry_hash = int(head["seq"]), str(head["entry_hash"])
         except Exception:  # noqa: S110 - no head yet, or unreadable: probe from genesis
@@ -112,4 +110,3 @@ class S3Backend:
             obj = json.loads(body["Body"].read())
             seq += 1
             entry_hash = str(obj["entry_hash"])
-

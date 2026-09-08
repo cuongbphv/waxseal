@@ -47,7 +47,9 @@ class TestValueRedaction:
         assert tok not in str(out)
 
     def test_google_api_key_is_redacted(self) -> None:
-        out = RegexRedactor().redact({"url": "https://maps.example/api?key=AIzaSyD4W9bZq1xK7mPv2nR8tYc3LfQj5hGa0eU"})
+        out = RegexRedactor().redact(
+            {"url": "https://maps.example/api?key=AIzaSyD4W9bZq1xK7mPv2nR8tYc3LfQj5hGa0eU"}
+        )
         assert "AIzaSyD4W9bZq1xK7mPv2nR8tYc3LfQj5hGa0eU" not in str(out)
 
     def test_plain_text_passes_through_unchanged(self) -> None:
@@ -141,9 +143,7 @@ class TestRedactBeforeHash:
         assert b"sk-verysecretkey12345678" not in raw
         assert log.verify().ok
 
-    def test_bytes_payload_with_a_configured_redactor_is_refused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_bytes_payload_with_a_configured_redactor_is_refused(self, tmp_path: Path) -> None:
         # Same refuse as sources.decisions.commit_input: the Redactor port
         # only sees dicts, so claiming bytes were redacted would be a
         # fail-open with no label (CLAUDE.md rule 6).
@@ -262,4 +262,3 @@ class TestProviderBatches:
         )
         assert set(out.values()) == {REDACTED}
         assert RegexRedactor().redact({"tokenizer": "bpe"}) == {"tokenizer": "bpe"}
-

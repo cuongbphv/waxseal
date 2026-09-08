@@ -288,8 +288,18 @@ class TestReadCache:
         self, cli: WaxsealCli, spawn_calls: list[object]
     ) -> None:
         argv = (
-            "--lam", "1", "--c", "1", "--w", "1", "--rho", "1",
-            "--delta", "1", "--t-max", "10",
+            "--lam",
+            "1",
+            "--c",
+            "1",
+            "--w",
+            "1",
+            "--rho",
+            "1",
+            "--delta",
+            "1",
+            "--t-max",
+            "10",
         )
         cli.run("cadence", *argv)
         n = len(spawn_calls)
@@ -305,17 +315,35 @@ class TestReadCache:
         cli.run("verify", str(trail), "--anchors")
         assert len(spawn_calls) > n
 
-    def test_the_oldest_cached_outcome_is_evicted(
-        self, spawn_calls: list[object]
-    ) -> None:
+    def test_the_oldest_cached_outcome_is_evicted(self, spawn_calls: list[object]) -> None:
         cli = WaxsealCli(outcome_cache_size=1)
         first = (
-            "--lam", "1", "--c", "1", "--w", "1", "--rho", "1",
-            "--delta", "1", "--t-max", "10",
+            "--lam",
+            "1",
+            "--c",
+            "1",
+            "--w",
+            "1",
+            "--rho",
+            "1",
+            "--delta",
+            "1",
+            "--t-max",
+            "10",
         )
         second = (
-            "--lam", "2", "--c", "1", "--w", "1", "--rho", "1",
-            "--delta", "1", "--t-max", "10",
+            "--lam",
+            "2",
+            "--c",
+            "1",
+            "--w",
+            "1",
+            "--rho",
+            "1",
+            "--delta",
+            "1",
+            "--t-max",
+            "10",
         )
         cli.run("cadence", *first)
         cli.run("cadence", *second)
@@ -351,9 +379,7 @@ class TestInputStamp:
         monkeypatch.setattr(Path, "is_file", boom)
         assert _input_stamp((str(tmp_path / "x"),)) == ()
 
-    def test_editing_a_file_inside_a_directory_changes_the_stamp(
-        self, tmp_path: Path
-    ) -> None:
+    def test_editing_a_file_inside_a_directory_changes_the_stamp(self, tmp_path: Path) -> None:
         from waxseal_server.runtime.cli import _input_stamp
 
         child = tmp_path / "segment.jsonl"
@@ -375,9 +401,7 @@ class TestInputStamp:
         stamps = _input_stamp((str(tmp_path),))
         assert len(stamps) == 1
 
-    def test_a_broken_symlink_in_a_directory_is_not_stamped(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_broken_symlink_in_a_directory_is_not_stamped(self, tmp_path: Path) -> None:
         from waxseal_server.runtime.cli import _directory_children
 
         (tmp_path / "dangling").symlink_to(tmp_path / "missing")

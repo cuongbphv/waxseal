@@ -163,6 +163,7 @@ Một `AnchorSink` chỉ có một method (xem `src/waxseal/ports/anchor.py`):
 ```python
 class AnchorSink(Protocol):
     name: str
+
     def anchor(self, checkpoint: Checkpoint) -> str | SinkReceipt | None: ...
 ```
 

@@ -221,7 +221,7 @@ extra and you edit that table; the other two READMEs need touching only when the
 ```python
 from waxseal import AuditLog
 
-log = AuditLog.open("~/.myagent/audit/trail.jsonl")   # or trail.db for SQLite
+log = AuditLog.open("~/.myagent/audit/trail.jsonl")  # or trail.db for SQLite
 
 log.append(
     payload={"tool": "bash", "command": "ls -la", "exit_code": 0},
@@ -239,8 +239,10 @@ Redact secrets **before** they are hashed and stored:
 from waxseal.adapters.redactors import RegexRedactor
 
 log = AuditLog.open("trail.jsonl", redactor=RegexRedactor())
-log.append(payload={"cmd": "curl -H 'Authorization: Bearer sk-...'"},
-           payload_type="application/vnd.myagent.toolcall+json")
+log.append(
+    payload={"cmd": "curl -H 'Authorization: Bearer sk-...'"},
+    payload_type="application/vnd.myagent.toolcall+json",
+)
 # cleartext never reaches disk; the hash commits to the redacted payload
 ```
 
@@ -340,7 +342,7 @@ Beyond agent actions, chain any file/document history:
 ```python
 from waxseal.sources.files import record_file, current_matches_last
 
-record_file(log, "SPEC.md", doc_id="spec")          # snapshot content hash into the chain
+record_file(log, "SPEC.md", doc_id="spec")  # snapshot content hash into the chain
 current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None (never recorded)
 ```
 
@@ -362,18 +364,21 @@ from waxseal.sources.decisions import commit_input, record_decision
 redactor = RegexRedactor()
 log = AuditLog.open("decisions.jsonl", redactor=redactor)
 
-record_decision(log, DecisionRecord(
-    decision_id="DEC-1001",
-    decision_type="transaction_approval",
-    system_id="screening-agent",
-    model=ModelRef(name="my-model", version="2026.08.1"),
-    input_commitment=commit_input(model_input, redactor=redactor),  # redacted, then hashed
-    outcome="approve",
-    rationale="below thresholds, established counterparty",
-    human_oversight=HumanOversight(mode="automated"),  # None = not recorded, NOT automated
-    risk_tier="high",           # the PROVIDER's own classification; None = not declared
-    classification_ref="RC-2026-014/v2",   # pointer to the dossier, never its contents
-))
+record_decision(
+    log,
+    DecisionRecord(
+        decision_id="DEC-1001",
+        decision_type="transaction_approval",
+        system_id="screening-agent",
+        model=ModelRef(name="my-model", version="2026.08.1"),
+        input_commitment=commit_input(model_input, redactor=redactor),  # redacted, then hashed
+        outcome="approve",
+        rationale="below thresholds, established counterparty",
+        human_oversight=HumanOversight(mode="automated"),  # None = not recorded, NOT automated
+        risk_tier="high",  # the PROVIDER's own classification; None = not declared
+        classification_ref="RC-2026-014/v2",  # pointer to the dossier, never its contents
+    ),
+)
 ```
 
 `risk_tier` is recorded verbatim and never interpreted: `"high"` and `"cao"` stay
@@ -414,23 +419,29 @@ from waxseal import IncidentRecord, InterventionRecord
 from waxseal.sources.incidents import record_incident
 from waxseal.sources.interventions import record_intervention
 
-record_incident(log, IncidentRecord(
-    incident_id="INC-2026-0007",
-    system_id="screening-agent",
-    detected_at="2026-09-01T07:10:00+00:00",
-    confirmed_at="2026-09-01T08:00:00+00:00",   # the moment a reporting clock starts from
-    severity="serious",
-    summary="scoring drifted after a data-source change",  # redacted before it is hashed
-    report_ref=None,          # no submission recorded HERE - never "not reported"
-))
+record_incident(
+    log,
+    IncidentRecord(
+        incident_id="INC-2026-0007",
+        system_id="screening-agent",
+        detected_at="2026-09-01T07:10:00+00:00",
+        confirmed_at="2026-09-01T08:00:00+00:00",  # the moment a reporting clock starts from
+        severity="serious",
+        summary="scoring drifted after a data-source change",  # redacted before it is hashed
+        report_ref=None,  # no submission recorded HERE - never "not reported"
+    ),
+)
 
-record_intervention(log, InterventionRecord(
-    intervention_id="IV-41",
-    system_id="screening-agent",
-    actor_ref="risk-queue-7",     # pseudonymous, like reviewer_ref
-    action="halt",
-    decision_ref="DEC-1001",      # None = not an act on one recorded decision
-))
+record_intervention(
+    log,
+    InterventionRecord(
+        intervention_id="IV-41",
+        system_id="screening-agent",
+        actor_ref="risk-queue-7",  # pseudonymous, like reviewer_ref
+        action="halt",
+        decision_ref="DEC-1001",  # None = not an act on one recorded decision
+    ),
+)
 ```
 
 ```bash
@@ -474,8 +485,7 @@ cannot close on its own.
 from waxseal import AuditLog
 from waxseal.adapters.anchors import FileAnchorSink
 
-log = AuditLog.open("trail.jsonl",
-                    anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
+log = AuditLog.open("trail.jsonl", anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
 # every 100th append best-effort publishes a checkpoint outside the write path;
 # a failed anchor never blocks a write - it only counts against anchor_failures
 ```
@@ -595,9 +605,8 @@ from waxseal import AuditLog
 from waxseal.adapters.attest import FileAttestor
 from waxseal.domain.sealing import generate_key
 
-k0 = generate_key()                      # escrow A_0 with your verifier, off this machine
-log = AuditLog.open("trail.jsonl",
-                    attestor=FileAttestor("trail.jsonl", initial_key=k0))
+k0 = generate_key()  # escrow A_0 with your verifier, off this machine
+log = AuditLog.open("trail.jsonl", attestor=FileAttestor("trail.jsonl", initial_key=k0))
 log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 
 log.verify_attestations(initial_key=k0)  # AttestResult(ok=True, checked=1, ...)
@@ -608,8 +617,7 @@ never imports a crypto library itself:
 
 ```python
 # any object with .algorithm, .key_id, .sign(bytes) -> bytes
-log = AuditLog.open("trail.jsonl",
-                    attestor=FileAttestor("trail.jsonl", signer=my_ed25519_signer))
+log = AuditLog.open("trail.jsonl", attestor=FileAttestor("trail.jsonl", signer=my_ed25519_signer))
 log.verify_attestations(verifier=my_ed25519_verifier)
 ```
 

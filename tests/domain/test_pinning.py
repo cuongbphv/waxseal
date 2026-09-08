@@ -325,7 +325,10 @@ class TestDeclaredTopologyLedger:
             checkpoint=pin_at(n),
             pinned_ts="2026-08-23T09:00:00+00:00",
             declared_topology=SeparationTopology(
-                seal_escrow=True, anchor_sinks=2, witness=True, pin_separate=False,
+                seal_escrow=True,
+                anchor_sinks=2,
+                witness=True,
+                pin_separate=False,
                 ledger=ledger,
             ),
         )
@@ -478,10 +481,7 @@ class TestAnchorStaleness:
 
     def test_unparseable_timestamp_is_unverifiable_not_stale(self) -> None:
         records = [(1, "not-a-timestamp")]
-        assert (
-            anchor_staleness(3600, records, now=self.NOW)
-            == ANCHOR_TIMESTAMP_UNPARSEABLE
-        )
+        assert anchor_staleness(3600, records, now=self.NOW) == ANCHOR_TIMESTAMP_UNPARSEABLE
 
     def test_never_raises_on_naive_aware_mismatch(self) -> None:
         # A naive ts next to an aware `now` makes datetime subtraction raise
@@ -489,10 +489,7 @@ class TestAnchorStaleness:
         # not a temporal fact, and never allowed to crash a pin check
         # running on attacker-writable sidecar data.
         records = [(1, "2026-08-29T11:59:00")]  # no offset
-        assert (
-            anchor_staleness(3600, records, now=self.NOW)
-            == ANCHOR_TIMESTAMP_UNPARSEABLE
-        )
+        assert anchor_staleness(3600, records, now=self.NOW) == ANCHOR_TIMESTAMP_UNPARSEABLE
 
     def test_exactly_at_the_deadline_is_not_stale(self) -> None:
         # age_s == max_age_s is still within the window: only strictly
@@ -566,10 +563,7 @@ class TestAnchorPolicyDowngrade:
     def test_only_v1_shaped_records_is_a_downgrade(self) -> None:
         # Case 1: none carry a binding, none unreadable.
         records = [(0, None), (1, None), (2, None)]
-        assert (
-            anchor_policy_downgrade(2, records, any_unreadable=False)
-            == ANCHOR_POLICY_DOWNGRADE
-        )
+        assert anchor_policy_downgrade(2, records, any_unreadable=False) == ANCHOR_POLICY_DOWNGRADE
 
     def test_binding_at_or_after_pinned_seq_is_no_downgrade(self) -> None:
         # Case 2.
@@ -581,19 +575,13 @@ class TestAnchorPolicyDowngrade:
         # forward — it does not corroborate the declared policy at the
         # pinned position.
         records = [(0, "commit-0"), (1, None)]
-        assert (
-            anchor_policy_downgrade(1, records, any_unreadable=False)
-            == ANCHOR_POLICY_DOWNGRADE
-        )
+        assert anchor_policy_downgrade(1, records, any_unreadable=False) == ANCHOR_POLICY_DOWNGRADE
 
     def test_unreadable_records_never_read_as_no_binding(self) -> None:
         # Case 4: some records unreadable, no READABLE record at-or-after
         # pinned_seq carries a binding -> unreadable, NOT downgrade.
         records = [(0, None), (1, None)]
-        assert (
-            anchor_policy_downgrade(1, records, any_unreadable=True)
-            == ANCHOR_BINDING_UNREADABLE
-        )
+        assert anchor_policy_downgrade(1, records, any_unreadable=True) == ANCHOR_BINDING_UNREADABLE
 
     def test_binding_found_wins_over_unreadable(self) -> None:
         # A readable record already satisfies the binding; the presence of
@@ -605,6 +593,4 @@ class TestAnchorPolicyDowngrade:
         assert anchor_policy_downgrade(0, [], any_unreadable=False) == ANCHOR_POLICY_DOWNGRADE
 
     def test_no_records_at_all_but_unreadable_is_unreadable(self) -> None:
-        assert (
-            anchor_policy_downgrade(0, [], any_unreadable=True) == ANCHOR_BINDING_UNREADABLE
-        )
+        assert anchor_policy_downgrade(0, [], any_unreadable=True) == ANCHOR_BINDING_UNREADABLE

@@ -93,9 +93,7 @@ def write_pin(trail: Path, pin: Path) -> None:
     assert main(["verify", str(trail), "--pin", str(pin)]) == 0
 
 
-def preflight(
-    capsys: pytest.CaptureFixture[str], *argv: str
-) -> tuple[int, str]:
+def preflight(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str]:
     code = main(["preflight", *argv])
     return code, capsys.readouterr().out
 
@@ -409,8 +407,13 @@ class TestPinStates:
         assert (
             main(
                 [
-                    "verify", str(trail), "--pin", str(pin),
-                    "--expect-anchor-binding", "--max-anchor-age-s", "3600",
+                    "verify",
+                    str(trail),
+                    "--pin",
+                    str(pin),
+                    "--expect-anchor-binding",
+                    "--max-anchor-age-s",
+                    "3600",
                 ]
             )
             == 0
@@ -526,8 +529,7 @@ class TestImmutablePrefixLines:
         assert "mechanism NOT CONFIRMED this run (finalized ledger / WORM / none)" in out
         assert "DESIGN.md §11" in out
         assert (
-            "tail from the whole trail — nothing is anchored: tamper-evident "
-            "only, never more"
+            "tail from the whole trail — nothing is anchored: tamper-evident only, never more"
         ) in out
         # CLAUDE.md: "tamper-proof" is only ever SCOPED, and this command
         # never claims it at all (same discipline as the ladder above).

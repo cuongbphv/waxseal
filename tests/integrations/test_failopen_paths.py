@@ -112,7 +112,8 @@ class TestOpenFailureStillLeavesADropRecord:
         sys.modules.pop("waxseal.integrations.hermes", None)
         hermes = importlib.import_module("waxseal.integrations.hermes")
         monkeypatch.setattr(
-            AuditLog, "open",
+            AuditLog,
+            "open",
             staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
         )
         hermes.on_post_tool_call(tool_name="terminal", args={})
@@ -133,7 +134,8 @@ class TestOpenFailureStillLeavesADropRecord:
         sys.modules.pop("waxseal.integrations.hermes_gateway", None)
         gw = importlib.import_module("waxseal.integrations.hermes_gateway")
         monkeypatch.setattr(
-            AuditLog, "open",
+            AuditLog,
+            "open",
             staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
         )
         gw.handle("agent:step", {"iteration": 1})

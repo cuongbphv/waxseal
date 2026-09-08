@@ -267,9 +267,7 @@ class TestReceiptsSurviveRotation:
         records = stored(sealed)
         records[0]["entry_hash"] = "ff" * 32
         sealed.write_text(
-            "".join(
-                json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in records
-            )
+            "".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in records)
         )
         report = store.cross_check_receipts("default")
         assert report.reason == "receipt_mismatch"
@@ -312,13 +310,9 @@ class TestArchivingReachesHostedChains:
         assert seen, "no segment was ever offered to the archive"
         assert taken.is_set(), "the archive ran while segments.lock was still held"
 
-    def test_no_archive_destination_is_a_labelled_state_not_a_silence(
-        self, tmp_path: Path
-    ) -> None:
+    def test_no_archive_destination_is_a_labelled_state_not_a_silence(self, tmp_path: Path) -> None:
         notices: list[str] = []
-        store = ChainStore(
-            tmp_path / "chains", max_segment_bytes=TINY, notice=notices.append
-        )
+        store = ChainStore(tmp_path / "chains", max_segment_bytes=TINY, notice=notices.append)
         fill_over(store, tmp_path, "default", 8)
         assert any("rotated" in line for line in notices)
         assert any("exists only on this box" in line for line in notices)
@@ -611,9 +605,7 @@ class TestTheHttpReadsFollowTheGroup:
         # about the segment being written — a truthful verdict on a sealed
         # segment would be a verdict about the wrong chain.
         settings = Settings(data_dir=tmp_path / "data")
-        store = ChainStore(
-            settings.chains_dir, max_segment_bytes=TINY, notice=lambda _m: None
-        )
+        store = ChainStore(settings.chains_dir, max_segment_bytes=TINY, notice=lambda _m: None)
         fill_over(store, tmp_path, "default", 8)
         segments = [p.name for p in store.segment_paths("default")]
         assert len(segments) > 1

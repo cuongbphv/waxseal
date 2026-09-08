@@ -32,6 +32,7 @@ from waxseal import AuditLog
 HOOK_PATH = Path(__file__).parent.parent.parent / "src" / "waxseal" / "integrations" / "cursor.py"
 SRC = str(Path(__file__).parent.parent.parent / "src")
 
+
 def _spawn_env(**overrides: str) -> dict[str, str]:
     """A scrubbed env that can still start CPython on Windows.
 
@@ -49,7 +50,6 @@ def _spawn_env(**overrides: str) -> dict[str, str]:
     return base
 
 
-
 def run_hook(
     event: dict[str, Any] | str, trail: Path, **env_overrides: str
 ) -> subprocess.CompletedProcess[str]:
@@ -59,7 +59,11 @@ def run_hook(
     stdin = event if isinstance(event, str) else json.dumps(event)
     return subprocess.run(
         [sys.executable, str(HOOK_PATH)],
-        input=stdin, capture_output=True, text=True, env=env, timeout=30,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
     )
 
 
@@ -79,9 +83,7 @@ def shell_event(**overrides: object) -> dict[str, Any]:
 
 def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
     line = trail.read_text().splitlines()[line_no]
-    result: dict[str, Any] = json.loads(
-        base64.b64decode(json.loads(line)["payload_b64"])
-    )
+    result: dict[str, Any] = json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
     return result
 
 
@@ -144,7 +146,7 @@ class TestEventCoverage:
                 "conversation_id": "conv-1",
                 "hook_event_name": "beforeMCPExecution",
                 "tool_name": "search",
-                "tool_input": "{\"q\": \"docs\"}",
+                "tool_input": '{"q": "docs"}',
             },
             trail,
         )
@@ -224,14 +226,20 @@ class TestDefaultTrailLocation:
         proc = subprocess.run(
             [sys.executable, str(HOOK_PATH)],
             input=json.dumps(shell_event()),
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
             env=_spawn_env(HOME=str(tmp_path)),
         )
         assert proc.returncode == 0
         from waxseal.domain.segments import project_slug
 
         trail = (
-            tmp_path / ".cursor" / "waxseal" / "trails"
-            / project_slug(shell_event()["cwd"]) / "trail.00000.jsonl"
+            tmp_path
+            / ".cursor"
+            / "waxseal"
+            / "trails"
+            / project_slug(shell_event()["cwd"])
+            / "trail.00000.jsonl"
         )
         assert AuditLog.open(trail).verify(measure_drops=False).checked == 1

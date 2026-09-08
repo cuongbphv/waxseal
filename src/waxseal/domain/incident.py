@@ -374,9 +374,7 @@ def _parse_offset_aware(raw: str, field: str) -> datetime | str:
     return parsed
 
 
-def window_status(
-    view: IncidentView, *, window: timedelta, now: datetime
-) -> WindowReading:
+def window_status(view: IncidentView, *, window: timedelta, now: datetime) -> WindowReading:
     """What this trail records about ``view`` against a reporting ``window``.
 
     The anchor is ``confirmed_at`` — the Điều 19(3)(c) confirmation moment
@@ -477,7 +475,6 @@ def window_status(
         ),
         elapsed_h=elapsed.total_seconds() / 3600.0,
     )
-
 
 
 def render_incidents(

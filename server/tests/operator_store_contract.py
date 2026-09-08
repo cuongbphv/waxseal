@@ -41,13 +41,9 @@ class OperatorStoreContract:
         assert made.role is Role.ADMIN
         assert made.active is True
 
-    def test_an_operator_without_an_email_keeps_none_not_an_empty_string(
-        self, store: Any
-    ) -> None:
+    def test_an_operator_without_an_email_keeps_none_not_an_empty_string(self, store: Any) -> None:
         # "" would render as a blank address in a UI; None renders as absent.
-        made = store.create_operator(
-            username="ci", display_name="ci", email=None, role=Role.WRITER
-        )
+        made = store.create_operator(username="ci", display_name="ci", email=None, role=Role.WRITER)
         assert made.email is None
         assert store.get_operator("ci") is not None
         assert store.get_operator("ci").email is None
@@ -56,22 +52,16 @@ class OperatorStoreContract:
         assert store.get_operator("nobody") is None
 
     def test_a_duplicate_username_is_refused(self, store: Any) -> None:
-        store.create_operator(
-            username="admin", display_name="Admin", email=None, role=Role.ADMIN
-        )
+        store.create_operator(username="admin", display_name="Admin", email=None, role=Role.ADMIN)
         with pytest.raises(OperatorExists):
             store.create_operator(
                 username="admin", display_name="Someone else", email=None, role=Role.VIEWER
             )
 
-    def test_a_refused_duplicate_does_not_change_the_existing_operator(
-        self, store: Any
-    ) -> None:
+    def test_a_refused_duplicate_does_not_change_the_existing_operator(self, store: Any) -> None:
         # Last-write-wins over who is an admin is the failure this refusal
         # exists to prevent, so the refusal has to leave the first one intact.
-        store.create_operator(
-            username="admin", display_name="Admin", email=None, role=Role.ADMIN
-        )
+        store.create_operator(username="admin", display_name="Admin", email=None, role=Role.ADMIN)
         with pytest.raises(OperatorExists):
             store.create_operator(
                 username="admin", display_name="Impostor", email=None, role=Role.VIEWER
@@ -91,9 +81,7 @@ class OperatorStoreContract:
         self, store: Any, bad: str
     ) -> None:
         with pytest.raises(InvalidIdentifier):
-            store.create_operator(
-                username=bad, display_name="x", email=None, role=Role.VIEWER
-            )
+            store.create_operator(username=bad, display_name="x", email=None, role=Role.VIEWER)
 
     def test_an_operator_can_be_corrected(self, store: Any) -> None:
         # A typo in an email is the ordinary case. Without an update path the
@@ -155,12 +143,8 @@ class OperatorStoreContract:
         with pytest.raises(NoSuchOperator):
             store.update_operator("ghost", email="x@y.z")
 
-    def test_an_update_that_changes_nothing_is_still_the_current_record(
-        self, store: Any
-    ) -> None:
-        made = store.create_operator(
-            username="x", display_name="x", email=None, role=Role.ADMIN
-        )
+    def test_an_update_that_changes_nothing_is_still_the_current_record(self, store: Any) -> None:
+        made = store.create_operator(username="x", display_name="x", email=None, role=Role.ADMIN)
         assert store.update_operator("x") == made
 
     # -------------------------------------------------------------------- keys
@@ -278,9 +262,7 @@ class OperatorStoreContract:
     def test_each_role_authenticates_to_its_own_scopes(self, store: Any) -> None:
         for role in Role:
             username = f"u-{role.value}"
-            store.create_operator(
-                username=username, display_name=username, email=None, role=role
-            )
+            store.create_operator(username=username, display_name=username, email=None, role=role)
             plaintext, _ = store.mint_key(username=username, label="k")
             principal = store.authenticate(plaintext)
             assert principal is not None

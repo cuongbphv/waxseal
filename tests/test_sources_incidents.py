@@ -124,9 +124,7 @@ class TestRecordIncident:
         assert result.reason == "payload_hash_mismatch"
         assert result.broken_seq == 1
 
-    def test_a_submission_is_recorded_by_appending_never_by_editing(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_submission_is_recorded_by_appending_never_by_editing(self, tmp_path: Path) -> None:
         # The append-only update path: the second row carries report_ref and
         # the reader folds them, latest row winning as a whole record.
         trail = tmp_path / "trail.jsonl"
@@ -172,7 +170,7 @@ class TestIterIncidents:
         log = open_log(trail)
         record_incident(log, a_record())
         record_incident(log, a_record(incident_id="inc-2"))
-        tamper_payload(trail, 1, b'"inc-2"', b'123456')
+        tamper_payload(trail, 1, b'"inc-2"', b"123456")
 
         reopened = open_log(trail)
         found = list(iter_incidents(reopened))
@@ -200,9 +198,7 @@ class TestIterIncidents:
         )
         assert [r for _, r in iter_incidents(log)] == [None]
 
-    def test_an_unreadable_row_is_excluded_when_filtering_by_id(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_unreadable_row_is_excluded_when_filtering_by_id(self, tmp_path: Path) -> None:
         # An unreadable row has no incident_id to match on; counting it in on
         # the strength of a field nobody could read would be worse.
         log = open_log(tmp_path / "trail.jsonl")

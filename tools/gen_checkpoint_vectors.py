@@ -58,11 +58,7 @@ def checkpoint_frame(
     """SPEC sections 6 and 15: v1 when there is no binding, v2 when there is."""
     if agg_commit is None:
         return (
-            CHECKPOINT_V1_PREFIX
-            + struct.pack(">Q", 3)
-            + lp(str(seq))
-            + lp(entry_hash)
-            + lp(root)
+            CHECKPOINT_V1_PREFIX + struct.pack(">Q", 3) + lp(str(seq)) + lp(entry_hash) + lp(root)
         )
     return (
         CHECKPOINT_V2_PREFIX
@@ -210,13 +206,10 @@ def check_vectors() -> list[str]:
     failures = []
     if doc["aggregate_commits"] != built["aggregate_commits"]:
         failures.append("aggregate_commits no longer reproduce from the SPEC prose")
-    for on_disk, rebuilt in zip(
-        doc["checkpoint_frames"], built["checkpoint_frames"], strict=True
-    ):
+    for on_disk, rebuilt in zip(doc["checkpoint_frames"], built["checkpoint_frames"], strict=True):
         if on_disk != rebuilt:
             failures.append(
-                f"{on_disk['name']}: expected {on_disk['frame_hex']}, "
-                f"built {rebuilt['frame_hex']}"
+                f"{on_disk['name']}: expected {on_disk['frame_hex']}, built {rebuilt['frame_hex']}"
             )
     return failures
 
@@ -228,8 +221,7 @@ def write_vectors() -> int:
         print(f"refusing to overwrite {VECTORS} (frozen vectors are write-once)")
         return 1
     VECTORS.write_text(
-        json.dumps(build_vectors(), indent=2, ensure_ascii=False, sort_keys=True)
-        + "\n",
+        json.dumps(build_vectors(), indent=2, ensure_ascii=False, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     print(f"wrote {VECTORS}")

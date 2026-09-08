@@ -58,8 +58,7 @@ def _incidents(
 
     if window_h <= 0:
         print(
-            f"unverifiable: --report-window-h must be positive, got {window_h} "
-            "— nothing was read"
+            f"unverifiable: --report-window-h must be positive, got {window_h} — nothing was read"
         )
         return 2
     try:

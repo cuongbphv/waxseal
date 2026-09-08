@@ -263,18 +263,14 @@ class EvmLedgerSink:
                 _signed_checkpoint(proof.checkpoint_b, proof.signature_b),
             ],
         )
-        return self._send(
-            "proveEquivocation", self._reader._address("bond"), calldata
-        ).tx_hash
+        return self._send("proveEquivocation", self._reader._address("bond"), calldata).tx_hash
 
     def _submit_non_extension(self, proof: NonExtensionProof) -> str:
         """Slash a writer whose newer head contradicts its older one at a leaf
         both trees contain. Private: `submit_fraud_proof` is the door."""
         reason = proof.validate()
         if reason is not None:
-            raise LedgerError(
-                f"proveNonExtension: the pair is not a non-extension: {reason}"
-            )
+            raise LedgerError(f"proveNonExtension: the pair is not a non-extension: {reason}")
         calldata = encode_call(
             SELECTOR_PROVE_NON_EXTENSION,
             [
@@ -285,6 +281,4 @@ class EvmLedgerSink:
                 leaf_claim(proof.in_newer),
             ],
         )
-        return self._send(
-            "proveNonExtension", self._reader._address("bond"), calldata
-        ).tx_hash
+        return self._send("proveNonExtension", self._reader._address("bond"), calldata).tx_hash

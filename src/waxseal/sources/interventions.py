@@ -63,8 +63,6 @@ def iter_interventions(
                 record = from_payload(json.loads(entry.payload))
             except (ValueError, TypeError, UnicodeDecodeError):
                 record = None
-        if decision_ref is not None and (
-            record is None or record.decision_ref != decision_ref
-        ):
+        if decision_ref is not None and (record is None or record.decision_ref != decision_ref):
             continue
         yield entry, record

@@ -77,9 +77,7 @@ class TestGeneratorImportsTheDigest:
 
     def test_the_generator_defines_no_digest_function_of_its_own(self) -> None:
         defined = {
-            node.name
-            for node in ast.walk(_generator_tree())
-            if isinstance(node, ast.FunctionDef)
+            node.name for node in ast.walk(_generator_tree()) if isinstance(node, ast.FunctionDef)
         }
         assert "signing_digest" not in defined
         assert "trail_id_for" not in defined

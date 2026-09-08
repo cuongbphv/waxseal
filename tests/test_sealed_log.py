@@ -172,9 +172,7 @@ class TestJournaldLessons:
         assert not result.ok
         assert result.reason == "seal_sequence_mismatch"
 
-    def test_truncating_trail_and_sidecar_together_is_detected(
-        self, tmp_path: Path
-    ) -> None:
+    def test_truncating_trail_and_sidecar_together_is_detected(self, tmp_path: Path) -> None:
         # Ma-Tsudik truncation attack: chop the tail of BOTH files. The chain
         # and the remaining seals are internally valid — but the keyfile epoch
         # is one-way: the attacker holds A_5, cannot compute A_3, so the
@@ -243,9 +241,7 @@ class TestMalformedSidecar:
         assert result.reason == "malformed_attestation"
         assert result.broken_seq == 1
 
-    def test_malformed_json_line_in_sidecar_is_malformed_not_a_crash(
-        self, tmp_path: Path
-    ) -> None:
+    def test_malformed_json_line_in_sidecar_is_malformed_not_a_crash(self, tmp_path: Path) -> None:
         k0 = generate_key()
         log = open_sealed(tmp_path, k0)
         log.append(payload={"i": 0}, payload_type=PT)
@@ -283,8 +279,7 @@ class TestMalformedSidecar:
         }
         with open(tmp_path / "trail.jsonl", "a") as f:
             f.write(json.dumps(trail_row) + "\n")
-        att_row = {"seq": 1, "entry_hash": evil_hash, "scheme": "fs-hmac-sha256-v1",
-                   "value": "00"}
+        att_row = {"seq": 1, "entry_hash": evil_hash, "scheme": "fs-hmac-sha256-v1", "value": "00"}
         with open(tmp_path / "trail.jsonl.attest", "a") as f:
             f.write(json.dumps(att_row) + "\n")
         # Key evolution is public (SHA-256), so an attacker CAN advance the
@@ -322,9 +317,7 @@ class TestAttestationCriticalSection:
     macOS (measured 2026-08-21: 80 entries, 1-2 attestations, the rest
     RuntimeError epoch mismatches)."""
 
-    def test_shared_log_concurrent_sealed_appends_attest_every_entry(
-        self, tmp_path: Path
-    ) -> None:
+    def test_shared_log_concurrent_sealed_appends_attest_every_entry(self, tmp_path: Path) -> None:
         from concurrent.futures import ThreadPoolExecutor
 
         k0 = generate_key()
@@ -343,9 +336,7 @@ class TestAttestationCriticalSection:
         assert len(list(attestor(log).attestations())) == total
         assert log.verify_attestations(initial_key=k0).ok
 
-    def test_attest_failure_after_persist_is_not_a_dropped_write(
-        self, tmp_path: Path
-    ) -> None:
+    def test_attest_failure_after_persist_is_not_a_dropped_write(self, tmp_path: Path) -> None:
         # The entry IS durably on the chain when attest raises; counting it as
         # dropped would make dropped_writes lie (CLAUDE.md rule 5). The loss
         # that actually happened (a missing seal) gets its own counter.
@@ -406,9 +397,7 @@ def open_agg_sealed(tmp_path: Path, k0: bytes) -> AuditLog:
 
     return AuditLog.open(
         tmp_path / "trail.jsonl",
-        attestor=FileAttestor(
-            tmp_path / "trail.jsonl", initial_key=k0, scheme=FS_HMAC_AGG_SCHEME
-        ),
+        attestor=FileAttestor(tmp_path / "trail.jsonl", initial_key=k0, scheme=FS_HMAC_AGG_SCHEME),
         now_fn=lambda: "2026-08-22T06:00:00+00:00",
     )
 
@@ -583,9 +572,7 @@ class TestFssAggregate:
 
         signer = TestInjectedSigner.FakeEd25519()
         with pytest.raises(ValueError, match="scheme"):
-            FileAttestor(
-                tmp_path / "trail.jsonl", signer=signer, scheme=FS_HMAC_AGG_SCHEME
-            )
+            FileAttestor(tmp_path / "trail.jsonl", signer=signer, scheme=FS_HMAC_AGG_SCHEME)
 
     def test_malformed_sealagg_json_is_a_verdict_not_a_crash(self, tmp_path: Path) -> None:
         k0 = generate_key()
@@ -614,9 +601,7 @@ class TestFssAggregate:
         assert not result.ok
         assert result.reason == "aggregate_mismatch"
 
-    def test_attestor_without_read_aggregate_skips_the_aggregate_gate(
-        self, tmp_path: Path
-    ) -> None:
+    def test_attestor_without_read_aggregate_skips_the_aggregate_gate(self, tmp_path: Path) -> None:
         # A minimal custom Attestor (not FileAttestor) that never implements
         # read_aggregate: the gate must be optional, not a hard requirement
         # of the AttestResult protocol — verify_attestations falls back to
@@ -629,8 +614,9 @@ class TestFssAggregate:
                 from waxseal.domain.sealing import seal_entry
 
                 value = seal_entry(k0_evolved(seq), entry_hash)
-                att = Attestation(seq=seq, entry_hash=entry_hash, scheme=FS_HMAC_SCHEME,
-                                   value=value)
+                att = Attestation(
+                    seq=seq, entry_hash=entry_hash, scheme=FS_HMAC_SCHEME, value=value
+                )
                 self._rows.append(att)
                 return att
 
@@ -672,10 +658,10 @@ class TestFssAggregate:
         obj = json.loads((tmp_path / "trail.jsonl.sealagg").read_text())
         assert obj["agg_start"] == 2
         assert obj["epoch"] == 5
-        assert [json.loads(line)["scheme"] for line in
-                (tmp_path / "trail.jsonl.attest").read_text().splitlines()] == (
-            [FS_HMAC_SCHEME] * 2 + [FS_HMAC_AGG_SCHEME] * 3
-        )
+        assert [
+            json.loads(line)["scheme"]
+            for line in (tmp_path / "trail.jsonl.attest").read_text().splitlines()
+        ] == ([FS_HMAC_SCHEME] * 2 + [FS_HMAC_AGG_SCHEME] * 3)
         result = log.verify_attestations(initial_key=k0)
         assert result.ok
 

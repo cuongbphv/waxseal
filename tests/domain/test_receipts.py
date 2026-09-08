@@ -262,25 +262,19 @@ class TestReceiptFrameFingerprint:
         obj = json.loads(record_line())
         obj[RECEIPT_FRAME_FINGERPRINT_FIELD] = "f" * 64
         obj["entry_hash"] = "not-a-hash-in-this-build"
-        assert isinstance(
-            parse_receipt_line(json.dumps(obj), line_no=1), UnrecognizedReceiptFrame
-        )
+        assert isinstance(parse_receipt_line(json.dumps(obj), line_no=1), UnrecognizedReceiptFrame)
 
     def test_a_non_hex64_declared_frame_is_malformed(self) -> None:
         # This project's own field failing to parse -- section 17's break
         # side, not the "newer build" side.
         obj = json.loads(record_line())
         obj[RECEIPT_FRAME_FINGERPRINT_FIELD] = "not-a-fingerprint"
-        assert isinstance(
-            parse_receipt_line(json.dumps(obj), line_no=1), MalformedRecord
-        )
+        assert isinstance(parse_receipt_line(json.dumps(obj), line_no=1), MalformedRecord)
 
     def test_a_non_string_declared_frame_is_malformed(self) -> None:
         obj = json.loads(record_line())
         obj[RECEIPT_FRAME_FINGERPRINT_FIELD] = 12345
-        assert isinstance(
-            parse_receipt_line(json.dumps(obj), line_no=1), MalformedRecord
-        )
+        assert isinstance(parse_receipt_line(json.dumps(obj), line_no=1), MalformedRecord)
 
     def test_widening_the_receipt_frame_field_set_changes_the_fingerprint(self) -> None:
         # The migration-060 protection this bead exists to give the receipt
@@ -323,7 +317,9 @@ class TestReceiptFrameFingerprint:
         obj[RECEIPT_FRAME_FINGERPRINT_FIELD] = alien
 
         naive = parse_receipt_line(
-            json.dumps(obj), line_no=1, registry=_NaiveRegistryThatChecksNothing()  # type: ignore[arg-type]
+            json.dumps(obj),
+            line_no=1,
+            registry=_NaiveRegistryThatChecksNothing(),  # type: ignore[arg-type]
         )
         assert isinstance(naive, ReceiptRecord), "naive registry: red without the real check"
 

@@ -120,9 +120,9 @@ class TestSimulate:
             simulate.run(out, animate=False)
             outcomes.append(
                 [
-                    json.loads(
-                        __import__("base64").b64decode(json.loads(line)["payload_b64"])
-                    )["outcome"]
+                    json.loads(__import__("base64").b64decode(json.loads(line)["payload_b64"]))[
+                        "outcome"
+                    ]
                     for line in (out / "decisions.jsonl").read_text().splitlines()
                 ]
             )
@@ -155,17 +155,13 @@ class TestTamperWalkthrough:
         # claims the README makes to a reviewer.
         assert tamper.run(poc_dir) == 0
 
-    def test_the_original_trail_is_never_modified(
-        self, poc_dir: Path, tamper: ModuleType
-    ) -> None:
+    def test_the_original_trail_is_never_modified(self, poc_dir: Path, tamper: ModuleType) -> None:
         trail = poc_dir / "decisions.jsonl"
         before = trail.read_bytes()
         tamper.run(poc_dir)
         assert trail.read_bytes() == before
 
-    def test_it_refuses_to_run_without_a_trail(
-        self, tmp_path: Path, tamper: ModuleType
-    ) -> None:
+    def test_it_refuses_to_run_without_a_trail(self, tmp_path: Path, tamper: ModuleType) -> None:
         assert tamper.run(tmp_path / "nothing-here") == 3
 
     def test_a_scenario_that_stopped_being_caught_fails_the_run(
@@ -178,7 +174,9 @@ class TestTamperWalkthrough:
         def mislabelled(src: Path, work: Path) -> object:
             outcome = original(src, work)
             return type(outcome)(
-                name=outcome.name, expected=0, actual=outcome.actual,
+                name=outcome.name,
+                expected=0,
+                actual=outcome.actual,
                 caught_by=outcome.caught_by,
             )
 
@@ -193,9 +191,7 @@ class TestAnimator:
         animate = load_module("_animate")
         assert animate.supports_ansi() is False
 
-    def test_plain_mode_still_prints_every_stage(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_plain_mode_still_prints_every_stage(self, capsys: pytest.CaptureFixture[str]) -> None:
         animate = load_module("_animate")
         animator = animate.FlowAnimator(enabled=False)
         animator.play("t", [animate.Stage("decide", "x"), animate.Stage("hash", "y")])

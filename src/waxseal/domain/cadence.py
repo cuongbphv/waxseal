@@ -88,9 +88,7 @@ class AnchorTechnologyInfeasible(Exception):
 def _require_positive(**values: float) -> None:
     for name, value in values.items():
         if value <= 0:
-            raise ValueError(
-                f"{name} must be > 0 (operator-supplied measurement, got {value!r})"
-            )
+            raise ValueError(f"{name} must be > 0 (operator-supplied measurement, got {value!r})")
 
 
 def _require_agent_count(M: int) -> None:

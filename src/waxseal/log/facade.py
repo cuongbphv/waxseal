@@ -358,9 +358,7 @@ class AuditLog:
         agg_commit, agg_epoch = self._aggregate_binding()
         with self._append_lock:
             root = self._merkle_root_for(hashes)
-        cp = checkpoint_for(
-            hashes, agg_commit=agg_commit, agg_epoch=agg_epoch, root=root
-        )
+        cp = checkpoint_for(hashes, agg_commit=agg_commit, agg_epoch=agg_epoch, root=root)
         self._anchor_sink.anchor(cp)
         return cp
 

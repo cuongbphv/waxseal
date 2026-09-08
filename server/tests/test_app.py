@@ -58,9 +58,7 @@ class TestHeadEndpoint:
     def test_an_invalid_chain_id_is_a_400(self, client: TestClient) -> None:
         assert client.get("/v1/chains/a%20b/head").status_code == 400
 
-    def test_a_traversal_attempt_never_reads_outside_the_root(
-        self, client: TestClient
-    ) -> None:
+    def test_a_traversal_attempt_never_reads_outside_the_root(self, client: TestClient) -> None:
         # Two layers have to fail for this to escape: the URL router (which
         # matches one path segment) and the chain_id check. The assertion is on
         # the outcome rather than on which layer caught it.
@@ -221,14 +219,10 @@ class TestAuthentication:
         )
         assert resp.status_code == 201
 
-    def test_reading_the_chain_api_also_needs_the_token(
-        self, keyed_client: TestClient
-    ) -> None:
+    def test_reading_the_chain_api_also_needs_the_token(self, keyed_client: TestClient) -> None:
         assert keyed_client.get("/v1/chains/default/head").status_code == 401
 
-    def test_the_public_api_never_asks_for_a_credential(
-        self, keyed_client: TestClient
-    ) -> None:
+    def test_the_public_api_never_asks_for_a_credential(self, keyed_client: TestClient) -> None:
         assert keyed_client.get("/public/v1/chains").status_code == 200
 
     def test_an_unconfigured_key_is_reported_as_open_not_as_secured(
@@ -239,28 +233,20 @@ class TestAuthentication:
         # the false-confidence half of the collapse this project exists to stop.
         assert client.get("/v1/meta").json()["write_auth"] == "open"
 
-    def test_a_configured_key_is_reported_as_required(
-        self, keyed_client: TestClient
-    ) -> None:
+    def test_a_configured_key_is_reported_as_required(self, keyed_client: TestClient) -> None:
         assert keyed_client.get("/v1/meta").json()["write_auth"] == "bearer_required"
 
 
 class TestPublicReadApi:
-    def test_it_lists_chains(
-        self, client: TestClient, envelopes: list[dict[str, Any]]
-    ) -> None:
+    def test_it_lists_chains(self, client: TestClient, envelopes: list[dict[str, Any]]) -> None:
         _post(client, envelopes[0], chain="alpha")
         assert client.get("/public/v1/chains").json() == {"chains": ["alpha"]}
 
-    def test_it_serves_head(
-        self, client: TestClient, envelopes: list[dict[str, Any]]
-    ) -> None:
+    def test_it_serves_head(self, client: TestClient, envelopes: list[dict[str, Any]]) -> None:
         _post(client, envelopes[0])
         assert client.get("/public/v1/chains/default/head").json()["seq"] == 0
 
-    def test_it_serves_entries(
-        self, client: TestClient, envelopes: list[dict[str, Any]]
-    ) -> None:
+    def test_it_serves_entries(self, client: TestClient, envelopes: list[dict[str, Any]]) -> None:
         _post(client, envelopes[0])
         assert len(client.get("/public/v1/chains/default/entries").json()["entries"]) == 1
 
@@ -363,9 +349,7 @@ class TestWitnessEndpoint:
         )
         assert resp.status_code == 201
 
-    def test_the_chain_write_key_is_refused_at_the_witness(
-        self, keyed_client: TestClient
-    ) -> None:
+    def test_the_chain_write_key_is_refused_at_the_witness(self, keyed_client: TestClient) -> None:
         # REMOTE.md section 8: a witness is a DIFFERENT administrative
         # authority. A witness that accepted the chain's write credential could
         # append forged entries to the very chain it exists to cross-check.
@@ -451,9 +435,7 @@ class TestCheckpointValidation:
             ({**CHECKPOINT, "agg_commit": "cc" * 32, "agg_epoch": "1"}, "epoch-not-an-int"),
         ],
     )
-    def test_a_malformed_checkpoint_is_400(
-        self, client: TestClient, body: Any, why: str
-    ) -> None:
+    def test_a_malformed_checkpoint_is_400(self, client: TestClient, body: Any, why: str) -> None:
         assert client.post("/v1/witness/w1", json=body).status_code == 400, why
 
     def test_a_witness_body_that_is_not_json_is_400(self, client: TestClient) -> None:

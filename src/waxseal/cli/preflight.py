@@ -139,16 +139,13 @@ def _preflight_anchors(trail: Path) -> _AnchorView:
         "unverifiable by name, NOT evidence of tampering, and NOT zero",
     )
     records = sidecar.records
-    sinks: tuple[str, ...] | None = tuple(
-        sorted({r.sink for r in records if r.sink != "file"})
-    )
+    sinks: tuple[str, ...] | None = tuple(sorted({r.sink for r in records if r.sink != "file"}))
     bound = tuple(r for r in records if r.checkpoint.agg_commit is not None)
 
     if records:
         anchor_records = Observed(
             True,
-            f"{len(records)} record(s) in {name}, latest at seq "
-            f"{records[-1].checkpoint.seq}",
+            f"{len(records)} record(s) in {name}, latest at seq {records[-1].checkpoint.seq}",
         )
     elif sidecar.unreadable_versions:
         anchor_records = unreadable
@@ -165,9 +162,7 @@ def _preflight_anchors(trail: Path) -> _AnchorView:
     elif sidecar.unreadable_versions:
         external, sinks = unreadable, None
     else:
-        external = Observed(
-            False, f"no record in {name} names a sink other than `file`"
-        )
+        external = Observed(False, f"no record in {name} names a sink other than `file`")
 
     if bound:
         aggregate = Observed(
@@ -188,8 +183,7 @@ def _preflight_anchors(trail: Path) -> _AnchorView:
             f"{anchor_records.detail}",
             f"  external anchor sinks: {count} — {external.detail}",
             _PREFLIGHT_DOMAINS,
-            f"  aggregate binding (SPEC 15): {_observed_label(aggregate)} — "
-            f"{aggregate.detail}",
+            f"  aggregate binding (SPEC 15): {_observed_label(aggregate)} — {aggregate.detail}",
         ),
         records=anchor_records,
         external=external,
@@ -293,22 +287,16 @@ def _preflight_pin(pin_path: Path | None) -> _PinView:
             topology=None,
         )
 
-    age = (
-        "not declared"
-        if stored.max_anchor_age_s is None
-        else str(stored.max_anchor_age_s)
-    )
+    age = "not declared" if stored.max_anchor_age_s is None else str(stored.max_anchor_age_s)
     return _PinView(
         lines=(
             f"  pin state: {pin_path} — target={stored.target}, pinned seq="
             f"{stored.checkpoint.seq} at {stored.pinned_ts}",
             "  pin declarations (declared, not measured — an operator's claim "
             "about who holds what, which no run can corroborate from a trail):",
-            f"    expect_anchor_binding: "
-            f"{_declared_bool(stored.expect_anchor_binding)}",
+            f"    expect_anchor_binding: {_declared_bool(stored.expect_anchor_binding)}",
             f"    max_anchor_age_s: {age}",
-            f"    declared_topology: "
-            f"{_render_declared_topology(stored.declared_topology)}",
+            f"    declared_topology: {_render_declared_topology(stored.declared_topology)}",
         ),
         topology=stored.declared_topology,
     )
@@ -344,10 +332,7 @@ def _preflight_trail_line(trail: Path) -> str:
         )
     if not hashes:
         return f"trail: {trail} — 0 recorded entries, no head yet"
-    return (
-        f"trail: {trail} — {len(hashes)} recorded entries, "
-        f"head seq={len(hashes) - 1}"
-    )
+    return f"trail: {trail} — {len(hashes)} recorded entries, head seq={len(hashes) - 1}"
 
 
 def _preflight_segment_lines(trail: Path) -> tuple[str, ...]:
@@ -372,8 +357,7 @@ def _preflight_segment_lines(trail: Path) -> tuple[str, ...]:
     group = [
         path
         for path in discover_segments(trail.parent)
-        if path.name == stem + SEGMENT_SUFFIX
-        or segment_ordinal(path.name, stem) is not None
+        if path.name == stem + SEGMENT_SUFFIX or segment_ordinal(path.name, stem) is not None
     ]
     if not group:
         return (

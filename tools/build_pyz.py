@@ -82,9 +82,7 @@ def _build_wheel(work: Path) -> Path:
         if proc.returncode == 0:
             break
     else:
-        raise SystemExit(
-            "no wheel builder available: install `uv` or `python -m build`"
-        )
+        raise SystemExit("no wheel builder available: install `uv` or `python -m build`")
     wheels = sorted(work.glob("waxseal-*.whl"))
     if not wheels:
         raise SystemExit(f"the wheel build produced nothing in {work}")

@@ -54,6 +54,8 @@ else:
     # even when every call site is skipif-ed off Windows). Never runs there.
     def _flock_state(lock_path: Path) -> str:
         raise AssertionError("flock probe is POSIX-only")
+
+
 from waxseal.adapters.segment_archive import s3_destination, server_import_destination
 from waxseal.domain.archive import ArchiveReport, ArchiveState
 from waxseal.domain.header import GENESIS_PREV_HASH
@@ -154,9 +156,7 @@ class TestNoRotationBelowTheThreshold:
         assert sorted(p.name for p in tmp_path.glob("*.jsonl")) == ["trail.jsonl"]
         assert AuditLog.open(base).verify(measure_drops=False).checked == 3
 
-    def test_an_oversized_file_with_no_complete_entry_is_not_rotated(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_oversized_file_with_no_complete_entry_is_not_rotated(self, tmp_path: Path) -> None:
         # Nothing to bind a new segment to: there is no tail yet.
         base = tmp_path / "trail.jsonl"
         base.write_bytes(b"\n" * (TINY + 1))
@@ -178,17 +178,13 @@ class TestRotationCreatesAndBinds:
             "trail.jsonl",
         ]
 
-    def test_a_numbered_active_segment_rotates_to_the_next_ordinal(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_numbered_active_segment_rotates_to_the_next_ordinal(self, tmp_path: Path) -> None:
         base = tmp_path / "trail.00000.jsonl"
         fill_over(base)
         open_segmented(base, max_segment_bytes=TINY)
         assert (tmp_path / "trail.00001.jsonl").exists()
 
-    def test_the_new_segments_genesis_is_the_closing_tail_binding(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_new_segments_genesis_is_the_closing_tail_binding(self, tmp_path: Path) -> None:
         base = tmp_path / "trail.00000.jsonl"
         closing = fill_over(base)
         hashes = closing.entry_hashes()
@@ -366,9 +362,7 @@ class TestFinalCheckpoint:
         assert len(sink.checkpoints) == 1
         assert sink.checkpoints[0].seq == tail_seq
 
-    def test_a_failing_final_checkpoint_is_labelled_and_never_blocks(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_failing_final_checkpoint_is_labelled_and_never_blocks(self, tmp_path: Path) -> None:
         class Broken:
             def anchor(self, cp: Checkpoint) -> None:
                 raise OSError("sink offline")
@@ -437,18 +431,14 @@ class TestActiveSegmentAndDiscovery:
             fill(tmp_path / name, 1)
         assert active_segment(tmp_path / "trail.jsonl").name == "trail.00001.jsonl"
 
-    def test_the_unnumbered_base_is_active_until_the_first_rotation(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_unnumbered_base_is_active_until_the_first_rotation(self, tmp_path: Path) -> None:
         fill(tmp_path / "trail.jsonl", 1)
         assert active_segment(tmp_path / "trail.jsonl").name == "trail.jsonl"
 
     def test_a_never_written_path_is_its_own_active_segment(self, tmp_path: Path) -> None:
         assert active_segment(tmp_path / "trail.00000.jsonl").name == "trail.00000.jsonl"
 
-    def test_a_not_yet_created_project_directory_is_not_an_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_not_yet_created_project_directory_is_not_an_error(self, tmp_path: Path) -> None:
         # The routed default names a per-project directory that does not exist
         # until the first append, and the threshold check runs BEFORE the lock
         # that would create it.
@@ -467,9 +457,7 @@ class TestActiveSegmentAndDiscovery:
         fill(tmp_path / "trail.7.jsonl", 1)
         assert active_segment(tmp_path / "trail.jsonl").name == "trail.00000.jsonl"
 
-    def test_discovery_orders_the_base_before_its_numbered_segments(
-        self, tmp_path: Path
-    ) -> None:
+    def test_discovery_orders_the_base_before_its_numbered_segments(self, tmp_path: Path) -> None:
         for name in ("trail.00001.jsonl", "trail.jsonl", "trail.00000.jsonl"):
             fill(tmp_path / name, 1)
         assert [p.name for p in discover_segments(tmp_path)] == [
@@ -484,9 +472,7 @@ class TestActiveSegmentAndDiscovery:
         fill(tmp_path / "trail.jsonl", 1)
         assert discover_segments(tmp_path) == []
 
-    def test_discovery_of_a_missing_directory_is_empty_not_an_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_discovery_of_a_missing_directory_is_empty_not_an_error(self, tmp_path: Path) -> None:
         assert discover_segments(tmp_path / "nope") == []
 
     def test_discovery_covers_every_stem_in_the_directory(self, tmp_path: Path) -> None:
@@ -621,9 +607,7 @@ class TestSegmentArchiveAtRotation:
     to be asserted directly.
     """
 
-    def test_no_destination_configured_is_reported_as_not_attempted(
-        self, tmp_path: Path
-    ) -> None:
+    def test_no_destination_configured_is_reported_as_not_attempted(self, tmp_path: Path) -> None:
         # Never silence: an operator who believes archiving is configured
         # learns from this line that it is not, at the moment the segment
         # becomes deletable-and-unrecoverable rather than months later.
@@ -650,9 +634,7 @@ class TestSegmentArchiveAtRotation:
         assert calls == []
         assert lines == []
 
-    def test_the_sealed_segment_reaches_the_destination_byte_for_byte(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_sealed_segment_reaches_the_destination_byte_for_byte(self, tmp_path: Path) -> None:
         base = tmp_path / "trail.00000.jsonl"
         fill_over(base)
         sealed = base.read_bytes()
@@ -773,9 +755,7 @@ class TestRestoreFromTheArchive:
     having been called.
     """
 
-    def test_a_deleted_segment_is_restored_from_s3_and_verifies_ok(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_deleted_segment_is_restored_from_s3_and_verifies_ok(self, tmp_path: Path) -> None:
         base = tmp_path / "trail.00000.jsonl"
         closing = fill_over(base)
         sealed_entries = len(closing.entry_hashes())

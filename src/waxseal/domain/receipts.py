@@ -251,9 +251,7 @@ def parse_receipt_line(
         # verifying under the identity it always had (CLAUDE.md rule 2) —
         # never reinterpreted, never orphaned.
         declared_fingerprint = receipt_fingerprint()
-    elif (
-        not isinstance(fp_raw, str) or len(fp_raw) != 64 or not set(fp_raw) <= RECEIPT_HEX64
-    ):
+    elif not isinstance(fp_raw, str) or len(fp_raw) != 64 or not set(fp_raw) <= RECEIPT_HEX64:
         # Present but the wrong shape: this project's own field failed to
         # parse, section 17's break side of the asymmetry — same treatment
         # `_hex64` gives `entry_hash`/`receipt_head` below.

@@ -564,8 +564,7 @@ def _bond_prove(
     kind = raw.get("kind") if isinstance(raw, dict) else None
     if kind not in ("equivocation", "non_extension"):
         print(
-            f"error: {proof_path}: 'kind' must be 'equivocation' or 'non_extension', "
-            f"got {kind!r}",
+            f"error: {proof_path}: 'kind' must be 'equivocation' or 'non_extension', got {kind!r}",
             file=sys.stderr,
         )
         return 1

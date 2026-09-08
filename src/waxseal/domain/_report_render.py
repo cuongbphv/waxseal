@@ -55,6 +55,7 @@ _RECEIPTS_LABEL: Final[dict[str, str]] = {
     ),
 }
 
+
 def _count_table(
     label: str, counts: Sequence[tuple[str, int]], *, truncate: int | None = None
 ) -> list[str]:
@@ -84,8 +85,7 @@ def _incident_lines(
     lines = ["", "## Incidents", ""]
     if total is None:
         lines.append(
-            "- Incident records: **not scanned**. The absence of a scan is "
-            "not a count of zero."
+            "- Incident records: **not scanned**. The absence of a scan is not a count of zero."
         )
         return lines
     lines.append(
@@ -116,8 +116,7 @@ def _intervention_lines(
     lines = ["", "## Human interventions", ""]
     if total is None:
         lines.append(
-            "- Intervention records: **not scanned**. The absence of a scan "
-            "is not a count of zero."
+            "- Intervention records: **not scanned**. The absence of a scan is not a count of zero."
         )
         return lines
     lines.append(
@@ -159,8 +158,7 @@ def _witness_lines(verdicts: tuple[WitnessVerdict, ...] | None) -> list[str]:
     for v in verdicts:
         if v.status == WITNESS_UNREACHABLE:
             lines.append(
-                f"  - `{v.name}`: **unreachable** ({v.reason}) — not checked, "
-                "which is not a pass"
+                f"  - `{v.name}`: **unreachable** ({v.reason}) — not checked, which is not a pass"
             )
         elif v.status == WITNESS_INCONSISTENT:
             lines.append(

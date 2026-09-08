@@ -22,7 +22,7 @@ callbacks do not propagate to children):
 from waxseal_handler import WaxsealCallbackHandler
 
 audit = WaxsealCallbackHandler("~/.waxseal/langchain-trail.jsonl")
-agent.invoke(input, config={"callbacks": [audit]})     # also works for LangGraph graphs
+agent.invoke(input, config={"callbacks": [audit]})  # also works for LangGraph graphs
 ```
 
 ## Verify anytime
