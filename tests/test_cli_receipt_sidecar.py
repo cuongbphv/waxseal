@@ -153,7 +153,7 @@ class TestTheReasonTable:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         trail = acknowledged_trail(tmp_path)
-        with receipts_path(trail).open("a") as f:
+        with receipts_path(trail).open("a", encoding="utf-8") as f:
             f.write("{this is not a record\n")
 
         code = main(["verify", str(trail)])

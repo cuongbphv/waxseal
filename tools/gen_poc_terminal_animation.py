@@ -268,6 +268,7 @@ def _run_script(script: Path, args: list[str]) -> str:
         capture_output=True,
         text=True,
         env={"PATH": "/usr/bin:/bin", "WAXSEAL_DEMO_PLAIN": "1", "PYTHONPATH": str(REPO / "src")},
+        encoding="utf-8",
     )
     return proc.stdout
 

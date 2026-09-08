@@ -64,6 +64,7 @@ def run_hook(
         text=True,
         env=env,
         timeout=30,
+        encoding="utf-8",
     )
 
 
@@ -230,6 +231,7 @@ class TestDefaultTrailLocation:
             text=True,
             timeout=30,
             env=_spawn_env(HOME=str(tmp_path)),
+            encoding="utf-8",
         )
         assert proc.returncode == 0
         from waxseal.domain.segments import project_slug

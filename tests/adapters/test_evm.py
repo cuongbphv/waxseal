@@ -1182,7 +1182,11 @@ class TestTheCoreDoesNotImportTheExtra:
 
         probe = "import sys, waxseal;loaded=[m for m in sys.modules if 'evm' in m];print(loaded)"
         out = subprocess.run(
-            [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding="utf-8",
         )
         assert out.stdout.strip() == "[]"
 

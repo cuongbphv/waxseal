@@ -258,6 +258,7 @@ class TestConditionR:
             capture_output=True,
             text=True,
             check=False,
+            encoding="utf-8",
         )
         assert proc.returncode == 2
         assert "signature_unchecked" in proc.stdout

@@ -66,6 +66,7 @@ def run(
         text=True,
         env=env,
         timeout=60,
+        encoding="utf-8",
     )
 
 

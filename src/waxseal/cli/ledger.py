@@ -335,6 +335,7 @@ class ExternalEvmSigner:
                 text=True,
                 timeout=30,
                 check=False,
+                encoding="utf-8",
             )
         except (OSError, subprocess.SubprocessError) as exc:
             raise LedgerError(

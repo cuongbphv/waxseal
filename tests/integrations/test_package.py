@@ -63,7 +63,11 @@ class TestPackageShape:
             "print('no-opener-at-import')\n"
         )
         proc = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            encoding="utf-8",
         )
         assert proc.returncode == 0, proc.stderr
         assert "no-opener-at-import" in proc.stdout

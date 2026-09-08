@@ -403,6 +403,19 @@ of these shipped in a release):
   `install.sh` used `ls` to pick the artifact (SC2012, now `find`), and
   `server/scripts/*.sh` had unguarded `cd`s, `A && B || C` notices and
   unfollowed `source` lines; CI runs shellcheck with `-x -P SCRIPTDIR`.
+  The second run then failed on a finding the local check had not shown:
+  shellcheck 0.9.0 (the runner's) reads `A && B || true` as SC2015 and
+  0.11.0 does not. CI and `make install-sh-check` now run one shellcheck
+  image pinned by digest, so a clean run here is a clean run there.
+- **Windows coverage floor.** With every test green, the Windows jobs
+  still exited 1: `adapters/mode_notice.py`'s POSIX body was only reached
+  by tests the whole module skipped on win32, so 7 lines went uncovered
+  there. The stat + format step is `_posix_mode_notice`, tested directly
+  on every platform; only the chmod-driven tests skip on Windows. Text-
+  mode `subprocess` calls (24), `Path.open` in an explicit text mode and
+  `examples/` are held to the same rule by the encoding guard test, and
+  the whole suite passes with `-X warn_default_encoding -W
+  error::EncodingWarning`, the closest a POSIX machine gets to cp1252.
 
 ### Security
 

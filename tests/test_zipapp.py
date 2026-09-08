@@ -51,6 +51,7 @@ def pyz(tmp_path_factory: pytest.TempPathFactory) -> Path:
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
+        encoding="utf-8",
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     built = sorted(out.glob("waxseal-*.pyz"))
@@ -63,9 +64,7 @@ def _run(pyz: Path, *args: str) -> subprocess.CompletedProcess[str]:
     # is the one known to exist here, and server/scripts/_lib.sh carries the
     # same note for the same reason.
     return subprocess.run(
-        [sys.executable, str(pyz), *args],
-        capture_output=True,
-        text=True,
+        [sys.executable, str(pyz), *args], capture_output=True, text=True, encoding="utf-8"
     )
 
 

@@ -211,7 +211,7 @@ def scenario_truncate(src: Path, work: Path) -> Outcome:
     rows = load(trail)
     save(trail, rows[:3])
     attest = trail.with_suffix(trail.suffix + ".attest")
-    lines = attest.read_text().splitlines()
+    lines = attest.read_text(encoding="utf-8").splitlines()
     attest.write_text("\n".join(lines[:3]) + "\n", encoding="utf-8")
 
     print(colour("     chain + sidecar agree with each other after the cut:", DIM))
@@ -281,7 +281,7 @@ def scenario_proof_bundle(src: Path, work: Path) -> Outcome:
     print(colour("     (trail deleted — the bundle stands on its own)", DIM))
     good = run_cmd(["verify-proof", str(bundle)])
 
-    obj = json.loads(bundle.read_text())
+    obj = json.loads(bundle.read_text(encoding="utf-8"))
     obj["payload_b64"] = base64.b64encode(b'{"outcome":"approve"}').decode()
     bundle.write_text(json.dumps(obj), encoding="utf-8")
     print(colour("     now tamper with the bundle itself:", DIM))

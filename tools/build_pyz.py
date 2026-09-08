@@ -78,7 +78,9 @@ def _build_wheel(work: Path) -> Path:
     ):
         if builder[0] != sys.executable and shutil.which(builder[0]) is None:
             continue
-        proc = subprocess.run(builder, cwd=REPO_ROOT, capture_output=True, text=True)
+        proc = subprocess.run(
+            builder, cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8"
+        )
         if proc.returncode == 0:
             break
     else:

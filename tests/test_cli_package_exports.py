@@ -50,6 +50,7 @@ def test_python_m_waxseal_cli_help_exits_0() -> None:
         [sys.executable, "-m", "waxseal.cli", "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert proc.returncode == 0, proc.stderr
     assert "verify" in proc.stdout

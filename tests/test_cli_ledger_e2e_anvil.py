@@ -113,7 +113,13 @@ def _base_env() -> dict[str, str]:
 
 def _run(*args: str, cwd: Path | None = None) -> str:
     done = subprocess.run(
-        list(args), cwd=cwd, env=_base_env(), capture_output=True, text=True, timeout=180
+        list(args),
+        cwd=cwd,
+        env=_base_env(),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        encoding="utf-8",
     )
     if done.returncode != 0:
         raise AssertionError(f"{' '.join(args)} failed ({done.returncode}):\n{done.stderr}")
@@ -392,6 +398,7 @@ def _waxseal(*args: str, env: dict[str, str]) -> subprocess.CompletedProcess[str
         capture_output=True,
         text=True,
         timeout=90,
+        encoding="utf-8",
     )
 
 

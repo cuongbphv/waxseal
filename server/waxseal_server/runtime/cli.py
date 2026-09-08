@@ -233,6 +233,7 @@ class WaxsealCli:
             capture_output=True,
             text=True,
             timeout=self._timeout,
+            encoding="utf-8",
         )
         match = _CHOICES_RE.search(completed.stdout)
         if match is None:  # pragma: no cover - argparse always prints the metavar
@@ -269,10 +270,7 @@ class WaxsealCli:
                         return outcome
                     del self._outcomes[key]
         completed = subprocess.run(  # noqa: S603 - list argv, shell=False, allowlisted command
-            list(argv),
-            capture_output=True,
-            text=True,
-            timeout=self._timeout,
+            list(argv), capture_output=True, text=True, timeout=self._timeout, encoding="utf-8"
         )
         outcome = _classify(command, argv, completed.returncode, completed.stdout, completed.stderr)
         if key is not None:

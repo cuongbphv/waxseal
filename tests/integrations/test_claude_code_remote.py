@@ -85,6 +85,7 @@ def run_hook(
         text=True,
         env=env,
         timeout=30,
+        encoding="utf-8",
     )
 
 
