@@ -50,17 +50,13 @@ from crewai.events import (
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations import _sanitize as _sanitize_impl
 from waxseal.integrations._trail import home_default, resolve_trail
 
-# _sanitize redacts BEFORE clipping: a clip can split a secret across the
-# boundary (a PEM losing its END marker stops matching) and land it on disk.
-_REDACTOR = RegexRedactor()
+MAX_FIELD_CHARS = _sanitize_impl.MAX_FIELD_CHARS
+_sanitize = _sanitize_impl.sanitize
 
 PAYLOAD_TYPE = "application/vnd.crewai.event+json"
-
-# Tool outputs can be megabytes (scraped pages, file reads). Clip stored
-# fields, visibly, because silent truncation would read as "the full output".
-MAX_FIELD_CHARS = 4096
 
 #: Where this integration writes when the caller names no path and
 #: `WAXSEAL_TRAIL` is unset.
@@ -74,25 +70,6 @@ _EVENT_ATTRS = (
     "task_id", "task_name", "crew_name", "inputs", "output", "from_cache",
     "error", "total_tokens", "event_id",
 )
-
-
-def _clip(text: str) -> str:
-    if len(text) <= MAX_FIELD_CHARS:
-        return text
-    return text[:MAX_FIELD_CHARS] + f"…[truncated {len(text) - MAX_FIELD_CHARS} chars]"
-
-
-def _sanitize(value: Any) -> Any:
-    """Keep the payload JSON-serializable and bounded whatever the event holds."""
-    if value is None or isinstance(value, (int, float, bool)):
-        return value
-    if isinstance(value, str):
-        return _clip(_REDACTOR.redact_text(value))
-    if isinstance(value, dict):
-        return {str(k): _sanitize(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_sanitize(v) for v in value]
-    return _clip(_REDACTOR.redact_text(repr(value)))
 
 
 class WaxsealEventListener(BaseEventListener):

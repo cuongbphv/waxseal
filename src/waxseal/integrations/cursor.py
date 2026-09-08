@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations import _sanitize as _sanitize_impl
 from waxseal.integrations._archive import archive_destination
 from waxseal.integrations._trail import home_base, resolve_trail, routed_trail
 from waxseal.sources.rotation import (
@@ -54,15 +55,10 @@ from waxseal.sources.rotation import (
     open_segmented,
 )
 
-# _sanitize redacts BEFORE clipping: a clip can split a secret across the
-# boundary (a PEM losing its END marker stops matching) and land it on disk.
-_REDACTOR = RegexRedactor()
+MAX_FIELD_CHARS = _sanitize_impl.MAX_FIELD_CHARS
+_sanitize = _sanitize_impl.sanitize
 
 PAYLOAD_TYPE = "application/vnd.cursor.hook-event+json"
-
-# Shell outputs and file contents can be megabytes. Clip stored fields,
-# visibly, because silent truncation would read as "the full output".
-MAX_FIELD_CHARS = 4096
 
 # Per-event fields worth keeping, on top of the common envelope. Unlisted
 # fields (e.g. beforeReadFile's full file content) are deliberately dropped:
@@ -104,25 +100,6 @@ def _project_key(event: dict[str, Any]) -> str | None:
     if isinstance(roots, list) and roots and isinstance(roots[0], str) and roots[0]:
         return roots[0]
     return None
-
-
-def _clip(text: str) -> str:
-    if len(text) <= MAX_FIELD_CHARS:
-        return text
-    return text[:MAX_FIELD_CHARS] + f"…[truncated {len(text) - MAX_FIELD_CHARS} chars]"
-
-
-def _sanitize(value: Any) -> Any:
-    """Keep the payload JSON-serializable and bounded whatever the event holds."""
-    if value is None or isinstance(value, (int, float, bool)):
-        return value
-    if isinstance(value, str):
-        return _clip(_REDACTOR.redact_text(value))
-    if isinstance(value, dict):
-        return {str(k): _sanitize(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_sanitize(v) for v in value]
-    return _clip(_REDACTOR.redact_text(repr(value)))
 
 
 def build_payload(event: dict[str, Any]) -> dict[str, Any]:

@@ -23,17 +23,17 @@ needs `pip install waxseal` in its environment.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
-from waxseal.integrations._trail import home_base, resolve_trail
+from waxseal.integrations import _sanitize as _sanitize_impl
+from waxseal.integrations._trail import hermes_home as _hermes_home
+from waxseal.integrations._trail import resolve_trail
 
-# _sanitize redacts BEFORE clipping: a clip can split a secret across the
-# boundary (a PEM losing its END marker stops matching) and land it on disk.
-_REDACTOR = RegexRedactor()
+MAX_FIELD_CHARS = _sanitize_impl.MAX_FIELD_CHARS
+_sanitize = _sanitize_impl.sanitize
 
 PAYLOAD_TYPE = "application/vnd.hermes.tool-call+json"
 
@@ -53,30 +53,9 @@ PLUGIN_MANIFEST = (
     "  - post_tool_call\n"
 )
 
-# Tool results can be megabytes (file reads, terminal dumps). Clip stored
-# fields, visibly, because silent truncation would read as "the full result".
-MAX_FIELD_CHARS = 4096
-
 # One log per resolved trail path: hermes loads this module once per
 # process, but tests (and multi-home setups) may vary HERMES_HOME.
 _logs: dict[Path, AuditLog] = {}
-
-
-def _hermes_home() -> Path:
-    env = os.environ.get("HERMES_HOME")
-    if env:
-        return Path(env)
-    try:
-        # Inside a hermes process this is the authoritative resolver.
-        from hermes_cli.config import get_hermes_home
-
-        return Path(get_hermes_home())
-    except Exception:
-        # home_base(), not Path.home(): the last rung has to honour HOME
-        # first or a host that sets it writes into a different Windows
-        # profile than `waxseal verify` reads (waxseal-fg4.3; the rule and
-        # the ntpath split are documented on home_base itself).
-        return home_base() / ".hermes"
 
 
 def _trail_path() -> Path:
@@ -99,25 +78,6 @@ def _get_log() -> AuditLog:
         log = AuditLog.open(path, redactor=RegexRedactor(), record_drops=True)
         _logs[path] = log
     return log
-
-
-def _clip(text: str) -> str:
-    if len(text) <= MAX_FIELD_CHARS:
-        return text
-    return text[:MAX_FIELD_CHARS] + f"…[truncated {len(text) - MAX_FIELD_CHARS} chars]"
-
-
-def _sanitize(value: Any) -> Any:
-    """Keep the payload JSON-serializable and bounded whatever the args hold."""
-    if value is None or isinstance(value, (int, float, bool)):
-        return value
-    if isinstance(value, str):
-        return _clip(_REDACTOR.redact_text(value))
-    if isinstance(value, dict):
-        return {str(k): _sanitize(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_sanitize(v) for v in value]
-    return _clip(_REDACTOR.redact_text(repr(value)))
 
 
 def _append(phase: str, kwargs: dict[str, Any], fields: tuple[str, ...]) -> None:
