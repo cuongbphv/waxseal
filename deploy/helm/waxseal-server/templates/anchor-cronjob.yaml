@@ -67,7 +67,7 @@ spec:
                   topologyKey: kubernetes.io/hostname
           containers:
             - name: anchor
-              image: "{{ .Values.anchor.image.repository }}:{{ .Values.anchor.image.tag }}"
+              image: {{ include "waxseal-server.image" .Values.anchor.image | quote }}
               imagePullPolicy: {{ .Values.anchor.image.pullPolicy }}
               securityContext:
                 {{- toYaml .Values.containerSecurityContext | nindent 16 }}

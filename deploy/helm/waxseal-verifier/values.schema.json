@@ -18,6 +18,11 @@
           "minLength": 1,
           "not": { "const": "latest" }
         },
+        "digest": {
+          "description": "Optional. `sha256:<64 hex>` of the published image; when set it pins the bytes and the tag only names the release. Images are cosign-signed by digest.",
+          "type": "string",
+          "pattern": "^(|sha256:[0-9a-f]{64})$"
+        },
         "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
       }
     },

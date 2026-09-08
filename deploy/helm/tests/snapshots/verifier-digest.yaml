@@ -86,7 +86,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: report
-              image: "ghcr.io/cuongbphv/waxseal:0.1.6"
+              image: "ghcr.io/cuongbphv/waxseal@sha256:0000000000000000000000000000000000000000000000000000000000000003"
               imagePullPolicy: IfNotPresent
               securityContext:
                 allowPrivilegeEscalation: false
@@ -185,7 +185,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: verify
-              image: "ghcr.io/cuongbphv/waxseal:0.1.6"
+              image: "ghcr.io/cuongbphv/waxseal@sha256:0000000000000000000000000000000000000000000000000000000000000003"
               imagePullPolicy: IfNotPresent
               securityContext:
                 allowPrivilegeEscalation: false
@@ -200,7 +200,7 @@ spec:
                 - -c
                 - |
                   set -u
-                  waxseal verify "$WAXSEAL_TRAIL_URL" --pin "/var/lib/waxseal-verifier/pin" --witness "https://witness.other-authority.example.invalid/v1/witness/waxseal" --expect-anchor-binding --max-anchor-age-s 90000
+                  waxseal verify "$WAXSEAL_TRAIL_URL" --pin "/var/lib/waxseal-verifier/pin"
                   rc=$?
                   echo "waxseal_command=verify waxseal_exit=$rc"
                   case "$rc" in

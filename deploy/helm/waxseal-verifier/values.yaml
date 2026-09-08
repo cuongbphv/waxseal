@@ -16,6 +16,10 @@ image:
   repository: ghcr.io/cuongbphv/waxseal
   # Never `latest`.
   tag: "0.1.6"
+  # Optional. `sha256:<64 hex>` of the published image. When set it pins the
+  # bytes and the tag only names the release; `unverifiable` is a statement
+  # about which build read the trail, and a digest names the build exactly.
+  digest: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 

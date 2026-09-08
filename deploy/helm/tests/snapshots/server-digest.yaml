@@ -84,7 +84,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: server
-          image: "ghcr.io/cuongbphv/waxseal-server:0.1.6"
+          image: "ghcr.io/cuongbphv/waxseal-server@sha256:0000000000000000000000000000000000000000000000000000000000000001"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -167,3 +167,106 @@ spec:
         resources:
           requests:
             storage: "20Gi"
+
+---
+# Source: waxseal-server/templates/anchor-cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: waxseal-server-anchor
+  labels:
+    helm.sh/chart: waxseal-server-0.1.0
+    app.kubernetes.io/name: waxseal-server
+    app.kubernetes.io/instance: waxseal-server
+    app.kubernetes.io/version: "0.1.6"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: waxseal
+    waxseal.io/trust-domain: chain
+    waxseal.io/role: anchor-client
+spec:
+  schedule: "23 * * * *"
+  # One anchor run at a time. Two `waxseal anchor` processes appending to one
+  # sidecar is the same single-writer question the chain itself answers with a
+  # file lock, and Forbid is the cheap answer here.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/name: waxseal-server
+        app.kubernetes.io/instance: waxseal-server
+        waxseal.io/role: anchor-client
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: waxseal-server
+            app.kubernetes.io/instance: waxseal-server
+            waxseal.io/role: anchor-client
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            fsGroup: 10001
+            runAsGroup: 10001
+            runAsNonRoot: true
+            runAsUser: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          affinity:
+            podAffinity:
+              # REQUIRED, not preferred. A ReadWriteOnce volume is attachable
+              # on one node at a time, so a run scheduled elsewhere does not
+              # anchor late — it does not start.
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: waxseal-server
+                      app.kubernetes.io/instance: waxseal-server
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: anchor
+              image: "ghcr.io/cuongbphv/waxseal@sha256:0000000000000000000000000000000000000000000000000000000000000002"
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+                readOnlyRootFilesystem: true
+              args:
+                - anchor
+                - "/var/lib/waxseal/chains/default/trail.jsonl"
+                - --witness
+                - "https://witness.other-authority.example.invalid/v1/witness/waxseal"
+              env:
+                # WAXSEAL_WITNESS_API_KEY and never WAXSEAL_API_KEY. The
+                # chain's write credential does not cross the administrative
+                # boundary to a witness (REMOTE.md section 8), and the CLI
+                # reads only this variable for witness deposits.
+                - name: WAXSEAL_WITNESS_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: waxseal-anchor-credentials
+                      key: WAXSEAL_WITNESS_API_KEY
+                      optional: true
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+                requests:
+                  cpu: 50m
+                  memory: 96Mi
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/waxseal
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: data-waxseal-server-0
+            - name: tmp
+              emptyDir: {}

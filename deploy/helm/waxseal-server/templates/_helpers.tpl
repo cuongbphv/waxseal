@@ -31,6 +31,21 @@ app.kubernetes.io/part-of: waxseal
 waxseal.io/trust-domain: chain
 {{- end -}}
 
+{{/*
+Image reference from an {repository, tag, digest} block. A digest, when set,
+pins the bytes and wins; the tag still names the release for whoever reads the
+manifest. Images are published cosign-signed BY DIGEST
+(.github/workflows/publish-images.yml), and until 0.1.6 the chart offered no
+way to pin to one while validate.yaml told operators to.
+*/}}
+{{- define "waxseal-server.image" -}}
+{{- if .digest -}}
+{{- printf "%s@%s" .repository .digest -}}
+{{- else -}}
+{{- printf "%s:%s" .repository .tag -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "waxseal-server.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "waxseal-server.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}

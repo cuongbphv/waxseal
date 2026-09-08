@@ -54,7 +54,7 @@ spec:
             {{- toYaml .Values.podSecurityContext | nindent 12 }}
           containers:
             - name: report
-              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              image: {{ include "waxseal-verifier.image" .Values.image | quote }}
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               securityContext:
                 {{- toYaml .Values.containerSecurityContext | nindent 16 }}

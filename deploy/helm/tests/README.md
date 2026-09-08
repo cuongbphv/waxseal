@@ -15,6 +15,12 @@ helm template waxseal-server ../waxseal-server \
 # the verifier, pointed at a server in another namespace
 helm template waxseal-verifier ../waxseal-verifier \
   -f values/verifier.yaml > snapshots/verifier.yaml
+
+# both charts with every image pinned by digest instead of tag
+helm template waxseal-server ../waxseal-server \
+  -f values/server-digest.yaml > snapshots/server-digest.yaml
+helm template waxseal-verifier ../waxseal-verifier \
+  -f values/verifier-digest.yaml > snapshots/verifier-digest.yaml
 ```
 
 The **release names matter**: `waxseal-server` and `waxseal-verifier`. Helm's
@@ -22,37 +28,22 @@ fullname helper collapses `<release>-<chart>` to `<release>` when the release
 name already contains the chart name, so a different release name changes every
 resource name in the output and the diff becomes noise.
 
-## These were hand-written. No helm ran.
+## Recorded output since 08/09/2026
 
-`helm`, `kubectl`, `kind` and `kubeconform` are not installed on the machine
-these charts were written on and could not be installed there. So:
+Until the 0.1.6 pre-release review every file in `snapshots/` was written by
+hand from reading the templates, because no `helm` was installed where the
+charts were written; the note here said so, and said the first real render
+would replace them. That render happened on 08/09/2026 with Helm v4.2.4:
+`helm lint` passed on both charts and the five commands above regenerated every
+snapshot. What is in `snapshots/` now is *output*, not intent. `kubeconform`
+still runs only in CI (job `helm`), and no manifest has been applied to a
+cluster; a `kind` run is still a follow-up.
 
-- **no `helm lint` and no `helm template` has ever been run against either
-  chart**, and no manifest here has ever been applied to a cluster;
-- every file in `snapshots/` was written by hand, from reading the templates -
-  it is a statement of *intent*, not a recording of *output*;
-- the YAML in `snapshots/` was machine-parsed (`yaml.safe_load_all`) and the
-  kind sequence checked, so it is valid YAML carrying the manifests it claims
-  to. That is the whole of what was verified.
-
-Three things are the most likely to differ from real output, and all three are
-cosmetic rather than semantic:
-
-1. **Document order.** Helm sorts rendered manifests by its install-order kind
-   sorter and, within a kind, by template file path; hooks are emitted after
-   the ordinary manifests. `snapshots/server-full.yaml` puts the seed Job last
-   for that reason. Derived from Helm's documented behaviour, not observed.
-2. **Whitespace and key order inside `toYaml` blocks.** `toYaml` marshals maps
-   with sorted keys and does not indent sequence items under their key; that is
-   what is written here, unverified.
-3. **Quoting.** Where a template pipes through `quote` the value is written
-   quoted; elsewhere the string is left bare.
-
-**The first CI run may need to regenerate these files, and that is expected.**
-Regenerating is the three commands above. A snapshot nobody can trust is worse
-than an honest note saying which one this is, so the note stays until a real
-`helm template` has replaced the contents at least once - at which point this
-section should be edited to say so.
+Two more value sets exist beside the original three: `server-digest.yaml` and
+`verifier-digest.yaml` pin every image by `image.digest` instead of tag, so the
+rendered reference is `repository@sha256:...`. The digests in them are
+placeholders of the right shape, checked by `values.schema.json`'s pattern; a
+real one comes from `cosign verify` on the published image.
 
 ## What the snapshots are for, and what they are not
 

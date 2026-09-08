@@ -48,7 +48,7 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: seed
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "waxseal-server.image" .Values.image | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}

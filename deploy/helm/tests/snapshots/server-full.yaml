@@ -27,6 +27,7 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ingress-nginx
+
 ---
 # Source: waxseal-server/templates/serviceaccount.yaml
 apiVersion: v1
@@ -42,6 +43,7 @@ metadata:
     app.kubernetes.io/part-of: waxseal
     waxseal.io/trust-domain: chain
 automountServiceAccountToken: false
+
 ---
 # Source: waxseal-server/templates/secret.yaml
 apiVersion: v1
@@ -61,6 +63,7 @@ stringData:
   WAXSEAL_API_KEY: "snapshot-bootstrap-key-not-a-real-credential"
   WAXSEAL_WITNESS_API_KEY: "snapshot-witness-key-not-a-real-credential"
   WAXSEAL_SERVER_DATABASE_URL: "postgresql://waxseal@postgres.waxseal-chain.svc.cluster.local:5432/waxseal"
+
 ---
 # Source: waxseal-server/templates/service.yaml
 apiVersion: v1
@@ -85,6 +88,7 @@ spec:
   selector:
     app.kubernetes.io/name: waxseal-server
     app.kubernetes.io/instance: waxseal-server
+
 ---
 # Source: waxseal-server/templates/statefulset.yaml
 apiVersion: apps/v1
@@ -214,6 +218,7 @@ spec:
         resources:
           requests:
             storage: "50Gi"
+
 ---
 # Source: waxseal-server/templates/anchor-cronjob.yaml
 apiVersion: batch/v1
@@ -320,6 +325,7 @@ spec:
                 claimName: data-waxseal-server-0
             - name: tmp
               emptyDir: {}
+
 ---
 # Source: waxseal-server/templates/ingress.yaml
 apiVersion: networking.k8s.io/v1
@@ -439,3 +445,4 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+

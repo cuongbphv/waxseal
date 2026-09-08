@@ -28,6 +28,20 @@ app.kubernetes.io/part-of: waxseal
 waxseal.io/trust-domain: verifier
 {{- end -}}
 
+{{/*
+Image reference from an {repository, tag, digest} block. A digest, when set,
+pins the bytes and wins; the tag still names the release for whoever reads the
+manifest. `unverifiable` is a statement about which build read the trail, and a
+digest names the build exactly.
+*/}}
+{{- define "waxseal-verifier.image" -}}
+{{- if .digest -}}
+{{- printf "%s@%s" .repository .digest -}}
+{{- else -}}
+{{- printf "%s:%s" .repository .tag -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "waxseal-verifier.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "waxseal-verifier.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
