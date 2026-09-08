@@ -9,7 +9,12 @@
 #   docker build -f server/Dockerfile -t waxseal-server .
 
 # ---- stage 1: the web UI -----------------------------------------------------
-FROM node:24-alpine AS web
+# --platform=$BUILDPLATFORM: the static bundle is the same bytes for every
+# target arch, so it is built ONCE, natively, and copied into each runtime
+# image. Built per target it ran under QEMU for linux/arm64, where vite/rollup
+# hung at "rendering chunks" and the 0.1.6 publish job hit GitHub's six-hour
+# limit; the amd64 side of the same step took two seconds.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS web
 WORKDIR /src
 COPY server/web/package.json server/web/package-lock.json* server/web/
 RUN cd server/web && npm ci
@@ -25,7 +30,8 @@ RUN cd server/web && npm run build
 # by luck. Export the lock (with hashes) here and install exactly that below.
 # `waxseal` is a path source (`..`) installed from this tree in the runtime
 # stage, so it is left out of the export.
-FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS lock
+# Also arch-independent output (a requirements file), so also built once.
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS lock
 WORKDIR /app
 COPY pyproject.toml ./
 COPY server/pyproject.toml server/uv.lock ./server/

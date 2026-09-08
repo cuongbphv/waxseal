@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ghcr.io/cuongbphv/waxseal-server:0.1.6` was never published.** The
+  release's `publish-images` job built both target platforms from scratch,
+  and under QEMU the `linux/arm64` `npm run build` (vite/rollup) hung at
+  "rendering chunks" while every other layer finished within two minutes;
+  GitHub cancelled the job at its six-hour ceiling. The v0.1.6 release
+  notes carry the known issue. `server/Dockerfile` now builds the `web`
+  and `lock` stages once, on `$BUILDPLATFORM`, since their output (a static
+  bundle, a requirements file) is the same bytes for every target arch;
+  the workflow gains `timeout-minutes: 45` so a hang fails in minutes,
+  and a GHA build cache per image. The fix cannot reach the v0.1.6 tag;
+  the server image ships with the next release.
+
 ## [0.1.6] - 2026-09-08
 
 ### Added
