@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Final
 
-from waxseal.domain.report import RECEIPTS_NOT_RECORDED_REASON, CheckSummary
+from waxseal.domain._report_types import RECEIPTS_NOT_RECORDED_REASON, CheckSummary
 from waxseal.domain.witnessing import (
     WITNESS_INCONSISTENT,
     WITNESS_UNREACHABLE,

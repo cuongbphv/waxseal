@@ -31,8 +31,26 @@ import json
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any
 
+from waxseal.domain._report_render import (
+    _UNPARSEABLE_NOTE,
+    _count_table,
+    _incident_lines,
+    _intervention_lines,
+    _receipts_obj,
+    _receipts_text,
+    _summary_obj,
+    _summary_text,
+    _witness_lines,
+    _witnesses_obj,
+)
+
+# Re-exported by name: the CLI imports both from here (see _report_types).
+from waxseal.domain._report_types import (
+    RECEIPTS_NOT_RECORDED_REASON as RECEIPTS_NOT_RECORDED_REASON,
+)
+from waxseal.domain._report_types import CheckSummary as CheckSummary
 from waxseal.domain.decision import DECISION_PAYLOAD_TYPE, from_payload
 from waxseal.domain.header import Entry
 from waxseal.domain.incident import INCIDENT_PAYLOAD_TYPE, scan_incidents
@@ -88,36 +106,6 @@ _INTERVENTION_NOTE = (
     "happened. A supervision mechanism that was switched off writes nothing, "
     "so no log witnesses its own absence"
 )
-
-
-#: The reason string a receipts check reports when there is no `.receipts`
-#: sidecar AT ALL. Defined here rather than in the CLI because this is the file
-#: that has to keep "never measured" apart from "measured and clean" in the
-#: document an auditor still has six months later -- the CLI only prints a line
-#: on the day. `verify` imports it from here so the two surfaces cannot drift
-#: into disagreeing about which state they are describing.
-RECEIPTS_NOT_RECORDED_REASON: Final = "no_receipts_recorded"
-
-@dataclass(frozen=True, slots=True)
-class CheckSummary:
-    """Outcome of a sidecar check. The absence of one of these (``None`` on
-    the report) means the check was never run, never that it passed."""
-
-    ok: bool
-    checked: int
-    reason: str | None = None
-    # The third value the chain verdict has always had, made available to
-    # sidecar checks too: this build could not read the thing by name (a pin
-    # state from a newer waxseal, a timestamp token in a shape it does not
-    # parse). Not a pass and not a break: exit 2, the same distinction that
-    # keeps an unknown fingerprint from being called tampering.
-    unverifiable: bool = False
-    # Caveats that qualify an `ok`: a check that ran but could not cover
-    # everything in front of it. These belong on the summary, not on the
-    # caller's printed line, since `report` is the artifact an auditor still has
-    # six months later, and a caveat only `verify` prints is a caveat that
-    # never reaches them.
-    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -484,17 +472,3 @@ def _parse_decision(entry: Entry) -> Any:
 def _ranked(counter: Counter[str]) -> tuple[tuple[str, int], ...]:
     """Most frequent first; ties by name so two audits of the same trail must diff cleanly."""
     return tuple(sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])))
-
-
-from waxseal.domain._report_render import (  # noqa: E402
-    _UNPARSEABLE_NOTE,
-    _count_table,
-    _incident_lines,
-    _intervention_lines,
-    _receipts_obj,
-    _receipts_text,
-    _summary_obj,
-    _summary_text,
-    _witness_lines,
-    _witnesses_obj,
-)
