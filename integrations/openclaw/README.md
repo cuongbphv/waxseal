@@ -1,4 +1,4 @@
-# waxseal-audit — OpenClaw integration
+# waxseal-audit - OpenClaw integration
 
 Tamper-evident external archive for [OpenClaw](https://github.com/openclaw/openclaw)'s
 audit ledger. Verified against openclaw/openclaw **@ main, 2026-08-22**. waxseal is on
@@ -34,15 +34,15 @@ Two things in OpenClaw's own tracker decided the shape:
   the execution path. An exporter adds none.
 - [#115342](https://github.com/openclaw/openclaw/issues/115342) argues the capability
   belongs at the **audit layer, not provider hooks**, because hooks exist for some runtimes
-  and not others — "a silent gap the moment an agent moves to a runtime without hooks".
+  and not others - "a silent gap the moment an agent moves to a runtime without hooks".
   Reading the ledger covers native providers, `claude-cli` and `codex` through one path.
 
 ## OpenClaw issues this speaks to
 
 | Issue | State | Ask | What this provides |
 |---|---|---|---|
-| [#12508](https://github.com/openclaw/openclaw/issues/12508) | open, P2 | Chain integrity + tamper detection + audit logging | A SHA-256 hash chain over the ledger's own records, offline-verifiable with `waxseal verify`. Not the in-core hook-chain checksums the issue proposes — see limits |
-| [#115342](https://github.com/openclaw/openclaw/issues/115342) | open, P2 | "payload_hash alone cannot answer *what did this agent just do*" | Nothing on content: the ledger stores no arguments, so neither does this. It answers the adjacent question — *was the record altered afterwards* |
+| [#12508](https://github.com/openclaw/openclaw/issues/12508) | open, P2 | Chain integrity + tamper detection + audit logging | A SHA-256 hash chain over the ledger's own records, offline-verifiable with `waxseal verify`. Not the in-core hook-chain checksums the issue proposes - see limits |
+| [#115342](https://github.com/openclaw/openclaw/issues/115342) | open, P2 | "payload_hash alone cannot answer *what did this agent just do*" | Nothing on content: the ledger stores no arguments, so neither does this. It answers the adjacent question - *was the record altered afterwards* |
 | [#20935](https://github.com/openclaw/openclaw/issues/20935) | open | Audit log for agent memory changes | Whatever the ledger records reaches the chain; memory-change coverage is OpenClaw's to add, not this exporter's |
 | [#71712](https://github.com/openclaw/openclaw/issues/71712) | open | Non-forgeable provenance | Append-only chain + optional external anchoring, so a rewrite has to forge the anchor history too |
 | [#106710](https://github.com/openclaw/openclaw/issues/106710) | closed | Missing audit trail on plugin lifecycle hooks | Only if the ledger records those events |
@@ -50,7 +50,7 @@ Two things in OpenClaw's own tracker decided the shape:
 **Caveat, stated plainly:** every one of those issues carries
 `clawsweeper:needs-maintainer-review` / `needs-product-decision`. No OpenClaw maintainer
 has endorsed an external chain, and #12508 asks for integrity **inside core**. This is
-offered as the external archive the docs describe — nothing more.
+offered as the external archive the docs describe - nothing more.
 
 ## Install
 
@@ -68,7 +68,7 @@ Then run it on a timer. Nothing to enable in OpenClaw, no gateway restart, no pl
 systemd timer equivalent: a `OnCalendar=*:0/5` unit running the same command.
 
 Requirements: the `openclaw` CLI on `PATH` (set `WAXSEAL_OPENCLAW_BIN` to override) and a
-gateway able to answer it — the CLI queries the versioned activity RPC.
+gateway able to answer it - the CLI queries the versioned activity RPC.
 
 Trail location, in order: `$WAXSEAL_TRAIL`, else `$OPENCLAW_HOME/audit/trail.jsonl`, else
 `~/.openclaw/audit/trail.jsonl`.
@@ -89,29 +89,29 @@ from waxseal.adapters.redactors import RegexRedactor
 from waxseal.sources.openclaw import ingest
 
 log = AuditLog.open("trail.jsonl", redactor=RegexRedactor(), record_drops=True)
-result = ingest(log)          # idempotent; resume point comes from the chain
+result = ingest(log)  # idempotent; resume point comes from the chain
 print(result.ingested, result.last_sequence, result.gaps)
 ```
 
 ## How it behaves
 
-- **Idempotent.** The resume point is the highest ledger `sequence` already on the chain —
+- **Idempotent.** The resume point is the highest ledger `sequence` already on the chain -
   read from the chain, not from a cursor file that could disagree with it. A re-run with no
   new ledger activity appends nothing, and the whole run (resume-read through append) holds
   an ingest lock (`<trail>.ingest.lock`), so two overlapping timer runs cannot both ingest
-  the same rows — a run that cannot take the lock backs off with a labelled notice.
+  the same rows - a run that cannot take the lock backs off with a labelled notice.
 - **Order is preserved.** The export is newest-first (`ORDER BY sequence DESC`, and
   `--cursor` means `sequence < cursor`), so the ingest reverses it and appends ascending. A
   chain whose order disagreed with the ledger's would misreport what happened when.
 - **Gaps are reported, never judged.** A hole in `sequence` means rows were pruned *or*
-  dropped, and from outside the two are indistinguishable — OpenClaw's queue is documented
+  dropped, and from outside the two are indistinguishable - OpenClaw's queue is documented
   best-effort. The hole becomes its own chain entry
   (`application/vnd.waxseal.openclaw-ingest-gap+json`, `cause: "prune_or_drop"`), and
   `waxseal verify` still reports the chain intact. A completeness fact is not a tamper
   verdict. A gap left by waxseal's own `--max-pages` bound is labelled `page_cap` instead,
   so the two are never confused.
 - **Filtered exports do not guess.** With `--kind` set, absent sequences are the filter
-  working as asked, so gap detection is switched off and reports `None` — not `()`.
+  working as asked, so gap detection is switched off and reports `None` - not `()`.
   Unmeasured is not zero.
 - **Never raises.** A missing binary, a stopped gateway, unparseable output, an unreadable
   trail: all report on stderr and exit 0. One damaged record does not cost its page; the
@@ -125,7 +125,7 @@ print(result.ingested, result.last_sequence, result.gaps)
 
 **Proves:** nothing was altered after ingest. Editing, deleting, reordering or inserting a
 row breaks the chain at an exact `seq` with a named reason. Rows written under an older
-field set report as *unverifiable*, never as *tampered*, after a rollback — the ledger's
+field set report as *unverifiable*, never as *tampered*, after a rollback - the ledger's
 shape has already migrated once ("the earlier run/tool-only ledger"), and that is the
 failure class waxseal's version fingerprints exist for.
 
@@ -133,7 +133,7 @@ failure class waxseal's version fingerprints exist for.
 
 - **that the ledger was complete when read.** OpenClaw says absence of a row proves
   nothing; an exporter cannot manufacture evidence that was never written.
-- **anything about content.** No prompts, tool arguments, results, or command output —
+- **anything about content.** No prompts, tool arguments, results, or command output -
   the ledger deliberately stores none of it, so the chain carries none either. For
   argument-level evidence you need a hook on the runtime itself
   ([integrations/claude-code/](../claude-code/) does that for Claude Code).

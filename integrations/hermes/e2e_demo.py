@@ -90,11 +90,11 @@ def main() -> int:
     # Payloads are stored base64 — decode them, otherwise the absence check
     # passes vacuously against encoded bytes.
     decoded = b"\n".join(
-        base64.b64decode(json.loads(line)["payload_b64"])
-        for line in trail.read_text().splitlines()
+        base64.b64decode(json.loads(line)["payload_b64"]) for line in trail.read_text().splitlines()
     )
-    check("cleartext secret absent from decoded payloads",
-          b"sk-secret1234567890abcdef" not in decoded)
+    check(
+        "cleartext secret absent from decoded payloads", b"sk-secret1234567890abcdef" not in decoded
+    )
     check("redaction marker present in decoded payloads", b"***REDACTED***" in decoded)
 
     print("\nScenario 2 — attacker rewrites a past action")
@@ -138,9 +138,14 @@ def main() -> int:
     lines_f.append(
         json.dumps(
             {
-                "header": header.__dict__ if hasattr(header, "__dict__") else {
-                    "seq": header.seq, "ts": header.ts, "hash_version": header.hash_version,
-                    "payload_type": header.payload_type, "payload_hash": header.payload_hash,
+                "header": header.__dict__
+                if hasattr(header, "__dict__")
+                else {
+                    "seq": header.seq,
+                    "ts": header.ts,
+                    "hash_version": header.hash_version,
+                    "payload_type": header.payload_type,
+                    "payload_hash": header.payload_hash,
                     "prev_hash": header.prev_hash,
                 },
                 "entry_hash": compute_entry_hash(header),

@@ -1,0 +1,104 @@
+{{- if .Values.report.enabled }}
+{{- /*
+`waxseal report <url> --json` to stdout — the SIEM and GRC integration point
+deployment.md section 4 names. Ship the report, not the trail.
+
+It carries the chain verdict, the completeness measure AND ITS SOURCE,
+inventory by payload type and schema fingerprint, decision counts by type and
+oversight mode, and the status of each sidecar check. Fields that were NOT
+CHECKED are reported as not checked, so an alerting rule must not treat a
+missing check as a pass — `dropped_writes: null` is "not measured" and is never
+the same as 0.
+
+No --pin here. The pin belongs to the verify job: two commands advancing one
+pin state on different schedules would make "what did this verifier last
+confirm" depend on which ran most recently.
+*/ -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-report" (include "waxseal-verifier.fullname" .) }}
+  labels:
+    {{- include "waxseal-verifier.labels" . | nindent 4 }}
+    waxseal.io/job: report
+spec:
+  schedule: {{ .Values.report.schedule | quote }}
+  concurrencyPolicy: {{ .Values.report.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.report.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.report.failedJobsHistoryLimit }}
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "waxseal-verifier.selectorLabels" . | nindent 8 }}
+        waxseal.io/job: report
+    spec:
+      backoffLimit: {{ .Values.report.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "waxseal-verifier.selectorLabels" . | nindent 12 }}
+            waxseal.io/job: report
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "waxseal-verifier.serviceAccountName" . }}
+          automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: report
+              image: {{ include "waxseal-verifier.image" .Values.image | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.containerSecurityContext | nindent 16 }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -u
+                  waxseal report "$WAXSEAL_TRAIL_URL" --json
+                  rc=$?
+                  echo "waxseal_command=report waxseal_exit=$rc"
+                  case "$rc" in
+                    0) echo "waxseal_verdict=ok" ;;
+                    1) echo "waxseal_verdict=broken SECURITY_INCIDENT preserve_do_not_repair" ;;
+                    2) echo "waxseal_verdict=unverifiable version_skew route_to_release_management" ;;
+                    3) echo "waxseal_verdict=absent nothing_was_read configuration_error" ;;
+                    *) echo "waxseal_verdict=unexpected_exit_code" ;;
+                  esac
+                  exit $rc
+              env:
+                - name: WAXSEAL_TRAIL_URL
+                  value: {{ .Values.trailUrl | quote }}
+                {{- include "waxseal-verifier.credentialEnv" . | nindent 16 }}
+                {{- with .Values.extraEnv }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              resources:
+                {{- toYaml .Values.report.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

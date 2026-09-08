@@ -130,12 +130,8 @@ def verify_proof_bundle(bundle: ProofBundle, registry: VersionRegistry) -> Bundl
         ):
             return BundleResult(ok=False, reason="payload_hash_mismatch", unverifiable=False)
 
-    if not verify_membership(
-        bundle.entry_hash, seq, bundle.batch_size, bundle.proof, bundle.root
-    ):
-        return BundleResult(
-            ok=False, reason="membership_not_proven", unverifiable=unverifiable
-        )
+    if not verify_membership(bundle.entry_hash, seq, bundle.batch_size, bundle.proof, bundle.root):
+        return BundleResult(ok=False, reason="membership_not_proven", unverifiable=unverifiable)
     return BundleResult(ok=True, reason=None, unverifiable=unverifiable)
 
 
@@ -153,9 +149,7 @@ def bundle_to_json(bundle: ProofBundle) -> str:
             "header": header_to_obj(bundle.header),
             "entry_hash": bundle.entry_hash,
             "payload_b64": (
-                None
-                if bundle.payload is None
-                else base64.b64encode(bundle.payload).decode("ascii")
+                None if bundle.payload is None else base64.b64encode(bundle.payload).decode("ascii")
             ),
             "batch_size": bundle.batch_size,
             "proof": list(bundle.proof),
@@ -185,9 +179,7 @@ def bundle_from_json(text: str) -> ProofBundle:
         raise ValueError("bundle must be a JSON object")
     version = obj.get("bundle_version")
     if version != BUNDLE_VERSION:
-        raise ValueError(
-            f"unknown bundle format {version!r}; this build reads {BUNDLE_VERSION}"
-        )
+        raise ValueError(f"unknown bundle format {version!r}; this build reads {BUNDLE_VERSION}")
     for field in ("header", "entry_hash", "batch_size", "proof", "root"):
         if field not in obj:
             raise ValueError(f"bundle is missing {field!r}")

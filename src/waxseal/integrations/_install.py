@@ -121,8 +121,7 @@ def _note_home_unused(target: str, home: Path | None) -> None:
     if home is None:
         return
     print(
-        f"note: --home has no effect for {target} "
-        "(nothing is installed to a home directory)",
+        f"note: --home has no effect for {target} (nothing is installed to a home directory)",
         file=sys.stderr,
     )
 
@@ -233,8 +232,12 @@ def _config_snippet(target: str, shim: Path) -> str:
     cmd = f"{sys.executable} {shim}"
     if target == "cursor":
         events = (
-            "beforeShellExecution", "afterShellExecution", "beforeMCPExecution",
-            "afterFileEdit", "beforeSubmitPrompt", "stop",
+            "beforeShellExecution",
+            "afterShellExecution",
+            "beforeMCPExecution",
+            "afterFileEdit",
+            "beforeSubmitPrompt",
+            "stop",
         )
         rows = ",\n".join(f'    "{e}": [{{ "command": "{cmd}" }}]' for e in events)
         return '{\n  "version": 1,\n  "hooks": {\n' + rows + "\n  }\n}"

@@ -1,0 +1,25 @@
+apiVersion: v2
+name: waxseal-verifier
+description: |
+  Scheduled verification and reporting — the VERIFIER trust domain of
+  docs/architecture/deployment.md section 1. CronJobs only: it runs no server,
+  mounts no trail volume, and holds no write credential. Install it in a
+  DIFFERENT namespace, or a different cluster, from waxseal-server. A verifier
+  under the same authority as the writer is a self-verifying writer reporting
+  on itself.
+type: application
+version: 0.1.0
+appVersion: "0.1.6"
+keywords:
+  - audit
+  - verification
+  - tamper-evident
+home: https://github.com/cuongbphv/waxseal
+sources:
+  - https://github.com/cuongbphv/waxseal
+maintainers:
+  - name: waxseal maintainers
+    url: https://github.com/cuongbphv/waxseal
+annotations:
+  waxseal.io/reads: http
+  waxseal.io/writes: nothing-on-the-trail

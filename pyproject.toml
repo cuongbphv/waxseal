@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "waxseal"
-version = "0.1.5"
+version = "0.1.6"
 description = "Tamper-evident, schema-evolution-safe audit hash chain for AI agent frameworks. Zero dependencies."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -113,6 +113,14 @@ exclude = [
   # consumer downloading the waxseal sdist has no use for a FastAPI app and a
   # Vue project, and every byte of it would be dead weight in the tarball.
   "server",
+  # deploy/ is the deployment layer: a runtime Dockerfile, an installer script,
+  # two Helm charts and systemd units. Same standing as server/ and contracts/
+  # above — a library consumer downloading the sdist to `pip install` it has no
+  # use for a StatefulSet template, and every byte of it is dead weight in the
+  # tarball. tools/build_pyz.py deliberately STAYS in the sdist: it is a build
+  # tool for this project, like the tools/gen_*_vectors.py scripts already
+  # shipped beside it.
+  "deploy",
   # contracts/ is the on-chain layer: Solidity sources, a Foundry toolchain and
   # 21 generated cross-vector files. The line above had NAMED it since 0.1.5
   # while the list did not exclude it, which was harmless only for as long as
@@ -243,5 +251,20 @@ extend-exclude = ["tools/pm"]
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.format]
+# `ruff format --check .` is a CI gate since 0.1.6. ruff also formats Python
+# fences inside Markdown, and CLAUDE.md's frozen paths may not be edited by a
+# tool any more than by an agent: a future ruff that decided to reflow one of
+# them must fail on nothing rather than rewrite it. None of these is
+# unformatted today; the list is a guard, not a fix.
+exclude = ["SPEC.md", "CLAUDE.md", "LICENSE", "tests/vectors", "src/waxseal/domain/fingerprint.py"]
+
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+# PLW1514 (unspecified-encoding) is preview-only in ruff 0.16; explicit-preview-rules
+# turns on that one rule and nothing else. Windows CI read cp1252 where every
+# other runner read UTF-8 (0.1.6, first Windows run); pathlib's read_text/
+# write_text are covered by tests/architecture/test_text_encoding.py, open()
+# by this rule.
+preview = true
+explicit-preview-rules = true
+select = ["E", "F", "I", "UP", "B", "SIM", "PLW1514"]

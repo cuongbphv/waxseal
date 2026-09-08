@@ -8,14 +8,14 @@ library, no icon package.
 
 Every verdict shown is produced by the waxseal CLI behind the server, and every verdict
 panel prints the `argv` that produced it so an operator can reproduce it. The console has
-no control that edits, deletes, repairs, reorders, or re-signs anything — waxseal reports,
+no control that edits, deletes, repairs, reorders, or re-signs anything - waxseal reports,
 it never repairs, and neither does this UI.
 
 Five states are rendered distinctly and never collapsed into a pass/fail pair:
 `ok`, `broken`, `unverifiable`, `absent`, `unavailable` (plus `usage_error` and
 `unexpected_exit`, which mean no verdict was computed at all). `unverifiable` never wears
 `broken`'s treatment, and `absent` is never drawn as a failure. Where the API returns
-`null` — `completeness.dropped_writes`, `separation.tau`, `receipts.checked` — the screen
+`null` - `completeness.dropped_writes`, `separation.tau`, `receipts.checked` - the screen
 prints "not measured" / "not declared" / "not recorded", never `0`.
 
 ## Develop
@@ -54,18 +54,18 @@ a real 404 rather than being handed a web page). Both halves are covered by
 `tests/test_static_ui.py`.
 
 `base` is therefore `'/'` and not `'./'`. Relative asset URLs would resolve against the
-deep route — the browser would request `/chains/assets/index-*.js`, `SpaStaticFiles` would
+deep route - the browser would request `/chains/assets/index-*.js`, `SpaStaticFiles` would
 answer that 404 with `index.html`, and the module loader would be handed HTML. A blank page
 on refresh only. If the bundle ever moves off the site root, `base` moves with it.
 
-The `static/` directory is generated — it is git-ignored and safe to delete.
+The `static/` directory is generated - it is git-ignored and safe to delete.
 
 ## Design system
 
 Every colour, type step, radius and spacing value lives in `src/styles/tokens.css` as a
 CSS custom property; no other file contains a literal hex. The system has one interactive
 accent (`--color-primary`, `#0066cc`) and no second one. Status colours are declared in
-their own commented block and never appear on a button or a link — and every status is
+their own commented block and never appear on a button or a link - and every status is
 carried by its word, so the screen reads correctly with the colour removed.
 
 There is no `box-shadow` anywhere: the design system has exactly one shadow and it is

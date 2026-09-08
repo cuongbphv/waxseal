@@ -32,7 +32,7 @@ BOND_ADDR = "0x" + "33" * 20
 KNOWN_FINGERPRINT = fingerprint_for(HEADER_FIELDS)
 UNKNOWN_FINGERPRINT = "ff" * 32
 
-FAKE_SIGNER = '''
+FAKE_SIGNER = """
 import sys
 
 def main():
@@ -48,13 +48,13 @@ def main():
         sys.exit(2)
 
 main()
-'''
+"""
 
 
 @pytest.fixture
 def signer_cmd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     script = tmp_path / "fake_signer.py"
-    script.write_text(FAKE_SIGNER)
+    script.write_text(FAKE_SIGNER, encoding="utf-8")
     cmd = f"{sys.executable} {script}"
     monkeypatch.setenv("WAXSEAL_EVM_SIGNER_CMD", cmd)
     return cmd
@@ -86,8 +86,16 @@ class TestRegistryPublish:
         urls = two_write_nodes()
         code = main(
             [
-                "registry", "publish", "--descriptor-of", UNKNOWN_FINGERPRINT,
-                "--registry", REGISTRY_ADDR, "--rpc", urls[0], "--rpc", urls[1],
+                "registry",
+                "publish",
+                "--descriptor-of",
+                UNKNOWN_FINGERPRINT,
+                "--registry",
+                REGISTRY_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -95,15 +103,25 @@ class TestRegistryPublish:
         assert "not a fingerprint" in err
 
     def test_missing_signer_cmd_exits_1(
-        self, monkeypatch: pytest.MonkeyPatch, two_write_nodes: Callable[[], list[str]],
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         monkeypatch.delenv("WAXSEAL_EVM_SIGNER_CMD", raising=False)
         urls = two_write_nodes()
         code = main(
             [
-                "registry", "publish", "--descriptor-of", KNOWN_FINGERPRINT,
-                "--registry", REGISTRY_ADDR, "--rpc", urls[0], "--rpc", urls[1],
+                "registry",
+                "publish",
+                "--descriptor-of",
+                KNOWN_FINGERPRINT,
+                "--registry",
+                REGISTRY_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -115,8 +133,14 @@ class TestRegistryPublish:
     ) -> None:
         code = main(
             [
-                "registry", "publish", "--descriptor-of", KNOWN_FINGERPRINT,
-                "--registry", REGISTRY_ADDR, "--rpc", "http://only-one",
+                "registry",
+                "publish",
+                "--descriptor-of",
+                KNOWN_FINGERPRINT,
+                "--registry",
+                REGISTRY_ADDR,
+                "--rpc",
+                "http://only-one",
             ]
         )
         err = capsys.readouterr().err
@@ -132,8 +156,16 @@ class TestRegistryPublish:
         urls = two_write_nodes()
         code = main(
             [
-                "registry", "publish", "--descriptor-of", KNOWN_FINGERPRINT,
-                "--registry", REGISTRY_ADDR, "--rpc", urls[0], "--rpc", urls[1],
+                "registry",
+                "publish",
+                "--descriptor-of",
+                KNOWN_FINGERPRINT,
+                "--registry",
+                REGISTRY_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -152,9 +184,18 @@ class TestRegistryPublish:
         try:
             code = main(
                 [
-                    "registry", "publish", "--descriptor-of", KNOWN_FINGERPRINT,
-                    "--registry", REGISTRY_ADDR,
-                    "--rpc", url_a, "--rpc", url_b, "--write-rpc", url_b,
+                    "registry",
+                    "publish",
+                    "--descriptor-of",
+                    KNOWN_FINGERPRINT,
+                    "--registry",
+                    REGISTRY_ADDR,
+                    "--rpc",
+                    url_a,
+                    "--rpc",
+                    url_b,
+                    "--write-rpc",
+                    url_b,
                 ]
             )
         finally:
@@ -179,8 +220,16 @@ class TestBondDeposit:
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "deposit", "--bond", BOND_ADDR, "--amount-wei", "0",
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "deposit",
+                "--bond",
+                BOND_ADDR,
+                "--amount-wei",
+                "0",
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -196,8 +245,16 @@ class TestBondDeposit:
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "deposit", "--bond", BOND_ADDR, "--amount-wei", "1000",
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "deposit",
+                "--bond",
+                BOND_ADDR,
+                "--amount-wei",
+                "1000",
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -211,8 +268,14 @@ class TestBondDeposit:
         # distinct from a SEND failure: nothing is broadcast at all.
         code = main(
             [
-                "bond", "deposit", "--bond", BOND_ADDR, "--amount-wei", "1",
-                "--rpc", "http://only-one",
+                "bond",
+                "deposit",
+                "--bond",
+                BOND_ADDR,
+                "--amount-wei",
+                "1",
+                "--rpc",
+                "http://only-one",
             ]
         )
         err = capsys.readouterr().err
@@ -220,15 +283,25 @@ class TestBondDeposit:
         assert "at least 2" in err
 
     def test_missing_signer_cmd_exits_1_before_sending(
-        self, monkeypatch: pytest.MonkeyPatch, two_write_nodes: Callable[[], list[str]],
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         monkeypatch.delenv("WAXSEAL_EVM_SIGNER_CMD", raising=False)
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "deposit", "--bond", BOND_ADDR, "--amount-wei", "1",
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "deposit",
+                "--bond",
+                BOND_ADDR,
+                "--amount-wei",
+                "1",
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -241,14 +314,24 @@ class TestBondProve:
         return {"seq": seq, "entry_hash": entry_hash, "root": root}
 
     def test_missing_file_exits_1(
-        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "prove", str(tmp_path / "nope.json"), "--bond", BOND_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "prove",
+                str(tmp_path / "nope.json"),
+                "--bond",
+                BOND_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -256,16 +339,26 @@ class TestBondProve:
         assert "cannot read" in err
 
     def test_invalid_json_exits_1(
-        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         proof_path = tmp_path / "proof.json"
-        proof_path.write_text("{not json")
+        proof_path.write_text("{not json", encoding="utf-8")
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                BOND_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -273,16 +366,26 @@ class TestBondProve:
         assert "not valid JSON" in err
 
     def test_missing_kind_exits_1(
-        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         proof_path = tmp_path / "proof.json"
-        proof_path.write_text('{"chain_id": "t"}')
+        proof_path.write_text('{"chain_id": "t"}', encoding="utf-8")
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                BOND_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -290,16 +393,26 @@ class TestBondProve:
         assert "'kind' must be" in err
 
     def test_equivocation_missing_field_exits_1(
-        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         proof_path = tmp_path / "proof.json"
-        proof_path.write_text('{"kind": "equivocation", "chain_id": "t"}')
+        proof_path.write_text('{"kind": "equivocation", "chain_id": "t"}', encoding="utf-8")
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                BOND_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -307,7 +420,10 @@ class TestBondProve:
         assert "malformed equivocation proof" in err
 
     def test_equivocation_structurally_inadmissible_exits_1(
-        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         # Same checkpoint on both sides: not divergent, so validate() names
@@ -326,13 +442,21 @@ class TestBondProve:
                     "checkpoint_b": cp,
                     "signature_b": "0x" + "22" * 65,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                BOND_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -340,7 +464,10 @@ class TestBondProve:
         assert "not_divergent" in err
 
     def test_equivocation_happy_path_exits_0(
-        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         import json
@@ -356,13 +483,21 @@ class TestBondProve:
                     "checkpoint_b": self._checkpoint(5, "ef" * 32, "01" * 32),
                     "signature_b": "0x" + "22" * 65,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                BOND_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -370,7 +505,10 @@ class TestBondProve:
         assert "tx=0x" in out
 
     def test_non_extension_happy_path_calls_submit_non_extension(
-        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         import json
@@ -387,16 +525,26 @@ class TestBondProve:
                     "newer_signature": "0x" + "22" * 65,
                     "in_older": {"index": 3, "entry_hash": "aa" * 32, "proof": ["bb" * 32]},
                     "in_newer": {
-                        "index": 3, "entry_hash": "cc" * 32, "proof": ["0xbb" + "bb" * 31],
+                        "index": 3,
+                        "entry_hash": "cc" * 32,
+                        "proof": ["0xbb" + "bb" * 31],
                     },
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                BOND_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -404,7 +552,10 @@ class TestBondProve:
         assert "tx=0x" in out
 
     def test_an_inadmissible_non_extension_is_refused_before_the_gas(
-        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Two leaves that AGREE are not a contradiction.
@@ -432,13 +583,21 @@ class TestBondProve:
                     "in_older": leaf,
                     "in_newer": leaf,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                BOND_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -446,7 +605,10 @@ class TestBondProve:
         assert "not a non-extension: leaves_agree" in err
 
     def test_checkpoint_not_an_object_is_malformed(
-        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         import json
@@ -462,13 +624,21 @@ class TestBondProve:
                     "checkpoint_b": self._checkpoint(5, "ef" * 32, "01" * 32),
                     "signature_b": "0x" + "22" * 65,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                BOND_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -477,7 +647,10 @@ class TestBondProve:
         assert "must be a JSON object" in err
 
     def test_leaf_claim_not_an_object_is_malformed(
-        self, signer_cmd: str, two_write_nodes: Callable[[], list[str]], tmp_path: Path,
+        self,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         import json
@@ -495,13 +668,21 @@ class TestBondProve:
                     "in_older": "not-an-object",
                     "in_newer": {"index": 3, "entry_hash": "cc" * 32, "proof": []},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         urls = two_write_nodes()
         code = main(
             [
-                "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                BOND_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         err = capsys.readouterr().err
@@ -525,12 +706,18 @@ class TestBondProve:
                     "checkpoint_b": self._checkpoint(5, "ef" * 32, "01" * 32),
                     "signature_b": "0x" + "22" * 65,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         code = main(
             [
-                "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
-                "--rpc", "http://only-one",
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                BOND_ADDR,
+                "--rpc",
+                "http://only-one",
             ]
         )
         err = capsys.readouterr().err
@@ -553,15 +740,23 @@ class TestBondProve:
                     "checkpoint_b": self._checkpoint(5, "ef" * 32, "01" * 32),
                     "signature_b": "0x" + "22" * 65,
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         url_a, server_a = start_fake_node(write_node(estimate_gas_answer=rpc_revert()))
         url_b, server_b = start_fake_node(write_node(estimate_gas_answer=rpc_revert()))
         try:
             code = main(
                 [
-                    "bond", "prove", str(proof_path), "--bond", BOND_ADDR,
-                    "--rpc", url_a, "--rpc", url_b,
+                    "bond",
+                    "prove",
+                    str(proof_path),
+                    "--bond",
+                    BOND_ADDR,
+                    "--rpc",
+                    url_a,
+                    "--rpc",
+                    url_b,
                 ]
             )
         finally:
@@ -580,17 +775,21 @@ class TestEthChainIdErrors:
     def test_malformed_response_is_a_labelled_error(
         self, signer_cmd: str, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        url_a, server_a = start_fake_node(
-            write_node(chain_id_answer={"jsonrpc": "2.0", "id": 1})
-        )
-        url_b, server_b = start_fake_node(
-            write_node(chain_id_answer={"jsonrpc": "2.0", "id": 1})
-        )
+        url_a, server_a = start_fake_node(write_node(chain_id_answer={"jsonrpc": "2.0", "id": 1}))
+        url_b, server_b = start_fake_node(write_node(chain_id_answer={"jsonrpc": "2.0", "id": 1}))
         try:
             code = main(
                 [
-                    "registry", "publish", "--descriptor-of", KNOWN_FINGERPRINT,
-                    "--registry", REGISTRY_ADDR, "--rpc", url_a, "--rpc", url_b,
+                    "registry",
+                    "publish",
+                    "--descriptor-of",
+                    KNOWN_FINGERPRINT,
+                    "--registry",
+                    REGISTRY_ADDR,
+                    "--rpc",
+                    url_a,
+                    "--rpc",
+                    url_b,
                 ]
             )
         finally:
@@ -608,8 +807,16 @@ class TestEthChainIdErrors:
         try:
             code = main(
                 [
-                    "registry", "publish", "--descriptor-of", KNOWN_FINGERPRINT,
-                    "--registry", REGISTRY_ADDR, "--rpc", url_a, "--rpc", url_b,
+                    "registry",
+                    "publish",
+                    "--descriptor-of",
+                    KNOWN_FINGERPRINT,
+                    "--registry",
+                    REGISTRY_ADDR,
+                    "--rpc",
+                    url_a,
+                    "--rpc",
+                    url_b,
                 ]
             )
         finally:
@@ -629,8 +836,16 @@ class TestSendFailuresAreLabelledNotCrashes:
         try:
             code = main(
                 [
-                    "registry", "publish", "--descriptor-of", KNOWN_FINGERPRINT,
-                    "--registry", REGISTRY_ADDR, "--rpc", url_a, "--rpc", url_b,
+                    "registry",
+                    "publish",
+                    "--descriptor-of",
+                    KNOWN_FINGERPRINT,
+                    "--registry",
+                    REGISTRY_ADDR,
+                    "--rpc",
+                    url_a,
+                    "--rpc",
+                    url_b,
                 ]
             )
         finally:
@@ -648,8 +863,16 @@ class TestSendFailuresAreLabelledNotCrashes:
         try:
             code = main(
                 [
-                    "bond", "deposit", "--bond", BOND_ADDR, "--amount-wei", "1",
-                    "--rpc", url_a, "--rpc", url_b,
+                    "bond",
+                    "deposit",
+                    "--bond",
+                    BOND_ADDR,
+                    "--amount-wei",
+                    "1",
+                    "--rpc",
+                    url_a,
+                    "--rpc",
+                    url_b,
                 ]
             )
         finally:

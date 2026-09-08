@@ -59,9 +59,7 @@ def granted_response(
     return _tlv(0x30, _tlv(0x30, _der_int(0)) + token)
 
 
-def trail_with_receipt(
-    tmp_path: Path, receipt: str | None, *, nonce: str | None = None
-) -> Path:
+def trail_with_receipt(tmp_path: Path, receipt: str | None, *, nonce: str | None = None) -> Path:
     """A two-entry trail whose one anchor record carries ``receipt``.
 
     Callable more than once per test: the entries are written only if the
@@ -87,7 +85,7 @@ def trail_with_receipt(
     }
     if nonce is not None:
         record["nonce"] = nonce
-    Path(str(path) + ".anchors").write_text(json.dumps(record) + "\n")
+    Path(str(path) + ".anchors").write_text(json.dumps(record) + "\n", encoding="utf-8")
     return path
 
 
@@ -171,9 +169,7 @@ class TestNonceReplay:
         assert main(["verify", str(path), "--anchors"]) == 0
         assert "attested time (RFC 3161" in capsys.readouterr().out
 
-    def test_a_legacy_record_without_a_stored_nonce_keeps_its_verdict(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_legacy_record_without_a_stored_nonce_keeps_its_verdict(self, tmp_path: Path) -> None:
         # Absence is not a mismatch (CLAUDE.md rule 5): every record written
         # before the field existed must verify exactly as it did — for those,
         # replay detection remains anchor-time-only.
@@ -301,15 +297,15 @@ class TestUnchangedBehaviour:
         # Our format, our verdict: garbage here is a break, not a foreign
         # format this build happens not to read.
         path = trail_with_receipt(tmp_path, None)
-        Path(str(path) + ".anchors").write_text("{ not json\n")
+        Path(str(path) + ".anchors").write_text("{ not json\n", encoding="utf-8")
         assert main(["verify", str(path), "--anchors"]) == 1
 
     def test_a_broken_chain_shape_still_beats_a_receipt_verdict(self, tmp_path: Path) -> None:
         path = trail_with_receipt(tmp_path, rfc3161_receipt(granted_response(b"other")))
         anchors = Path(str(path) + ".anchors")
-        record = json.loads(anchors.read_text())
+        record = json.loads(anchors.read_text(encoding="utf-8"))
         record["entry_hash"] = "f" * 64
-        anchors.write_text(json.dumps(record) + "\n")
+        anchors.write_text(json.dumps(record) + "\n", encoding="utf-8")
         assert main(["verify", str(path), "--anchors"]) == 1
 
 
@@ -359,9 +355,7 @@ class TestAnchorSubcommandSinks:
             "waxseal.adapters.ots.urllib_transport", lambda timeout=10.0: ots_transport
         )
 
-        rc = main(
-            ["anchor", str(path), "--tsa-url", "http://tsa", "--ots-calendar", "http://cal"]
-        )
+        rc = main(["anchor", str(path), "--tsa-url", "http://tsa", "--ots-calendar", "http://cal"])
         assert rc == 0
 
         records = read_anchor_records(path).records
@@ -424,9 +418,7 @@ class TestReceiptVerdictUnit:
         from waxseal.adapters.anchors import AnchorRecord
         from waxseal.cli import _receipt_verdict
 
-        cp = Checkpoint(
-            seq=1, entry_hash="a" * 64, root="b" * 64, agg_commit="c" * 64, agg_epoch=2
-        )
+        cp = Checkpoint(seq=1, entry_hash="a" * 64, root="b" * 64, agg_commit="c" * 64, agg_epoch=2)
         record = AnchorRecord(
             checkpoint=cp,
             sink="rfc3161",

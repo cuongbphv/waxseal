@@ -18,7 +18,7 @@ Three surfaces in one process, deliberately kept apart:
 | Public read point | `/public/v1/...` | none | Third-party verification without being granted anything. |
 
 The public read point is not "the same data with authentication turned off". It
-is a separate surface with no write route on it at all — the read authority is
+is a separate surface with no write route on it at all - the read authority is
 architecture here, not a permission bit. That shape is borrowed from the
 mirror-node pattern (0.1.5 plan, Workstream G4), and a test asserts that no
 `/public` route accepts anything but `GET`.
@@ -45,7 +45,7 @@ cd server
 ./scripts/start-local.sh --demo     # demo chains, then serve on :8000
 ```
 
-Both are wrappers, not magic — the underlying commands, if you prefer them:
+Both are wrappers, not magic - the underlying commands, if you prefer them:
 
 ```bash
 docker compose -f server/docker-compose.yml up --build
@@ -112,7 +112,7 @@ docker compose -f server/docker-compose.yml exec server \
 | `user-waxseal` | writer | A machine. What an agent hook appends with. |
 
 `key-mint` is deliberately **not** idempotent: a second mint is a second
-credential. Each key's plaintext is printed once and never again — the store
+credential. Each key's plaintext is printed once and never again - the store
 holds only its SHA-256, so this server cannot show you a key twice and cannot
 leak every key at once.
 
@@ -154,7 +154,7 @@ because arguments are visible in a process listing (REMOTE.md section 5).
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `WAXSEAL_SERVER_DATA_DIR` | `/var/lib/waxseal` | Chains, witness records, imports — **files**. |
+| `WAXSEAL_SERVER_DATA_DIR` | `/var/lib/waxseal` | Chains, witness records, imports - **files**. |
 | `WAXSEAL_SERVER_DATABASE_URL` | unset | PostgreSQL for operators and API keys. Unset means an in-memory store that forgets them on restart. |
 | `WAXSEAL_API_KEY` | unset | Bootstrap bearer token, admin scopes. |
 | `WAXSEAL_WITNESS_API_KEY` | unset | Bearer token for the witness. Never a chain or operator key. |
@@ -167,7 +167,7 @@ the table above is read once at start-up and is read-only at run time: changing
 open, and changing a credential from the console it authenticates is how a
 console locks itself out or quietly widens its own access.
 
-Alongside them the server keeps a small **settings store** — operational values
+Alongside them the server keeps a small **settings store** - operational values
 an operator changes without a redeploy. `GET /v1/settings` returns both halves
 and the Settings screen renders them together, so "what is this server
 configured with" has one answer in one place.
@@ -194,12 +194,12 @@ its reason on the screen.
 Four values are refused **by name**, not merely absent, and the refusal carries
 its reason so nobody adds them later as an oversight:
 
-- `api_key` and `witness_api_key` — credentials. The operator store keeps only a
+- `api_key` and `witness_api_key` - credentials. The operator store keeps only a
   key's SHA-256 precisely so the database cannot leak a live credential, and the
   witness key belongs to a *different administrative authority*: a shared
   settings table would put both under one editor.
-- `database_url` — cannot live in the database it names.
-- `data_dir` — held open by the running process.
+- `database_url` - cannot live in the database it names.
+- `data_dir` - held open by the running process.
 
 `GET /v1/settings` reports the three secrets as `state: "set" | "unset"` and
 there is **no field a value could occupy**. That is what stops a "show me the
@@ -212,7 +212,7 @@ deployment. Both mutating routes refuse these keys with `404 no_such_setting`.
 one endpoint cannot disagree with itself, so a "cross-check" against it is not
 one. An operator relying on a single voice is blind to exactly the eclipse the
 cross-check exists to detect. Configure two independent providers or leave it
-unset — with fewer than two, `ledger-status` answers `unverifiable` and says why
+unset - with fewer than two, `ledger-status` answers `unverifiable` and says why
 rather than reporting a status it could not confirm.
 
 ### Why the trails are not in PostgreSQL
@@ -222,13 +222,26 @@ data volume, and that is a deliberate line rather than an unfinished migration:
 
 - the product's promise is that a third party can verify a trail with the stock
   `waxseal verify` on their own machine. Put the trail in this database and this
-  server becomes the only thing that can read it — exactly the trust
+  server becomes the only thing that can read it - exactly the trust
   concentration the public read point exists to remove;
 - the waxseal library and its CLI know nothing about PostgreSQL, and adding a
   driver to them would break the zero-dependency rule the whole design rests on
   (CLAUDE.md rule 1);
 - backing up the data volume gives you files `waxseal verify` reads directly,
   with no server and no database running.
+
+## Kubernetes
+
+`deploy/helm/waxseal-server/` installs this server as a StatefulSet at one
+replica, with the seed hook, an optional co-located anchor client, and a
+`values.schema.json` that pins the replica count. It is one replica because a
+JSONL trail behind a file lock admits exactly one writer, and a Deployment's
+rolling update would surge a second onto the same volume.
+
+The verifier is a **separate chart** for a separate namespace or cluster:
+`deploy/helm/waxseal-verifier/`. A verifier that whoever writes the trail can
+also upgrade is a self-verifying writer reporting on itself. Neither chart ships
+a witness, for the same reason. See [`deploy/README.md`](../../deploy/README.md).
 
 ## TLS
 
@@ -260,7 +273,7 @@ waxseal_api_keys    key_id, username, label, fingerprint, key_sha256,
 
 Back up both. `trail.jsonl` is the ordinary waxseal JSONL format, so
 `waxseal verify` works directly on a restored copy with no server and no
-database running — which is the point of keeping it a file.
+database running - which is the point of keeping it a file.
 
 ## Pointing an agent hook at this server
 
@@ -269,7 +282,7 @@ makes it a chain server, so no second configuration mechanism is needed:
 
 ```sh
 #!/bin/sh
-# ~/.claude/hooks/waxseal-remote.sh — the credential is NOT in settings.json.
+# ~/.claude/hooks/waxseal-remote.sh - the credential is NOT in settings.json.
 [ -f "$HOME/.config/waxseal/hook.env" ] && { set -a; . "$HOME/.config/waxseal/hook.env"; set +a; }
 WAXSEAL_TRAIL="${WAXSEAL_TRAIL:-http://127.0.0.1:8000}" \
 WAXSEAL_API_KEY="${WAXSEAL_WRITER_KEY:-}" \
@@ -347,9 +360,9 @@ becomes an overlay drawer below 900px.
 | | |
 |---|---|
 | ![Cadence](screenshots/en/11-cadence.png) | ![Settings](screenshots/en/19-settings.png) |
-| **Cadence** — cost-optimal anchoring interval from the operator's own measurements. Opens no trail. | **Settings** — the credential, the environment, and the knobs. Secrets report `set`/`unset` and nothing else. |
+| **Cadence** - cost-optimal anchoring interval from the operator's own measurements. Opens no trail. | **Settings** - the credential, the environment, and the knobs. Secrets report `set`/`unset` and nothing else. |
 | ![Tickets](screenshots/en/10-tickets.png) | ![Trail output](screenshots/en/03-trail-output.png) |
-| **Tickets** — a missing ticket is a *detected* drop; no issuer data is *unmeasured*. Never rendered as "0 drops". | **Trail** — every verdict carries the `argv` that produced it, so an operator can reproduce it. |
+| **Tickets** - a missing ticket is a *detected* drop; no issuer data is *unmeasured*. Never rendered as "0 drops". | **Trail** - every verdict carries the `argv` that produced it, so an operator can reproduce it. |
 
 Full sets: [`docs/screenshots/en/`](screenshots/en/) and
 [`docs/screenshots/vi/`](screenshots/vi/), desktop and phone, regenerated by
@@ -362,7 +375,7 @@ key into and twelve places to leave one behind.
 ### Screenshots are generated, not curated
 
 `screenshots.sh` stands up its own server with its own demo data on a scratch
-port and photographs that — never a real deployment. Two guards run before each
+port and photographs that - never a real deployment. Two guards run before each
 shutter, because both failures are invisible in review once the frame is a PNG:
 
 - every screen is checked for horizontal overflow;
@@ -375,7 +388,7 @@ developer's home directory into the published image.
 
 Demo data is written through the waxseal **library**, so it cannot be a shape no
 real client produces. It carries no organisation, no person, no address and no
-credential — placeholder identities only (`agent-a`, `reviewer-1`).
+credential - placeholder identities only (`agent-a`, `reviewer-1`).
 
 ## Not implemented, and why
 
@@ -383,7 +396,7 @@ Recorded here rather than left for someone to discover, on the same discipline
 the conformance ledger uses: written is not shipped.
 
 - **No pin-store endpoint.** The 0.1.5 plan lists one under Workstream I, but no
-  waxseal client speaks HTTP to a pin store — `FilePinStore` reads and writes a
+  waxseal client speaks HTTP to a pin store - `FilePinStore` reads and writes a
   local path the operator chooses, and its own docstring says the pin must live
   where the trail's writer cannot reach. An endpoint with no client is surface
   that looks like a feature and checks nothing, and hosting the pin next to the
@@ -393,7 +406,7 @@ the conformance ledger uses: written is not shipped.
   column would be a control that admits everyone while looking like one that
   does not.
 - **No 2FA and no session history.** The operator table tracks what it can
-  actually observe — role, creation, whether a key has ever been used. Columns
+  actually observe - role, creation, whether a key has ever been used. Columns
   the server cannot fill are absent rather than rendered as em dashes.
 - **No longer on this list: the `preflight` and `segments` screens.** Both were
   recorded here as unshipped. Workstream B shipped `segments` and Workstream E
@@ -442,7 +455,7 @@ HTTP; the four that write are not, and cannot be reached even by name.
 | `GET /v1/cadence?lam=&c=&w=&rho=&delta=&t_max=&M=` | `cadence` | `verify:run` |
 
 `anchor`, `install`, `registry` and `bond` write. They are absent from the
-server's read-only command set, so no HTTP request reaches them — CLAUDE.md
+server's read-only command set, so no HTTP request reaches them - CLAUDE.md
 rule 4 ("verify reports, never repairs") expressed as a URL table rather than a
 promise.
 
@@ -453,7 +466,7 @@ Three things in that table are not obvious:
   same scope. A writer key must not be able to read back the trail it extends.
 - **Every query parameter becomes an element of `argv`**, which is the one place
   this server turns caller input into a subprocess argument. Each is validated
-  *before* the subprocess exists — a validator that rejects afterwards has
+  *before* the subprocess exists - a validator that rejects afterwards has
   already run the command it meant to prevent. Anchored patterns, not `float()`,
   which accepts `inf`, `nan` and a leading sign.
 - **`verify-handoff --origin` takes a chain id, never a path.** The server
@@ -464,7 +477,7 @@ Three things in that table are not obvious:
 
 It is the only read with no chain in it: every input is a measurement the
 operator supplies, so a server holding no chains at all still answers it. Nothing
-is prefilled and no parameter has a default — a cadence computed from a number
+is prefilled and no parameter has a default - a cadence computed from a number
 this server chose would be advice nobody measured, printed with the confidence
 of advice somebody did. It returns a recommended *band*, never a bare point.
 
@@ -478,7 +491,7 @@ status:
 | State | Meaning |
 |---|---|
 | `configured: false`, `reason: no_liveness_address` | Nothing to run. `missing` names the setting that would fix it. Not an error. |
-| `configured: false`, `reason: bond_without_writer` | A bond address with no writer. Named rather than sent to argparse, which would answer with a usage error — a server bug wearing no verdict. |
+| `configured: false`, `reason: bond_without_writer` | A bond address with no writer. Named rather than sent to argparse, which would answer with a usage error - a server bug wearing no verdict. |
 | `configured: true` | The command ran. Its verdict is carried through verbatim, including the `unverifiable` it returns with fewer than two RPC endpoints. |
 
 ## Reads run the CLI
@@ -492,16 +505,16 @@ Two consequences worth knowing:
 
 - Commands this build of waxseal does not have report `"status": "unavailable"`
   with a null verdict. They are never run, because argparse also exits 2 and
-  that would arrive looking exactly like "unverifiable" — a verdict nobody
+  that would arrive looking exactly like "unverifiable" - a verdict nobody
   computed. As of 0.1.5 the wheel has every read this server offers, so the path
-  is reached only by an older wheel behind a newer server — the case it exists
+  is reached only by an older wheel behind a newer server - the case it exists
   for.
 - Exit 3 ("nothing was read") is reported as `"absent"`, never as a break. A
   tamper report against a file that does not exist is a false alarm.
 - `segments` is handed the DIRECTORY holding the trail, not the trail file: it
   walks a segment group and the rotation bindings between its files (SPEC.md
   section 20). A chain that has not rotated therefore reports `"absent"` with
-  "no sealed segments" on stderr — nothing was checked — rather than an `ok` that
+  "no sealed segments" on stderr - nothing was checked - rather than an `ok` that
   would claim every segment of a trail with none was found intact.
 
 ## Receipt chain
@@ -523,7 +536,7 @@ GET /public/v1/chains/<id>/receipts/cross-check  # does it still match the trail
 All three are published because a receipt chain only a server can evaluate is a
 promise rather than evidence. Both verdicts are three-valued: `ok`, `broken`,
 and `unverifiable` (a record version this build cannot read). `checked: null`
-with `reason: "not_recorded"` means there is no log at all — which is never the
+with `reason: "not_recorded"` means there is no log at all - which is never the
 same as a log with nothing wrong in it.
 
 The two answer different questions, and the difference is the point:
@@ -532,7 +545,7 @@ The two answer different questions, and the difference is the point:
   stays `ok` after an edit to the *trail*, because the log itself was not
   touched. Correct, and useless on its own.
 - **`cross-check`** asks whether entry `seq` still carries the hash that was
-  acknowledged for it. This is what catches a **self-consistent** local rewrite —
+  acknowledged for it. This is what catches a **self-consistent** local rewrite -
   the kind that recomputes `entry_hash` so plain `verify` passes. The receipt is
   the memory the rewriter does not hold. Reasons are SPEC.md section 19's:
   `receipt_mismatch` and `receipt_beyond_head` (a rollback or truncation).
@@ -540,5 +553,5 @@ The two answer different questions, and the difference is the point:
 The honest limit is SPEC.md section 19's too: a server that rewrote **both** the
 trail and its own receipt log consistently passes both checks. What they defeat
 is the cheaper edit that does not also curate the receipts. Narrowing it further
-means reading this server's published head back from somewhere else — a client's
+means reading this server's published head back from somewhere else - a client's
 `.receipts` sidecar, or a third party who kept a copy.

@@ -139,9 +139,7 @@ def _synchronized_transport(barrier: threading.Barrier, conflicts: list[int]) ->
 
 
 class TestCompareAndSetRace:
-    def test_two_writers_racing_one_seq_yield_one_409_and_no_fork(
-        self, live: LiveServer
-    ) -> None:
+    def test_two_writers_racing_one_seq_yield_one_409_and_no_fork(self, live: LiveServer) -> None:
         # The plan's acceptance criterion for the server: two writers race, one
         # gets a 409. Falsifiability receipt: remove the CAS check in
         # ChainStore.append's builder and no 409 is ever served — both land at
@@ -227,9 +225,7 @@ class TestAnchorAndWitnessClients:
         HTTPAnchorSink(url, api_key="witness-key").anchor(self._checkpoint(1))
         assert len(HTTPWitness(url, api_key="witness-key").fetch().checkpoints) == 1
 
-    def test_the_chain_write_key_does_not_open_the_witness(
-        self, keyed_live: LiveServer
-    ) -> None:
+    def test_the_chain_write_key_does_not_open_the_witness(self, keyed_live: LiveServer) -> None:
         sink = HTTPAnchorSink(f"{keyed_live.base_url}/v1/witness/w1", api_key="chain-key")
         with pytest.raises(RuntimeError, match="401"):
             sink.anchor(self._checkpoint(1))

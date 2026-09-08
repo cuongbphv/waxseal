@@ -96,7 +96,7 @@ class Observed:
 class PreflightObservation:
     """Everything a run saw, one field per mechanism the ladder names.
 
-    Path knowledge stays in `cli.py`, which fills each ``detail`` in: this
+    Path knowledge stays in `cli/preflight.py`, which fills each ``detail`` in: this
     module must not learn where a sidecar lives (the layer DAG forbids the
     domain any filesystem knowledge at all).
 
@@ -180,8 +180,7 @@ _NEEDS_AGGREGATE: Final = (
 )
 
 _DETAIL_ANCHOR_SINK_HELD: Final = (
-    "an attacker who holds the anchor sink itself is outside what any local "
-    "mechanism can reach"
+    "an attacker who holds the anchor sink itself is outside what any local mechanism can reach"
 )
 _DETAIL_COLLUSION: Final = (
     "collusion between the writer and every witness leaves no independent "
@@ -241,13 +240,8 @@ def ladder_for(observation: PreflightObservation) -> LadderReading:
         Rung(
             number=3,
             attacker_holds="trail + keyfile + `.anchors`",
-            stopper=(
-                "external anchor: the TSA / calendar / witness / ledger holds "
-                "its own copy"
-            ),
-            state=_state_of(
-                observation.external_anchor, observation.witness, observation.ledger
-            ),
+            stopper=("external anchor: the TSA / calendar / witness / ledger holds its own copy"),
+            state=_state_of(observation.external_anchor, observation.witness, observation.ledger),
             detail=(
                 f"{observation.external_anchor.detail}; {observation.witness.detail}; "
                 f"{observation.ledger.detail}"
@@ -288,9 +282,7 @@ def ladder_for(observation: PreflightObservation) -> LadderReading:
         stops_at=stops_at,
         next_rung=rungs[stops_at],
         present_above_cap=tuple(
-            r.number
-            for r in rungs
-            if r.number > stops_at and r.state is RungState.PRESENT
+            r.number for r in rungs if r.number > stops_at and r.state is RungState.PRESENT
         ),
     )
 
@@ -314,8 +306,7 @@ def render_ladder(reading: LadderReading) -> list[str]:
         lines.append(f"                        observed: {rung.detail}")
     if reading.stops_at == 0:
         lines.append(
-            "this configuration stops an attacker at rung 0 — rung 1's own "
-            "stopper is not PRESENT."
+            "this configuration stops an attacker at rung 0 — rung 1's own stopper is not PRESENT."
         )
     else:
         lines.append(

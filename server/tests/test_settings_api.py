@@ -59,9 +59,7 @@ def auth() -> dict[str, str]:
 
 
 class TestNoSecretIsEverDisclosed:
-    def test_no_credential_value_appears_anywhere_in_the_response(
-        self, keyed: TestClient
-    ) -> None:
+    def test_no_credential_value_appears_anywhere_in_the_response(self, keyed: TestClient) -> None:
         # The whole body as text, so a secret cannot hide in a field this test
         # forgot to name.
         body = keyed.get("/v1/settings", headers=auth()).text
@@ -71,9 +69,7 @@ class TestNoSecretIsEverDisclosed:
         assert "secret-password" not in body
 
     @pytest.mark.parametrize("key", ["api_key", "witness_api_key", "database_url"])
-    def test_a_secret_reports_only_whether_it_is_set(
-        self, keyed: TestClient, key: str
-    ) -> None:
+    def test_a_secret_reports_only_whether_it_is_set(self, keyed: TestClient, key: str) -> None:
         rows = keyed.get("/v1/settings", headers=auth()).json()["deployment"]
         [row] = [r for r in rows if r["key"] == key]
         assert row["state"] == "set"
@@ -129,9 +125,7 @@ class TestReadingTheConfiguration:
         assert page["value"] == "500"
         assert page["source"] == "default"
 
-    def test_an_unconfigured_setting_is_null_not_an_empty_string(
-        self, client: TestClient
-    ) -> None:
+    def test_an_unconfigured_setting_is_null_not_an_empty_string(self, client: TestClient) -> None:
         stored = client.get("/v1/settings").json()["stored"]
         [rpc] = [r for r in stored if r["key"] == "ledger_rpc_urls"]
         assert rpc["value"] is None
@@ -253,9 +247,7 @@ class TestAuthority:
     ) -> None:
         assert getattr(keyed, method)(path).status_code == 401
 
-    def test_the_read_needs_keys_manage_not_merely_trails_read(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_read_needs_keys_manage_not_merely_trails_read(self, tmp_path: Path) -> None:
         # An auditor's scope deliberately does not reach this screen: where a
         # server keeps its data and which authorities are closed is
         # administrative reconnaissance, not an audit finding.
@@ -266,11 +258,7 @@ class TestAuthority:
             username="auditor", display_name="a", email=None, role=Role.AUDITOR
         )
         plaintext, _ = operators.mint_key(username="auditor", label="k")
-        client = TestClient(
-            create_app(Settings(data_dir=tmp_path / "data"), operators=operators)
-        )
-        response = client.get(
-            "/v1/settings", headers={"Authorization": f"Bearer {plaintext}"}
-        )
+        client = TestClient(create_app(Settings(data_dir=tmp_path / "data"), operators=operators))
+        response = client.get("/v1/settings", headers={"Authorization": f"Bearer {plaintext}"})
         assert response.status_code == 403
         assert "keys:manage" in response.json()["detail"]

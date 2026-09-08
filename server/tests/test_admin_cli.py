@@ -53,9 +53,7 @@ def run(capsys: Any, env: dict[str, str], *argv: str) -> tuple[int, dict[str, An
 
 
 class TestSeed:
-    def test_it_creates_the_two_standard_operators(
-        self, capsys: Any, env: dict[str, str]
-    ) -> None:
+    def test_it_creates_the_two_standard_operators(self, capsys: Any, env: dict[str, str]) -> None:
         code, body = run(capsys, env, "seed")
         assert code == 0
         assert [(s["username"], s["role"]) for s in body["seeded"]] == [
@@ -106,12 +104,8 @@ class TestIdempotence:
 
     def test_a_re_seed_does_not_change_the_existing_role(self) -> None:
         store = InMemoryOperatorStore()
-        _add_operator(
-            store, username="admin", role=Role.ADMIN, display_name="Admin", email=None
-        )
-        _add_operator(
-            store, username="admin", role=Role.VIEWER, display_name="Nope", email=None
-        )
+        _add_operator(store, username="admin", role=Role.ADMIN, display_name="Admin", email=None)
+        _add_operator(store, username="admin", role=Role.VIEWER, display_name="Nope", email=None)
         assert store.get_operator("admin").role is Role.ADMIN
 
 
@@ -120,9 +114,7 @@ class TestOperatorCommands:
         # One process, one store: the CLI builds a store per invocation, so a
         # memory-backed run only shows state within a single main() call. This
         # asserts the printed shape of each command.
-        code, body = run(
-            capsys, env, "operator-add", "--username", "admin", "--role", "admin"
-        )
+        code, body = run(capsys, env, "operator-add", "--username", "admin", "--role", "admin")
         assert code == 0
         assert body == {
             "outcome": "created",
@@ -136,15 +128,11 @@ class TestOperatorCommands:
         assert code == 0
         assert body == {"operators": []}
 
-    def test_an_unsafe_username_is_a_usage_error(
-        self, capsys: Any, env: dict[str, str]
-    ) -> None:
+    def test_an_unsafe_username_is_a_usage_error(self, capsys: Any, env: dict[str, str]) -> None:
         code, _ = run(capsys, env, "operator-add", "--username", "../x", "--role", "viewer")
         assert code == 2
 
-    def test_an_unknown_role_is_rejected_by_the_parser(
-        self, env: dict[str, str]
-    ) -> None:
+    def test_an_unknown_role_is_rejected_by_the_parser(self, env: dict[str, str]) -> None:
         with pytest.raises(SystemExit) as exc:
             main(["operator-add", "--username", "x", "--role", "superuser"], env=env)
         assert exc.value.code == 2
@@ -217,9 +205,7 @@ class TestKeyCommands:
         assert listed[0]["label"] == "laptop"
         assert secret not in str(listed)
 
-    def test_revoking_a_real_key_reports_true_and_stops_it_working(
-        self, capsys: Any
-    ) -> None:
+    def test_revoking_a_real_key_reports_true_and_stops_it_working(self, capsys: Any) -> None:
         store = InMemoryOperatorStore()
         seed_into(store)
         main(["key-mint", "--username", "admin", "--label", "x"], env={}, store=store)
@@ -247,9 +233,7 @@ class TestUsage:
 
 
 class TestOperatorUpdate:
-    def test_seed_corrects_a_wrong_email_rather_than_reporting_exists(
-        self, capsys: Any
-    ) -> None:
+    def test_seed_corrects_a_wrong_email_rather_than_reporting_exists(self, capsys: Any) -> None:
         # Idempotent must not mean inert: re-seeding with a corrected address is
         # exactly how an operator fixes a typo without touching the database.
         store = InMemoryOperatorStore()

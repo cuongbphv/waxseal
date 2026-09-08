@@ -1,0 +1,115 @@
+waxseal-verifier {{ .Chart.AppVersion }} installed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+  Target:  {{ .Values.trailUrl }}
+  verify:  {{ if .Values.verify.enabled }}{{ .Values.verify.schedule }}{{ else }}DISABLED{{ end }}
+  report:  {{ if .Values.report.enabled }}{{ .Values.report.schedule }}{{ else }}DISABLED{{ end }}
+  pin:     {{ if and .Values.verify.enabled .Values.verify.pin.enabled }}{{ include "waxseal-verifier.pinPath" . }} on claim {{ include "waxseal-verifier.pinClaimName" . }}{{ else }}NOT PINNED{{ end }}
+
+  kubectl -n {{ .Release.Namespace }} get cronjobs -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl -n {{ .Release.Namespace }} logs -l waxseal.io/job=verify --tail=50
+
+NEVER WIRE AUTOMATIC REMEDIATION TO EXIT 1
+==========================================
+waxseal reports; it does not repair. No code path may rewrite, reorder or "fix"
+entries (CLAUDE.md rule 4), and neither may your runbook. Which row is the
+tamper is a decision only an operator can make, and a repair DESTROYS the
+evidence a court or a regulator would need. An automation that "restores the
+trail from backup" on exit 1 has deleted the only copy of the thing that was
+being detected.
+
+WHERE THE EXIT CODES GO
+=======================
+  exit 0  intact                          nothing
+  exit 1  broken, first break printed      SECURITY FUNCTION: preserve, do not
+          with its seq and reason          repair, do not restart the writer
+  exit 2  intact, but rows this build      RELEASE MANAGEMENT, not the SOC
+          cannot verify by name
+  exit 3  the target does not exist        configuration error: nothing was
+                                           read, nothing was created
+
+Exit 2 exists because of the two incidents in CLAUDE.md. A rollback that leaves
+rows written by a newer schema must not page anyone as a tampering alarm — and
+must equally not be silently recomputed under the wrong field tuple and
+reported intact. Route it to whoever owns versions, and alert on it: exit 2 is
+not a pass.
+
+Every run echoes `waxseal_command=<verb> waxseal_exit=<code>` and a
+`waxseal_verdict=` line, so a log query can separate 1 from 2 without reading
+the pod status. If your alerting collapses them into "job failed", the
+three-valued verdict this project is built on has been flattened back to two on
+the way to the screen, which is the exact failure it exists to prevent.
+
+THIS RELEASE IS THE VERIFIER AUTHORITY
+======================================
+It should NOT be in the same namespace, and preferably not the same cluster, as
+waxseal-server. A verifier that whoever writes the trail can also `helm
+upgrade` is a self-verifying writer reporting on itself.
+{{- if not .Values.verify.pin.enabled }}
+
+NO PIN — a self-consistent rewrite is not bounded
+=================================================
+verify.pin.enabled is false, so this verifier keeps no memory of the heads it
+has already confirmed. Chain verification still catches an edit, a deletion, an
+insertion and a reorder, but a chain server that rewrites the whole history
+consistently recomputes every hash and passes. A pinned head is what catches
+that, and its entire value is that it lives where the trail's writer cannot
+reach (adapters/pinstore.py). This is a labelled absence, not a failure.
+{{- else }}
+
+The pin claim carries helm.sh/resource-policy: keep, so `helm uninstall` leaves
+it behind. That is deliberate: losing the pin loses every head this verifier
+has ever confirmed, and a fresh pin trusts whatever it is served first.
+{{- end }}
+{{- if not .Values.verify.witnessUrls }}
+
+NO WITNESS — a split view is not bounded
+========================================
+verify.witnessUrls is empty, so nothing here would notice this server serving
+this verifier one history and someone else another. A witness catches that, and
+only while the witness host answers to a DIFFERENT administrative authority
+than the chain server. A witness hosted beside the chain it witnesses proves
+nothing, and no code can enforce which one you configured — adapters/witness.py
+says exactly that in its own docstring, because the deployment is the security
+argument.
+{{- else }}
+
+Witnesses configured:
+{{- range .Values.verify.witnessUrls }}
+  - {{ . }}
+{{- end }}
+Each must answer to an authority that is NOT the chain server's. Nothing in the
+code can check that for you.
+{{- end }}
+{{- if and .Values.verify.enabled .Values.verify.anchors }}
+
+verify.anchors is true, and for a URL target the flag has NO EFFECT: a remote
+trail has no local .anchors sidecar to read. The CLI prints a labelled note on
+stderr every run rather than pretending it checked something. The anchor
+sidecar is checked where it lives, beside the trail, on the chain host.
+{{- end }}
+{{- if not (or .Values.credentials.existingSecret .Values.credentials.apiKey) }}
+
+NO READ CREDENTIAL CONFIGURED
+=============================
+WAXSEAL_API_KEY is unset for these jobs. That works only against a server whose
+write auth is open, or a public read point that needs none. If the target
+requires a bearer token, every run will fail on transport rather than report a
+verdict — which is exit-code noise, not a chain finding. Mint a VIEWER or
+AUDITOR key on the server and point credentials.existingSecret at a Secret
+carrying it:
+
+  waxseal-server-admin key-mint --username auditor --label k8s-verifier
+
+Never the chain's write key. The variable name is shared; the value must not
+be.
+{{- end }}
+{{- if .Values.credentials.apiKey }}
+
+The read credential was supplied INLINE and is in this release's stored
+manifest, readable by anyone who can read Helm releases in
+{{ .Release.Namespace }}. Development shape only.
+{{- end }}
+
+Read before this matters: docs/architecture/deployment.md section 4 (exit codes
+are the interface), SPEC.md sections 13 and 14 (pinning, witnessing),
+deploy/README.md.

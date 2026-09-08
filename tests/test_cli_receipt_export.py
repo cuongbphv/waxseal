@@ -25,9 +25,7 @@ from waxseal.cli import main
 from waxseal.domain.checkpoint import Checkpoint, checkpoint_frame
 
 
-def record(
-    seq: int = 1, receipt: str | None = None, v: int = 1
-) -> dict[str, object]:
+def record(seq: int = 1, receipt: str | None = None, v: int = 1) -> dict[str, object]:
     return {
         "entry_hash": "e" * 64,
         "receipt": receipt,
@@ -43,9 +41,9 @@ def trail_with_sidecar(tmp_path: Path, records: list[dict[str, object]]) -> Path
     # The command reads only the sidecar — the trail merely has to exist
     # (extraction is not verification; `verify --anchors` is the cross-check).
     trail = tmp_path / "trail.jsonl"
-    trail.write_text("")
+    trail.write_text("", encoding="utf-8")
     Path(str(trail) + ".anchors").write_text(
-        "".join(json.dumps(r) + "\n" for r in records)
+        "".join(json.dumps(r) + "\n" for r in records), encoding="utf-8"
     )
     return trail
 
@@ -63,9 +61,7 @@ def frame_for(seq: int) -> bytes:
 
 
 class TestNothingReadNothingCreated:
-    def test_a_missing_trail_is_exit_3_and_creates_no_out_dir(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_missing_trail_is_exit_3_and_creates_no_out_dir(self, tmp_path: Path) -> None:
         out = tmp_path / "receipts"
         code = main(["receipt", str(tmp_path / "absent.jsonl"), "--out", str(out)])
         assert code == 3
@@ -75,7 +71,7 @@ class TestNothingReadNothingCreated:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         trail = tmp_path / "trail.jsonl"
-        trail.write_text("")
+        trail.write_text("", encoding="utf-8")
         out = tmp_path / "receipts"
         assert main(["receipt", str(trail), "--out", str(out)]) == 3
         assert not out.exists()
@@ -120,9 +116,7 @@ class TestExtraction:
         assert (out / "seq-0.tsr").read_bytes() == b"A"
         assert not (out / "seq-1.tsr").exists()
 
-    def test_duplicate_seq_records_do_not_overwrite_each_other(
-        self, tmp_path: Path
-    ) -> None:
+    def test_duplicate_seq_records_do_not_overwrite_each_other(self, tmp_path: Path) -> None:
         # A duplicate record from a racing anchor trigger is a supported race
         # (adapters/anchors.py) — but the receipts differ (different serials),
         # and silently overwriting one would discard evidence.
@@ -162,9 +156,7 @@ class TestNothingToExtract:
 
     def test_a_seq_that_matches_no_record_is_exit_2(self, tmp_path: Path) -> None:
         trail = trail_with_sidecar(tmp_path, [record(seq=1, receipt=rfc3161_receipt(b"D"))])
-        assert main(
-            ["receipt", str(trail), "--seq", "9", "--out", str(tmp_path / "r")]
-        ) == 2
+        assert main(["receipt", str(trail), "--seq", "9", "--out", str(tmp_path / "r")]) == 2
 
     def test_an_unknown_receipt_type_is_labelled_and_skipped(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -203,7 +195,7 @@ class TestMalformedSidecar:
     ) -> None:
         # Our format, our verdict — same asymmetry `verify --anchors` keeps.
         trail = tmp_path / "trail.jsonl"
-        trail.write_text("")
-        Path(str(trail) + ".anchors").write_text("{ not json\n")
+        trail.write_text("", encoding="utf-8")
+        Path(str(trail) + ".anchors").write_text("{ not json\n", encoding="utf-8")
         assert main(["receipt", str(trail), "--out", str(tmp_path / "r")]) == 1
         assert "malformed_anchor" in capsys.readouterr().err

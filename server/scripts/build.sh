@@ -12,6 +12,7 @@
 # and the Docker image builds its own copy in a separate stage rather than
 # copying whatever happened to be on the developer's disk.
 
+# shellcheck source=_lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 DO_BACKEND=1 DO_FRONTEND=1 DO_DOCKER=0 DO_CHECK=0

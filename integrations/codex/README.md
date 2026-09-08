@@ -1,7 +1,7 @@
-# waxseal-audit — Codex CLI integration
+# waxseal-audit - Codex CLI integration
 
 Tamper-evident audit trail for OpenAI Codex CLI via its lifecycle hooks system.
-Verified against the openai/codex source at rust-v0.149.0 (2026-08-21) — the hooks
+Verified against the openai/codex source at rust-v0.149.0 (2026-08-21) - the hooks
 schema lives in `codex-rs/hooks/src/schema.rs`.
 
 Every tool dispatch (PreToolUse), tool result (PostToolUse), and user prompt
@@ -14,7 +14,7 @@ Trails are **routed per project** (SPEC.md section 20): the project key is the
 hook event's `cwd`, so two projects never braid their histories into one file.
 The active segment is rolled over into a new sealed segment once it passes
 16 MiB, and the segments are linked by a rotation binding at each new
-segment's `seq` 0 — never by `prev_hash` across a file boundary.
+segment's `seq` 0 - never by `prev_hash` across a file boundary.
 
 ```bash
 waxseal segments $CODEX_HOME/waxseal/trails/<slug>          # every segment + its binding
@@ -25,11 +25,11 @@ waxseal verify   $CODEX_HOME/waxseal/trails/<slug>/trail.00000.jsonl   # one seg
 nothing read. `WAXSEAL_TRAIL` still overrides the LOCATION, and is not a
 rotation off-switch: a trail named through it rotates too, and on its first
 rotation it is adopted as the base segment. A pre-0.1.5
-`$CODEX_HOME/waxseal/trail.jsonl` is neither migrated nor sealed — it stops receiving
+`$CODEX_HOME/waxseal/trail.jsonl` is neither migrated nor sealed - it stops receiving
 appends and keeps verifying with plain `waxseal verify`.
 
 > Do not confuse this with the legacy `notify` config: `notify` fires one
-> `agent-turn-complete` event per turn with no tool data — too weak for auditing.
+> `agent-turn-complete` event per turn with no tool data - too weak for auditing.
 > The hooks below are per tool call, with `tool_input` (including the shell
 > command) and `tool_response` on stdin.
 
@@ -65,13 +65,13 @@ waxseal verify ~/.codex/waxseal/trails/<slug>/trail.00000.jsonl
 ## Design notes
 
 - **Exit 0 on every path.** Exit code 2 blocks the tool call, and stdout is parsed
-  as decision JSON (`decision`, `continue`, `updatedInput`) — the audit hook stays
+  as decision JSON (`decision`, `continue`, `updatedInput`) - the audit hook stays
   silent on stdout and never vetoes work. Failures degrade to a labelled stderr
   notice (chain integrity ≠ trail completeness).
 - **Redact-before-hash**: cleartext keys never touch this trail; verification still
   passes because the hash commits to the redacted payload.
 - Large tool responses are clipped with a visible `…[truncated N chars]` marker.
-- A killed or skipped hook is a missing record with no seq gap — that is exactly
+- A killed or skipped hook is a missing record with no seq gap - that is exactly
   why `dropped_writes` is reported separately from chain integrity.
 
 ## End-to-end demo

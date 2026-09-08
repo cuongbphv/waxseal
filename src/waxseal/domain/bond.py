@@ -1,12 +1,13 @@
 """Bonded checkpoints: what a writer can be slashed for (pure; no I/O).
 
-The bonded equivocation contract is the third construction the paper
-describes as designed but not implemented. It does not make a writer honest.
-It makes ONE specific dishonesty expensive: signing two different
-checkpoints at the same position. That fact is self-contained — anyone
-holding both signed checkpoints can present them, and no further context is
-needed to see the contradiction — which is what makes it enforceable by a
-contract with no view of the log.
+The bonded equivocation contract is the pure half of a shipped construction:
+`domain/bond.py` shapes the proofs, `BondedCheckpoints.sol` slashes on them,
+and `waxseal bond deposit` / `bond prove` is the CLI. It does not make a
+writer honest. It makes ONE specific dishonesty expensive: signing two
+different checkpoints at the same position. That fact is self-contained -
+anyone holding both signed checkpoints can present them, and no further
+context is needed to see the contradiction - which is what makes it
+enforceable by a contract with no view of the log.
 
 The other fault the contract is asked about, a writer whose new tree does
 not extend its old one, is NOT self-contained, and the asymmetry is easy to

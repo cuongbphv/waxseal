@@ -42,7 +42,7 @@ WEB_MODULES = {"fastapi", "starlette", "uvicorn"}
 
 
 def _modules(layer: str) -> list[Path]:
-    return sorted((PACKAGE / layer).glob("*.py"))
+    return sorted((PACKAGE / layer).rglob("*.py"))
 
 
 def _imported_names(path: Path) -> set[str]:
@@ -124,7 +124,9 @@ class TestTheCheckItselfWorks:
 
     def test_it_reads_imports_out_of_a_real_module(self, tmp_path: Path) -> None:
         module = tmp_path / "sample.py"
-        module.write_text("import os\nfrom waxseal_server.api.deps import Services\n")
+        module.write_text(
+            "import os\nfrom waxseal_server.api.deps import Services\n", encoding="utf-8"
+        )
         assert _imported_names(module) == {"os", "waxseal_server.api.deps"}
 
     def test_it_resolves_a_layer_from_a_module_path(self) -> None:

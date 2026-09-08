@@ -225,17 +225,13 @@ def verify_segments(segments: Sequence[SegmentRead]) -> SegmentsResult:
 
     for index, seg in enumerate(segments):
         if seg.chain is None:
-            states.append(
-                SegmentState(seg.identity, SEGMENT_UNVERIFIABLE, "segment_unreadable")
-            )
+            states.append(SegmentState(seg.identity, SEGMENT_UNVERIFIABLE, "segment_unreadable"))
             continue
         if not seg.chain.ok:
             # A segment whose own links do not hold says nothing useful about
             # its binding, so the break is the whole finding for it.
             states.append(
-                SegmentState(
-                    seg.identity, SEGMENT_BROKEN, seg.chain.reason, seg.chain.broken_seq
-                )
+                SegmentState(seg.identity, SEGMENT_BROKEN, seg.chain.reason, seg.chain.broken_seq)
             )
             continue
 

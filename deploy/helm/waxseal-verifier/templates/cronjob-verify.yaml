@@ -1,0 +1,146 @@
+{{- if .Values.verify.enabled }}
+{{- /*
+`waxseal verify <url>` on a schedule, from the verifier's own namespace.
+
+WHY A URL AND NOT A MOUNT. Reading the server's HTTP surface is not a
+workaround for ReadWriteOnce; it is the better separation-of-authority story. A
+verifier that mounted the writer's volume would need a grant on the writer's
+storage, a schedule on the writer's node, and in practice a place in the
+writer's namespace — three ways back under the authority it exists to be
+independent of. Over HTTP it needs a network route and a read credential.
+`verify_chain` runs CLIENT-SIDE regardless, so a server that corrupts,
+truncates or reorders entries is caught exactly as a corrupted local file would
+be (server/docs/deployment.md, "What the server is trusted for").
+
+What HTTP does not catch on its own is a server that forges a whole
+self-consistent rewrite from genesis. That is what --pin and --witness are for,
+and both only work while the pin file and the witness host answer to a
+different authority than the chain server. The pin file is on this namespace's
+own PVC for that reason.
+
+EXIT CODES ARE THE INTERFACE. The wrapper below runs the CLI, captures the
+status, echoes it in a form a log query can match, and exits with it — so exit
+1 (broken) and exit 2 (unverifiable) stay distinguishable all the way out to
+the SIEM. `set -e` is deliberately absent: it would kill the shell on the CLI's
+non-zero exit before the echo ran, and the echo is the point.
+*/ -}}
+{{- $flags := "" -}}
+{{- if .Values.verify.anchors -}}
+{{- $flags = printf "%s --anchors" $flags -}}
+{{- end -}}
+{{- if .Values.verify.pin.enabled -}}
+{{- $flags = printf "%s --pin %s" $flags (include "waxseal-verifier.pinPath" . | quote) -}}
+{{- end -}}
+{{- range .Values.verify.witnessUrls -}}
+{{- $flags = printf "%s --witness %s" $flags (. | quote) -}}
+{{- end -}}
+{{- if .Values.verify.expectAnchorBinding -}}
+{{- $flags = printf "%s --expect-anchor-binding" $flags -}}
+{{- end -}}
+{{- if .Values.verify.maxAnchorAgeSeconds -}}
+{{- $flags = printf "%s --max-anchor-age-s %d" $flags (int .Values.verify.maxAnchorAgeSeconds) -}}
+{{- end -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-verify" (include "waxseal-verifier.fullname" .) }}
+  labels:
+    {{- include "waxseal-verifier.labels" . | nindent 4 }}
+    waxseal.io/job: verify
+spec:
+  schedule: {{ .Values.verify.schedule | quote }}
+  # Forbid: two runs read-modify-writing one pin state file would race, and a
+  # torn pin reads as malformed on the next run — which is a break.
+  concurrencyPolicy: {{ .Values.verify.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.verify.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.verify.failedJobsHistoryLimit }}
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "waxseal-verifier.selectorLabels" . | nindent 8 }}
+        waxseal.io/job: verify
+    spec:
+      # 0: a detected break is not retried. Exit 1 is a security incident to
+      # preserve, not a flake, and a retry loop turns one finding into a burst
+      # of identical alerts that say nothing the first run did not.
+      backoffLimit: {{ .Values.verify.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "waxseal-verifier.selectorLabels" . | nindent 12 }}
+            waxseal.io/job: verify
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "waxseal-verifier.serviceAccountName" . }}
+          automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: verify
+              image: {{ include "waxseal-verifier.image" .Values.image | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.containerSecurityContext | nindent 16 }}
+              # Overrides the image's ENTRYPOINT ["waxseal"] so the exit code
+              # can be captured, labelled and re-raised.
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -u
+                  waxseal verify "$WAXSEAL_TRAIL_URL"{{ $flags }}
+                  rc=$?
+                  echo "waxseal_command=verify waxseal_exit=$rc"
+                  case "$rc" in
+                    0) echo "waxseal_verdict=ok" ;;
+                    1) echo "waxseal_verdict=broken SECURITY_INCIDENT preserve_do_not_repair" ;;
+                    2) echo "waxseal_verdict=unverifiable version_skew route_to_release_management" ;;
+                    3) echo "waxseal_verdict=absent nothing_was_read configuration_error" ;;
+                    *) echo "waxseal_verdict=unexpected_exit_code" ;;
+                  esac
+                  exit $rc
+              env:
+                - name: WAXSEAL_TRAIL_URL
+                  value: {{ .Values.trailUrl | quote }}
+                {{- include "waxseal-verifier.credentialEnv" . | nindent 16 }}
+                {{- with .Values.extraEnv }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              resources:
+                {{- toYaml .Values.verify.resources | nindent 16 }}
+              volumeMounts:
+                {{- if .Values.verify.pin.enabled }}
+                - name: pin
+                  mountPath: {{ .Values.verify.pin.mountPath }}
+                {{- end }}
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            {{- if .Values.verify.pin.enabled }}
+            - name: pin
+              persistentVolumeClaim:
+                claimName: {{ include "waxseal-verifier.pinClaimName" . }}
+            {{- end }}
+            - name: tmp
+              emptyDir: {}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

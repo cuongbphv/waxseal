@@ -1,0 +1,94 @@
+# Chain OpenClaw's audit ledger into a waxseal trail, every five minutes.
+#
+# This unit REPLACES the crontab line `waxseal install openclaw` prints:
+#
+#   */5 * * * * <interpreter> -m waxseal.integrations.openclaw
+#
+# WHY THE INTERPRETER IS AN ABSOLUTE PATH AND NOT `python3`.
+# `waxseal install` prints `sys.executable` — the running interpreter's own
+# path — never a bare `python3`, and `integrations/_install.py` records why in
+# the code: "the interpreter on PATH is not necessarily the one that has
+# waxseal installed. When it is not, every hook event is dropped with a label
+# nobody reads and the trail stays empty while the hooks look installed."
+# That failure already happened on the repository owner's machine. A unit file
+# has no shell and no PATH resolution to fall back on, so the path is written
+# out, and if it is wrong systemd fails the unit with status 203/EXEC — loudly,
+# which is the whole point.
+#
+# ** EDIT ExecStart BELOW ** to the interpreter that actually has waxseal:
+#
+#   python3 -c 'import sys; print(sys.executable)'   # in that environment
+#   systemctl edit waxseal-openclaw-ingest.service   # drop-in override
+#
+# NOTHING RUNS ON THE AGENT'S PATH. This is a timer that reads OpenClaw's own
+# ledger after the fact; it is not a hook and cannot veto or delay anything the
+# agent does. OpenClaw keeps that ledger but prunes it (30 days, 100k rows) and
+# hashes no row, which is what this chains.
+#
+# Requires the `openclaw` CLI on PATH inside this unit and a running gateway to
+# answer it. If either is missing the run exits non-zero rather than writing an
+# empty pass — an ingester that reports success having ingested nothing is
+# indistinguishable from one that found nothing to ingest, and only one of
+# those is true.
+
+[Unit]
+Description=waxseal ingest of the OpenClaw audit ledger
+Documentation=https://github.com/cuongbphv/waxseal
+# The gateway answers over the network on most installs.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# The identity that owns the trail: this unit WRITES chain entries, so it is
+# the writer. Not DynamicUser — a transient user cannot own an append-only log
+# across runs, and each run would be a different identity extending the same
+# chain.
+User=waxseal
+Group=waxseal
+
+# Leading dash: a missing file is not a failure. WAXSEAL_TRAIL and/or
+# OPENCLAW_HOME belong here, both ABSOLUTE — resolve_trail() takes
+# WAXSEAL_TRAIL verbatim and REFUSES a leading `~`, because no shell runs
+# between this file and the process.
+EnvironmentFile=-/etc/waxseal/openclaw-ingest.env
+
+# The trail directory, writable. Adjust to wherever WAXSEAL_TRAIL points.
+ReadWritePaths=/var/lib/waxseal
+
+ExecStart=/usr/local/bin/python3 -m waxseal.integrations.openclaw
+
+SuccessExitStatus=0
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+# MemoryDenyWriteExecute is DELIBERATELY ABSENT here, unlike in the verify
+# and anchor units. This one execs the `openclaw` CLI, which is somebody
+# else's binary and may carry a JIT; denying W+X would fail it with a
+# refused syscall that looks nothing like "the gateway did not answer".
+# A labelled weaker hardening beats a confusing failure.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Shorter than the five-minute cadence, so a hung gateway cannot leave two runs
+# overlapping on one trail. The timer's own guard is below.
+TimeoutStartSec=4min

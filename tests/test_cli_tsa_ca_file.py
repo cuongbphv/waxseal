@@ -121,7 +121,9 @@ class TestSignatureUnchecked:
     impossible to get wrong."""
 
     def test_the_absent_extra_is_exit_2_and_says_how_to_install_it(
-        self, anchored: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str],
+        self,
+        anchored: tuple[Path, Path, Path],
+        capsys: pytest.CaptureFixture[str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """FALSIFIABILITY RECEIPT (the branch whose absence is the hazard).
@@ -142,7 +144,9 @@ class TestSignatureUnchecked:
         assert "waxseal[rfc3161]" in out
 
     def test_a_bundle_that_is_not_there_is_exit_2(
-        self, anchored: tuple[Path, Path, Path], tmp_path: Path,
+        self,
+        anchored: tuple[Path, Path, Path],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         trail, _, _ = anchored
@@ -151,13 +155,16 @@ class TestSignatureUnchecked:
         assert "signature_unchecked" in capsys.readouterr().out
 
     def test_unchecked_is_never_rendered_as_a_pass(
-        self, anchored: tuple[Path, Path, Path], tmp_path: Path,
+        self,
+        anchored: tuple[Path, Path, Path],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         trail, _, _ = anchored
-        assert main(
-            ["verify", str(trail), "--anchors", "--tsa-ca-file", str(tmp_path / "gone.pem")]
-        ) != 0
+        assert (
+            main(["verify", str(trail), "--anchors", "--tsa-ca-file", str(tmp_path / "gone.pem")])
+            != 0
+        )
 
 
 class TestNotEngaged:
@@ -196,22 +203,26 @@ class TestReport:
         # The artifact an auditor still has six months later. A caveat that
         # only `verify` prints is a caveat that never reaches them.
         trail, ca_file, _ = anchored
-        rc = main(
-            ["report", str(trail), "--anchors", "--json", "--tsa-ca-file", str(ca_file)]
-        )
+        rc = main(["report", str(trail), "--anchors", "--json", "--tsa-ca-file", str(ca_file)])
         assert rc == 0
         notes = json.loads(capsys.readouterr().out)["anchors"]["notes"]
         assert any("signature_valid" in note for note in notes)
 
     def test_the_report_carries_an_unchecked_state_too(
-        self, anchored: tuple[Path, Path, Path], tmp_path: Path,
+        self,
+        anchored: tuple[Path, Path, Path],
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         trail, _, _ = anchored
         rc = main(
             [
-                "report", str(trail), "--anchors", "--json",
-                "--tsa-ca-file", str(tmp_path / "absent.pem"),
+                "report",
+                str(trail),
+                "--anchors",
+                "--json",
+                "--tsa-ca-file",
+                str(tmp_path / "absent.pem"),
             ]
         )
         assert rc == 2
@@ -235,12 +246,19 @@ class TestConditionR:
         trail, _, _ = anchored
         proc = subprocess.run(
             [
-                sys.executable, "-m", "waxseal.cli", "verify", str(trail), "--anchors",
-                "--tsa-ca-file", str(tmp_path / "nowhere.pem"),
+                sys.executable,
+                "-m",
+                "waxseal.cli",
+                "verify",
+                str(trail),
+                "--anchors",
+                "--tsa-ca-file",
+                str(tmp_path / "nowhere.pem"),
             ],
             capture_output=True,
             text=True,
             check=False,
+            encoding="utf-8",
         )
         assert proc.returncode == 2
         assert "signature_unchecked" in proc.stdout

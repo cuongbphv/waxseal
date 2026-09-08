@@ -150,9 +150,10 @@ class TestUploadSetsRetention:
             retention=COMPLIANCE,
             now_fn=now_fn,
         )
-        assert client.put_kwargs["ContentMD5"] == base64.b64encode(
-            hashlib.md5(b"x", usedforsecurity=False).digest()
-        ).decode()
+        assert (
+            client.put_kwargs["ContentMD5"]
+            == base64.b64encode(hashlib.md5(b"x", usedforsecurity=False).digest()).decode()
+        )
 
     def test_no_retention_asked_for_sends_no_lock_parameters(self) -> None:
         client = FakeWormS3Client(retention=FakeClientError("NoSuchObjectLockConfiguration"))
@@ -385,18 +386,14 @@ class TestWormUnknown:
     def test_a_client_without_the_object_lock_api_is_unknown(self) -> None:
         # An injected client from an older SDK or an S3-compatible service
         # may simply not have the method. That is "could not ask".
-        report = object_worm_state(
-            FakeS3Client(), bucket="audit", key="k", now_fn=now_fn
-        )
+        report = object_worm_state(FakeS3Client(), bucket="audit", key="k", now_fn=now_fn)
         assert report.state is WormState.UNKNOWN
         assert "get_object_retention" in report.detail
 
     def test_the_default_now_fn_needs_no_injection(self) -> None:
         # Rule 8: injectable, not mandatory. The real clock puts FUTURE in
         # the future for any plausible run date, so this stays deterministic.
-        report = object_worm_state(
-            FakeWormS3Client(retention=retained()), bucket="audit", key="k"
-        )
+        report = object_worm_state(FakeWormS3Client(retention=retained()), bucket="audit", key="k")
         assert report.state is WormState.LOCKED
 
 
@@ -442,7 +439,7 @@ class TestExtraAbsentIsItsOwnLabelledState:
 
 
 class TestBucketWormState:
-    """"Is Object Lock configured on this bucket" is a DIFFERENT question
+    """ "Is Object Lock configured on this bucket" is a DIFFERENT question
     from "is this object version retained" — the archive path asks the
     former directly; `waxseal preflight` (J4) only names WORM as a
     mechanism, without checking bucket state itself. It gets its own

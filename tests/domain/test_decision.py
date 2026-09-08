@@ -72,10 +72,46 @@ class TestPayloadShape:
         # rule 5: absent and unmeasured must not look alike. An omitted key
         # would be indistinguishable from a schema that never had the field.
         payload = to_payload(minimal())
-        for key in ("rationale", "policy_version", "confidence", "human_oversight",
-                    "subject_ref", "trace_id"):
+        for key in (
+            "rationale",
+            "policy_version",
+            "confidence",
+            "human_oversight",
+            "subject_ref",
+            "trace_id",
+            "risk_tier",
+            "classification_ref",
+        ):
             assert key in payload, key
             assert payload[key] is None, key
+
+    def test_declared_risk_tier_and_dossier_ref_round_trip(self) -> None:
+        record = DecisionRecord(
+            decision_id="d-5",
+            decision_type="credit_decision",
+            system_id="lending-agent",
+            model=ModelRef(name="risk-llm", version="2026.08"),
+            input_commitment=HEX64,
+            outcome="deny",
+            risk_tier="rui ro cao",
+            classification_ref="HSPL-2026-014/v3",
+        )
+        payload = to_payload(record)
+        assert payload["risk_tier"] == "rui ro cao"
+        assert payload["classification_ref"] == "HSPL-2026-014/v3"
+        assert from_payload(payload) == record
+
+    def test_a_payload_written_before_these_fields_existed_parses_as_none(self) -> None:
+        # Backward compatibility: a row written by 0.1.5 has neither key. It
+        # must read back as "no tier declared", never as a broken row and
+        # never as the lowest tier.
+        payload = to_payload(minimal())
+        del payload["risk_tier"]
+        del payload["classification_ref"]
+        parsed = from_payload(payload)
+        assert parsed.risk_tier is None
+        assert parsed.classification_ref is None
+        assert parsed == minimal()
 
     def test_model_digest_null_is_preserved_not_dropped(self) -> None:
         payload = to_payload(minimal())
@@ -111,15 +147,45 @@ class TestUnknownIsNotAnError:
         )
         assert to_payload(record)["human_oversight"]["mode"] == "four_eyes_committee"
 
+    @pytest.mark.parametrize("tier", ["cao", "tier-2", " trung binh ", "HIGH"])
+    def test_declared_risk_tier_is_recorded_verbatim(self, tier: str) -> None:
+        # The provider owns this classification (Law on AI 134/2025 Art. 10(1)).
+        # Normalizing "cao" to "high" would be waxseal adjudicating it, and
+        # trimming whitespace would silently rewrite what was declared.
+        record = DecisionRecord(
+            decision_id="d-6",
+            decision_type="t",
+            system_id="s",
+            model=ModelRef(name="m", version="v"),
+            input_commitment=HEX64,
+            outcome="approve",
+            risk_tier=tier,
+        )
+        assert to_payload(record)["risk_tier"] == tier
+        assert from_payload(to_payload(record)).risk_tier == tier
+
+    def test_an_empty_risk_tier_string_is_kept_not_rejected(self) -> None:
+        # The analogue is rationale/policy_version, which accept "". Only a
+        # field that is required when its object exists (HumanOversight.mode)
+        # earns _require_nonempty.
+        record = DecisionRecord(
+            decision_id="d-7",
+            decision_type="t",
+            system_id="s",
+            model=ModelRef(name="m", version="v"),
+            input_commitment=HEX64,
+            outcome="approve",
+            risk_tier="",
+        )
+        assert to_payload(record)["risk_tier"] == ""
+
 
 class TestValidation:
     # An audit record that commits to nothing is worse than no record at all:
     # it looks like evidence and proves nothing. These reject at write time,
     # where the caller can still fix it, rather than at audit time.
 
-    @pytest.mark.parametrize(
-        "field", ["decision_id", "decision_type", "system_id", "outcome"]
-    )
+    @pytest.mark.parametrize("field", ["decision_id", "decision_type", "system_id", "outcome"])
     def test_empty_required_string_is_rejected(self, field: str) -> None:
         kwargs = {
             "decision_id": "d",
@@ -143,9 +209,7 @@ class TestValidation:
         with pytest.raises(ValueError, match="mode"):
             HumanOversight(mode="")
 
-    @pytest.mark.parametrize(
-        "bad", ["", "abc", "A" * 64, "g" * 64, HEX64 + "a", " " + "a" * 63]
-    )
+    @pytest.mark.parametrize("bad", ["", "abc", "A" * 64, "g" * 64, HEX64 + "a", " " + "a" * 63])
     def test_input_commitment_must_be_64_lowercase_hex(self, bad: str) -> None:
         with pytest.raises(ValueError, match="input_commitment"):
             DecisionRecord(
@@ -192,7 +256,15 @@ class TestValidation:
             assert record.confidence == value
 
     @pytest.mark.parametrize(
-        "field", ["rationale", "policy_version", "subject_ref", "trace_id"]
+        "field",
+        [
+            "rationale",
+            "policy_version",
+            "subject_ref",
+            "trace_id",
+            "risk_tier",
+            "classification_ref",
+        ],
     )
     def test_optional_string_fields_reject_non_strings(self, field: str) -> None:
         # These land verbatim in the hashed payload; a stray object would
@@ -257,6 +329,11 @@ class TestValidation:
         with pytest.raises(Exception):  # noqa: B017 - FrozenInstanceError
             minimal().outcome = "deny"  # type: ignore[misc]
 
+    @pytest.mark.parametrize("field", ["risk_tier", "classification_ref"])
+    def test_the_declared_classification_fields_are_immutable(self, field: str) -> None:
+        with pytest.raises(Exception):  # noqa: B017 - FrozenInstanceError
+            setattr(minimal(), field, "cao")
+
 
 class TestFromPayloadRejectsMalformed:
     # from_payload parses attacker-reachable bytes off the trail. It raises a
@@ -294,6 +371,13 @@ class TestFromPayloadRejectsMalformed:
         payload = to_payload(minimal())
         payload["decision_id"] = 7
         with pytest.raises(ValueError):
+            from_payload(payload)
+
+    @pytest.mark.parametrize("field", ["risk_tier", "classification_ref"])
+    def test_non_string_declared_classification_raises_valueerror(self, field: str) -> None:
+        payload = to_payload(minimal())
+        payload[field] = 2
+        with pytest.raises(ValueError, match=field):
             from_payload(payload)
 
     def test_non_numeric_confidence_raises_valueerror(self) -> None:

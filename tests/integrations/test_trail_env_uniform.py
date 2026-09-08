@@ -141,11 +141,11 @@ class TestSharedResolver:
 
         err = capsys.readouterr().err
         assert "[waxseal-audit]" in err
-        assert "WAXSEAL_TRAIL" in err          # the variable
-        assert "~/x.jsonl" in err              # the offending value
-        assert "absolute path" in err          # the fix
+        assert "WAXSEAL_TRAIL" in err  # the variable
+        assert "~/x.jsonl" in err  # the offending value
+        assert "absolute path" in err  # the fix
         assert "systemd unit" in err and "compose file" in err
-        assert str(fallback) in err            # where writes actually go
+        assert str(fallback) in err  # where writes actually go
 
     def test_a_bare_tilde_is_refused_too(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -192,9 +192,9 @@ class TestSharedResolver:
         # a caller writing Python, where expanduser() is the documented
         # behaviour of the library defaults and no config file is involved.
         monkeypatch.setenv("WAXSEAL_TRAIL", "~/from-env.jsonl")
-        assert _trail.resolve_trail(
-            "~/explicit.jsonl", default=lambda: tmp_path / "f.jsonl"
-        ) == (Path.home() / "explicit.jsonl")
+        assert _trail.resolve_trail("~/explicit.jsonl", default=lambda: tmp_path / "f.jsonl") == (
+            Path.home() / "explicit.jsonl"
+        )
         assert capsys.readouterr().err == ""
 
     def test_the_default_is_not_computed_when_it_is_not_needed(
@@ -256,9 +256,15 @@ def crewai(monkeypatch: pytest.MonkeyPatch) -> Iterator[type]:
     setattr(events, "BaseEventListener", BaseEventListener)  # noqa: B010
     setattr(events, "crewai_event_bus", bus)  # noqa: B010
     for attr in (
-        "ToolUsageStartedEvent", "ToolUsageFinishedEvent", "ToolUsageErrorEvent",
-        "TaskStartedEvent", "TaskCompletedEvent", "TaskFailedEvent",
-        "CrewKickoffStartedEvent", "CrewKickoffCompletedEvent", "CrewKickoffFailedEvent",
+        "ToolUsageStartedEvent",
+        "ToolUsageFinishedEvent",
+        "ToolUsageErrorEvent",
+        "TaskStartedEvent",
+        "TaskCompletedEvent",
+        "TaskFailedEvent",
+        "CrewKickoffStartedEvent",
+        "CrewKickoffCompletedEvent",
+        "CrewKickoffFailedEvent",
     ):
         setattr(events, attr, type(attr, (), {}))
     pkg = types.ModuleType("crewai")
@@ -395,9 +401,7 @@ class TestHermesPrecedence:
         self, hermes_module: types.ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
-        assert hermes_module._trail_path() == (
-            tmp_path / "hermes-home" / "audit" / "trail.jsonl"
-        )
+        assert hermes_module._trail_path() == (tmp_path / "hermes-home" / "audit" / "trail.jsonl")
 
     def test_home_env_beats_path_home_in_the_fallback(
         self, hermes_module: types.ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -450,7 +454,7 @@ class TestHermesPrecedence:
         # drop filed next to the host default would be invisible to anyone
         # looking where they pointed the writer (rule 6).
         blocked = tmp_path / "blocked"
-        blocked.write_text("a file where the trail directory should be")
+        blocked.write_text("a file where the trail directory should be", encoding="utf-8")
         monkeypatch.setenv("WAXSEAL_TRAIL", str(blocked / "trail.jsonl"))
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
         if hasattr(hermes_module, "handle"):
@@ -556,7 +560,7 @@ class TestEveryIntegrationHonoursTheVariable:
         offenders = [
             path.name
             for path in sorted(src.glob("*.py"))
-            if path.name != "_trail.py" and '"WAXSEAL_TRAIL"' in path.read_text()
+            if path.name != "_trail.py" and '"WAXSEAL_TRAIL"' in path.read_text(encoding="utf-8")
         ]
         assert offenders == []
 
@@ -616,9 +620,7 @@ class TestEveryIntegrationHonoursTheVariable:
     def test_the_census_is_complete(self) -> None:
         src = Path(_trail.__file__).parent
         modules = {
-            f"waxseal.integrations.{p.stem}"
-            for p in src.glob("*.py")
-            if not p.stem.startswith("_")
+            f"waxseal.integrations.{p.stem}" for p in src.glob("*.py") if not p.stem.startswith("_")
         }
         assert modules == set(self.MODULES)
 
@@ -664,9 +666,7 @@ class TestEveryIntegrationRefusesALeadingTilde:
     ) -> None:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
         monkeypatch.setenv("WAXSEAL_TRAIL", self.TILDE)
-        assert hermes_module._trail_path() == (
-            tmp_path / "hermes-home" / "audit" / "trail.jsonl"
-        )
+        assert hermes_module._trail_path() == (tmp_path / "hermes-home" / "audit" / "trail.jsonl")
         assert "REFUSED" in capsys.readouterr().err
 
     def test_the_originally_honouring_four_fall_back_to_the_host_default(

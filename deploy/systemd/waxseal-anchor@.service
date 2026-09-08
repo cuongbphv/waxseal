@@ -1,0 +1,96 @@
+# Scheduled checkpoint publication for one trail — runs as the CHAIN's service
+# user, on purpose.
+#
+#   systemctl enable --now \
+#     "waxseal-anchor@$(systemd-escape /var/lib/waxseal/chains/default/trail.jsonl).timer"
+#
+# WHY THIS ONE IS NOT DynamicUser, UNLIKE waxseal-verify@.
+# `waxseal anchor` WRITES: the `.anchors` sidecar is written BESIDE the trail,
+# so this unit needs the trail's directory writable and it needs to be the
+# identity that owns it. A transient user could not write there, and a
+# transient user that could would mean the directory was writable by any
+# transient user on the host.
+#
+# That co-location is the INTENDED topology, not a compromise.
+# docs/architecture/deployment.md section 1 draws the arrow from the chain
+# server into the anchor domain: the process that publishes checkpoints belongs
+# on the chain side. What must answer to a DIFFERENT administrative authority
+# is the anchor SINK — the RFC 3161 TSA, the OpenTimestamps calendar, the
+# witness host. A published root the trail's writer can rewrite proves nothing
+# (deployment.md section 5).
+#
+# WAXSEAL_WITNESS_API_KEY, never WAXSEAL_API_KEY. The CLI reads only the
+# witness variable for witness deposits, and REMOTE.md section 8 is why: a
+# witness holding the chain's write credential could append forged entries to
+# the very chain it exists to cross-check.
+#
+# Every path here is ABSOLUTE and none may begin with `~` —
+# `integrations/_trail.py`'s resolve_trail() refuses such a value and names
+# unit files as the reason.
+#
+# This unit appends NO chain entries. The CLI never does.
+
+[Unit]
+Description=waxseal anchor %I
+Documentation=https://github.com/cuongbphv/waxseal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# The chain's service user, created by whoever installed the writer. Not
+# DynamicUser: see the header.
+User=waxseal
+Group=waxseal
+
+# Leading dash: a missing file is not a failure.
+EnvironmentFile=-/etc/waxseal/anchor.env
+
+# The trail's DIRECTORY, read-write, because the `.anchors` sidecar lands
+# beside the trail. %I is the trail file; the directory is what the sidecar
+# needs. Set this to the directory holding your trail — systemd does not
+# compute a dirname for you, which is why it is spelled out rather than
+# derived from %I.
+ReadWritePaths=/var/lib/waxseal
+
+ExecStart=/usr/local/bin/waxseal anchor %I $WAXSEAL_ANCHOR_SINK_ARGS
+
+# No SuccessExitStatus widening. A failed publication is a failed publication:
+# the checkpoint did not reach the sink, and the next `verify --anchors` has
+# one fewer record than it should. `domain/archive.py` makes the neighbouring
+# point about an off-box copy — archive_not_attempted is not archive_stored,
+# and calling a failure a success invents evidence that does not exist.
+SuccessExitStatus=0
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+# Safe for waxseal itself (stdlib-only Python needs no W+X mapping). If you
+# point WAXSEAL_EVM_SIGNER_CMD at a signer with a JIT — a Node or a Go
+# runtime — this is the line that will break it, and it will break as a
+# refused syscall rather than as a bad signature. Drop it in a drop-in for
+# that case rather than editing this file.
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# A TSA or a calendar can be slow. It must not be slow forever.
+TimeoutStartSec=10min

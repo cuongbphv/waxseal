@@ -106,9 +106,7 @@ def router(services: Services, authz: Authorizer) -> APIRouter:
             _secret_row(
                 "witness_api_key", "WAXSEAL_WITNESS_API_KEY", s.witness_api_key is not None
             ),
-            _secret_row(
-                "database_url", "WAXSEAL_SERVER_DATABASE_URL", s.database_url is not None
-            ),
+            _secret_row("database_url", "WAXSEAL_SERVER_DATABASE_URL", s.database_url is not None),
         ]
 
     def stored_rows() -> list[dict[str, object]]:
@@ -154,7 +152,7 @@ def router(services: Services, authz: Authorizer) -> APIRouter:
         except json.JSONDecodeError as exc:
             return error(400, "malformed_body", f"body is not JSON: {exc}")
         if not isinstance(body, dict) or not isinstance(body.get("value"), str):
-            return error(400, "malformed_body", "body must be {\"value\": \"<string>\"}")
+            return error(400, "malformed_body", 'body must be {"value": "<string>"}')
         try:
             stored = services.config.set(key, body["value"])
         except NoSuchSetting as exc:
@@ -166,9 +164,7 @@ def router(services: Services, authz: Authorizer) -> APIRouter:
         return JSONResponse({"key": key, "value": stored, "source": "stored"})
 
     @api.post("/settings/{key}/reset")
-    def post_reset(
-        key: str, authorization: str | None = Header(default=None)
-    ) -> JSONResponse:
+    def post_reset(key: str, authorization: str | None = Header(default=None)) -> JSONResponse:
         """Revert one setting to its default.
 
         A POST rather than a DELETE, matching `keys/{key_id}/revoke`: this

@@ -24,7 +24,7 @@ required to refuse to pick a winner.
 
 If Foundry is absent every test here SKIPS WITH A LABEL naming what is
 missing. It never silently passes, and it is never the coverage: the
-fake-transport suite covers adapters/evm.py on its own.
+fake-transport suite covers adapters/evm/ on its own.
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ pytestmark = _foundry.skip_without_foundry(
     reason=(
         "SKIPPED WITH LABEL: Foundry (anvil/forge/cast 1.8.x) was found neither on PATH "
         "nor in foundryup's install directory (tests/_foundry.py looked in both), so the "
-        "on-chain end-to-end evidence for adapters/evm.py was NOT collected on this run. "
+        "on-chain end-to-end evidence for adapters/evm/ was NOT collected on this run. "
         "Install with `foundryup`. The fake-transport suite in tests/adapters/test_evm.py "
         "still ran and still covers the adapter."
     ),
@@ -107,7 +107,13 @@ def _env() -> dict[str, str]:
 
 def _run(*args: str, cwd: Path | None = None) -> str:
     done = subprocess.run(
-        list(args), cwd=cwd, env=_env(), capture_output=True, text=True, timeout=180
+        list(args),
+        cwd=cwd,
+        env=_env(),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        encoding="utf-8",
     )
     if done.returncode != 0:
         raise AssertionError(f"{' '.join(args)} failed ({done.returncode}):\n{done.stderr}")
@@ -450,16 +456,12 @@ class TestAgreementAcrossTwoRealChains:
         assert verdict.status == LIVE
         assert verdict.deadline_s == DEADLINE_S
 
-    def test_the_chains_own_verdict_agrees_that_the_trail_is_live(
-        self, chain: Deployment
-    ) -> None:
+    def test_the_chains_own_verdict_agrees_that_the_trail_is_live(self, chain: Deployment) -> None:
         assert _reader(chain).on_chain_delinquency(TRAIL) is False
 
 
 class TestTheRevertIsAnAnswer:
-    def test_an_unregistered_trail_reverts_and_is_read_as_absence(
-        self, chain: Deployment
-    ) -> None:
+    def test_an_unregistered_trail_reverts_and_is_read_as_absence(self, chain: Deployment) -> None:
         # The four bytes come from the compiled contract, not from this file.
         # A wrong ERROR_TRAIL_NOT_REGISTERED would make this `unreachable`.
         assert _reader(chain).latest_checkpoint("no-such-trail") is None
@@ -470,9 +472,7 @@ class TestTheRevertIsAnAnswer:
         # contract refuses to answer, and the adapter reports the third value.
         assert _reader(chain).on_chain_delinquency("no-such-trail") is None
 
-    def test_an_unregistered_trail_has_nothing_to_be_late_against(
-        self, chain: Deployment
-    ) -> None:
+    def test_an_unregistered_trail_has_nothing_to_be_late_against(self, chain: Deployment) -> None:
         verdict = _reader(chain).liveness("no-such-trail", now=datetime.now(UTC))
         assert verdict.status == UNREACHABLE
 
@@ -532,9 +532,7 @@ class TestTheRegistry:
         assert finding.status == REGISTRY_ABSENT
         assert finding.reason == REGISTRY_NOT_REGISTERED
 
-    def test_a_duplicate_registration_is_rejected_by_the_contract(
-        self, chain: Deployment
-    ) -> None:
+    def test_a_duplicate_registration_is_rejected_by_the_contract(self, chain: Deployment) -> None:
         # Append-only is the feature. On the WRITE path a revert is the
         # contract saying no — a positive rejection, not unreachability.
         with pytest.raises(LedgerError, match="the contract rejected this call"):

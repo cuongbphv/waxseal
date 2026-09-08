@@ -37,40 +37,18 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations import _sanitize as _sanitize_impl
 from waxseal.integrations._trail import home_default, resolve_trail
 
-# _sanitize redacts BEFORE clipping: a clip can split a secret across the
-# boundary (a PEM losing its END marker stops matching) and land it on disk.
-_REDACTOR = RegexRedactor()
+MAX_FIELD_CHARS = _sanitize_impl.MAX_FIELD_CHARS
+_clip = _sanitize_impl.clip
+_sanitize = _sanitize_impl.sanitize
 
 PAYLOAD_TYPE = "application/vnd.langchain.tool-event+json"
-
-# Tool outputs can be megabytes (retrieved documents, SQL dumps). Clip stored
-# fields, visibly, because silent truncation would read as "the full output".
-MAX_FIELD_CHARS = 4096
 
 #: Where this integration writes when the caller names no path and
 #: `WAXSEAL_TRAIL` is unset.
 DEFAULT_TRAIL = "~/.waxseal/langchain-trail.jsonl"
-
-
-def _clip(text: str) -> str:
-    if len(text) <= MAX_FIELD_CHARS:
-        return text
-    return text[:MAX_FIELD_CHARS] + f"…[truncated {len(text) - MAX_FIELD_CHARS} chars]"
-
-
-def _sanitize(value: Any) -> Any:
-    """Keep the payload JSON-serializable and bounded whatever the run holds."""
-    if value is None or isinstance(value, (int, float, bool)):
-        return value
-    if isinstance(value, str):
-        return _clip(_REDACTOR.redact_text(value))
-    if isinstance(value, dict):
-        return {str(k): _sanitize(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_sanitize(v) for v in value]
-    return _clip(_REDACTOR.redact_text(repr(value)))
 
 
 class WaxsealCallbackHandler(BaseCallbackHandler):
@@ -96,18 +74,14 @@ class WaxsealCallbackHandler(BaseCallbackHandler):
     def _append(self, payload: dict[str, Any]) -> None:
         try:
             if self._log is None:
-                self._log = AuditLog.open(
-                    self._trail, redactor=RegexRedactor(), record_drops=True
-                )
+                self._log = AuditLog.open(self._trail, redactor=RegexRedactor(), record_drops=True)
         except Exception as e:  # broken environment: never block the run
             print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
             # No AuditLog to route this through, so record it directly,
             # best-effort (FileDropRecorder.record() never raises).
             from waxseal.adapters.drops import FileDropRecorder
 
-            FileDropRecorder(self._trail).record(
-                reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-            )
+            FileDropRecorder(self._trail).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
             return
         if not self._log.try_append(payload=payload, payload_type=PAYLOAD_TYPE):
             # Labelled fail-open (chain integrity ≠ trail completeness).

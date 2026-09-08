@@ -184,7 +184,7 @@ def urllib_transport(*, timeout: float = 10.0) -> Transport:
             request.url, data=request.body, headers=request.headers, method=request.method
         )
         try:
-            with _opener().open(req, timeout=timeout) as resp:  # noqa: S310
+            with _opener().open(req, timeout=timeout) as resp:  # noqa: S310 - scheme checked against _ALLOWED_SCHEMES above
                 return RemoteResponse(
                     status=resp.status, headers=dict(resp.headers), body=resp.read()
                 )
@@ -346,7 +346,7 @@ class RemoteBackend:
         # portal, a proxy error page, a truncated response) is not a
         # protocol-defined outcome any more than a bad status code is. It
         # must become the same RemoteError a 5xx would, never an uncaught
-        # JSONDecodeError/KeyError escaping through the CLI (cli.py's own
+        # JSONDecodeError/KeyError escaping through the CLI (cli/_main.py's own
         # try/except only catches OSError/RemoteError).
         try:
             page = json.loads(body)

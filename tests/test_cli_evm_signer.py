@@ -84,21 +84,17 @@ main()
 @pytest.fixture
 def signer_cmd(tmp_path: Path) -> str:
     script = tmp_path / "fake_signer.py"
-    script.write_text(FAKE_SIGNER)
+    script.write_text(FAKE_SIGNER, encoding="utf-8")
     return f"{sys.executable} {script}"
 
 
 class TestEvmSignerMissing:
-    def test_missing_env_var_raises_ledger_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_env_var_raises_ledger_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("WAXSEAL_EVM_SIGNER_CMD", raising=False)
         with pytest.raises(LedgerError, match="WAXSEAL_EVM_SIGNER_CMD is not set"):
             _evm_signer()
 
-    def test_empty_env_var_is_treated_as_missing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_env_var_is_treated_as_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("WAXSEAL_EVM_SIGNER_CMD", "")
         with pytest.raises(LedgerError, match="WAXSEAL_EVM_SIGNER_CMD is not set"):
             _evm_signer()

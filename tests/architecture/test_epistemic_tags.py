@@ -69,6 +69,13 @@ def fold(text: str) -> str:
 # cover for it. That is the same failure this file guards against in prose.
 DOC_GLOBS = (
     "*.md",
+    # deploy/ is a documentation tree in its own right -- an index, a systemd
+    # guide and a chart-test note, all of which make claims about what was and
+    # was not verified on the machine that wrote them. Added when that tree
+    # landed (0.1.6): a new directory of prose outside every glob is a place
+    # an unlabelled claim can sit forever without anyone able to grep for it,
+    # which is the exact failure this file exists to prevent.
+    "deploy/**/*.md",
     "docs/**/*.md",
     "examples/**/*.md",
     "integrations/*/README*.md",
@@ -114,8 +121,7 @@ class TestEpistemicTagVocabulary:
             # this UTF-8 corpus (all 8 win CI jobs, UnicodeDecodeError, 01/09).
             for lineno, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), start=1):
                 offenders += [
-                    f"{doc.relative_to(REPO)}:{lineno}: {tag}"
-                    for tag in translated_tags_in(line)
+                    f"{doc.relative_to(REPO)}:{lineno}: {tag}" for tag in translated_tags_in(line)
                 ]
         assert offenders == []
 
@@ -123,9 +129,7 @@ class TestEpistemicTagVocabulary:
         # A pattern that matches nothing passes the test above in silence. The
         # detector is therefore exercised against known-positive samples rather
         # than trusted, including the accent-stripped spelling.
-        assert translated_tags_in("**`[Chưa xác minh]`** Bộ byte chính xác") == [
-            "[Chưa xác minh]"
-        ]
+        assert translated_tags_in("**`[Chưa xác minh]`** Bộ byte chính xác") == ["[Chưa xác minh]"]
         assert translated_tags_in("[Chua xac minh] can cu: ...") == ["[Chua xac minh]"]
         assert translated_tags_in("[Suy luận — căn cứ: ngày tạo công khai]") != []
         # ...and does not fire on the sanctioned form, nor on a Vietnamese

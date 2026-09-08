@@ -41,7 +41,7 @@ class ChainSummary:
 
 @dataclass(frozen=True, slots=True)
 class ReceiptLogReport:
-    """"Is the acknowledgment log internally consistent?"
+    """ "Is the acknowledgment log internally consistent?"
 
     `checked is None` means the log is absent — never measured — and must never
     render as 0, "measured, nothing wrong" (CLAUDE.md rule 5).
@@ -55,7 +55,7 @@ class ReceiptLogReport:
 
 @dataclass(frozen=True, slots=True)
 class ReceiptCrossCheck:
-    """"Does entry `seq` still carry the hash that was acknowledged for it?"
+    """ "Does entry `seq` still carry the hash that was acknowledged for it?"
 
     `broken_seq` is the CHAIN's seq, not the receipt's: the operator's next
     question is which entry, and pointing at a receipt index would send them to

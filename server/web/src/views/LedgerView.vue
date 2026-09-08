@@ -12,7 +12,7 @@
 
 import { computed, watch } from 'vue'
 import { useI18n } from '@/lib/i18n'
-import { api } from '@/lib/api'
+import { loadLedgerStatus } from '@/services/ledger'
 import { LEDGER_CONTRACTS } from '@/content'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { useChainDirectory } from '@/composables/useChainDirectory'
@@ -34,7 +34,7 @@ const chain = computed(() => directory.ids.value?.[0] ?? null)
 const status = useAsyncData(() => {
   const id = chain.value
   if (id === null) throw new Error('no chain')
-  return api.ledgerStatus(id)
+  return loadLedgerStatus(id)
 })
 
 watch(chain, (id) => {

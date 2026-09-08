@@ -114,41 +114,17 @@ from waxseal.domain.decision import (
     ModelRef,
 )
 from waxseal.domain.decision import to_payload as _decision_to_payload
+from waxseal.integrations import _sanitize as _sanitize_impl
 from waxseal.integrations._trail import home_default, resolve_trail
 
-# _sanitize redacts BEFORE clipping: a clip can split a secret across the
-# boundary (a PEM losing its END marker stops matching) and land it on disk.
-_REDACTOR = RegexRedactor()
+MAX_FIELD_CHARS = _sanitize_impl.MAX_FIELD_CHARS
+_sanitize = _sanitize_impl.sanitize
 
 PAYLOAD_TYPE = "application/vnd.waxseal.agt-event+json"
-
-# AGT audit data can carry arbitrary policy-rule context (regex sources,
-# matched content excerpts). Clip stored fields, visibly, because silent
-# truncation would read as "the full record".
-MAX_FIELD_CHARS = 4096
 
 #: Where this integration writes when the caller names no path and
 #: `WAXSEAL_TRAIL` is unset.
 DEFAULT_TRAIL = "~/.waxseal/agt-trail.jsonl"
-
-
-def _clip(text: str) -> str:
-    if len(text) <= MAX_FIELD_CHARS:
-        return text
-    return text[:MAX_FIELD_CHARS] + f"…[truncated {len(text) - MAX_FIELD_CHARS} chars]"
-
-
-def _sanitize(value: Any) -> Any:
-    """Keep the payload JSON-serializable and bounded whatever the entry holds."""
-    if value is None or isinstance(value, (int, float, bool)):
-        return value
-    if isinstance(value, str):
-        return _clip(_REDACTOR.redact_text(value))
-    if isinstance(value, dict):
-        return {str(k): _sanitize(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_sanitize(v) for v in value]
-    return _clip(_REDACTOR.redact_text(repr(value)))
 
 
 def _commitment(payload: dict[str, Any]) -> str:
@@ -311,9 +287,7 @@ class WaxsealAuditSink:
             # best-effort (FileDropRecorder.record() never raises).
             from waxseal.adapters.drops import FileDropRecorder
 
-            FileDropRecorder(self._trail).record(
-                reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-            )
+            FileDropRecorder(self._trail).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
             return None
         return self._log
 
@@ -330,9 +304,7 @@ class WaxsealAuditSink:
             )
             from waxseal.adapters.drops import FileDropRecorder
 
-            FileDropRecorder(self._trail).record(
-                reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-            )
+            FileDropRecorder(self._trail).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
             return
         log = self._open_log()
         if log is None:

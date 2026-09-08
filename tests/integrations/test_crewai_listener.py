@@ -98,10 +98,8 @@ def stub(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.SimpleNamespace]:
 
 
 def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
-    line = trail.read_text().splitlines()[line_no]
-    result: dict[str, Any] = json.loads(
-        base64.b64decode(json.loads(line)["payload_b64"])
-    )
+    line = trail.read_text(encoding="utf-8").splitlines()[line_no]
+    result: dict[str, Any] = json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
     return result
 
 
@@ -127,9 +125,14 @@ class TestRegistration:
         stub.module.WaxsealEventListener(tmp_path / "trail.jsonl")
         registered = {cls.__name__ for cls in stub.bus.handlers}
         assert registered == {
-            "ToolUsageStartedEvent", "ToolUsageFinishedEvent", "ToolUsageErrorEvent",
-            "TaskStartedEvent", "TaskCompletedEvent", "TaskFailedEvent",
-            "CrewKickoffStartedEvent", "CrewKickoffCompletedEvent",
+            "ToolUsageStartedEvent",
+            "ToolUsageFinishedEvent",
+            "ToolUsageErrorEvent",
+            "TaskStartedEvent",
+            "TaskCompletedEvent",
+            "TaskFailedEvent",
+            "CrewKickoffStartedEvent",
+            "CrewKickoffCompletedEvent",
             "CrewKickoffFailedEvent",
         }
 
@@ -144,10 +147,14 @@ class TestToolEvents:
         stub.bus.handlers[stub.events.ToolUsageFinishedEvent](
             "crew",
             stub.events.ToolUsageFinishedEvent(
-                tool_name="web_search", tool_args={"query": "waxseal"},
-                agent_role="Researcher", agent_id="agent-1",
-                task_id="task-1", task_name="research",
-                output="10 results", from_cache=False,
+                tool_name="web_search",
+                tool_args={"query": "waxseal"},
+                agent_role="Researcher",
+                agent_id="agent-1",
+                task_id="task-1",
+                task_name="research",
+                output="10 results",
+                from_cache=False,
             ),
         )
         result = AuditLog.open(trail).verify(measure_drops=False)
@@ -175,8 +182,12 @@ class TestToolEvents:
         stub.bus.handlers[stub.events.ToolUsageErrorEvent](
             "crew",
             stub.events.ToolUsageErrorEvent(
-                tool_name="web_search", tool_args={}, agent_role="Researcher",
-                agent_id="agent-1", task_id="task-1", task_name="research",
+                tool_name="web_search",
+                tool_args={},
+                agent_role="Researcher",
+                agent_id="agent-1",
+                task_id="task-1",
+                task_name="research",
                 error=TimeoutError("search timed out"),
             ),
         )
@@ -230,8 +241,13 @@ class TestRedactionAndClipping:
         stub.bus.handlers[stub.events.ToolUsageFinishedEvent](
             "crew",
             stub.events.ToolUsageFinishedEvent(
-                tool_name="t", tool_args={}, agent_role="r", agent_id="a",
-                task_id="t1", task_name="n", output="y" * 1_000_000,
+                tool_name="t",
+                tool_args={},
+                agent_role="r",
+                agent_id="a",
+                task_id="t1",
+                task_name="n",
+                output="y" * 1_000_000,
             ),
         )
         assert len(trail.read_bytes()) < 100_000
@@ -245,7 +261,7 @@ class TestNeverBlocksTheCrew:
         # The bus would swallow a raise, but that swallow is silent — the
         # listener must label the drop itself.
         blocked = tmp_path / "blocked"
-        blocked.write_text("a file where the trail dir should be")
+        blocked.write_text("a file where the trail dir should be", encoding="utf-8")
         stub.module.WaxsealEventListener(blocked / "trail.jsonl")
         stub.bus.handlers[stub.events.ToolUsageStartedEvent]("crew", tool_started(stub.events))
         assert "dropped" in capsys.readouterr().err
@@ -261,7 +277,8 @@ class TestNeverBlocksTheCrew:
         # yet, so it calls FileDropRecorder directly. tmp_path is writable,
         # so unlike the blocked-directory case above, the record must land.
         monkeypatch.setattr(
-            AuditLog, "open",
+            AuditLog,
+            "open",
             staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
         )
         trail = tmp_path / "trail.jsonl"
@@ -270,4 +287,4 @@ class TestNeverBlocksTheCrew:
         assert "dropped" in capsys.readouterr().err
         drops = tmp_path / "trail.jsonl.drops"
         assert drops.exists()
-        assert len(drops.read_text().splitlines()) == 1
+        assert len(drops.read_text(encoding="utf-8").splitlines()) == 1

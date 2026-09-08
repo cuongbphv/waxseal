@@ -1,0 +1,48 @@
+{{- /*
+Render-time refusals. This file emits no manifest; it exists so a values file
+cannot install a shape the deployment's security argument forbids.
+
+`helm install` is a deployment path like any other, and every check here has a
+counterpart somewhere else in the project that would otherwise be the only one:
+server/scripts/start-docker.sh refuses two identical API keys, and a Helm
+install must not be the way around it.
+*/ -}}
+
+{{- if and .Values.secrets.apiKey .Values.secrets.witnessApiKey }}
+{{- if eq .Values.secrets.apiKey .Values.secrets.witnessApiKey }}
+{{- fail "waxseal-server: WAXSEAL_API_KEY and WAXSEAL_WITNESS_API_KEY are set to the SAME value. Refused (REMOTE.md section 8): a witness holding the chain's write credential could append forged entries to the very chain it exists to cross-check. server/scripts/start-docker.sh refuses this at start-up and a Helm install is not a way around it. Set secrets.witnessApiKey to a different credential, or leave it empty and run no witness endpoint." }}
+{{- end }}
+{{- end }}
+
+{{- if ne (int .Values.replicaCount) 1 }}
+{{- fail "waxseal-server: replicaCount must be 1. A trail is a JSONL file guarded by a file lock, so exactly one writer may exist (CLAUDE.md rule 7). Two writers can both extend the same prev_hash, which forks the chain. Horizontal autoscaling is forbidden for this workload; there is no HPA in this chart." }}
+{{- end }}
+
+{{- if not (hasPrefix "/" .Values.persistence.mountPath) }}
+{{- fail "waxseal-server: persistence.mountPath must be an ABSOLUTE path (it is WAXSEAL_SERVER_DATA_DIR inside the container)." }}
+{{- end }}
+
+{{- if eq .Values.image.tag "latest" }}
+{{- fail "waxseal-server: image.tag must not be `latest`. An audit component whose version you cannot name from the manifest is one whose behaviour you cannot reproduce; pin a release tag or a digest." }}
+{{- end }}
+
+{{- if .Values.anchor.enabled }}
+{{- if hasPrefix "~" .Values.anchor.trailPath }}
+{{- fail "waxseal-server: anchor.trailPath starts with `~`. Nothing expands a tilde between a manifest and the process, so the value would name a directory literally called `~`. integrations/_trail.py refuses such a value out loud for exactly this reason. Use an absolute path." }}
+{{- end }}
+{{- if not (hasPrefix "/" .Values.anchor.trailPath) }}
+{{- fail "waxseal-server: anchor.trailPath must be an ABSOLUTE path inside the container, under persistence.mountPath." }}
+{{- end }}
+{{- if not (hasPrefix .Values.persistence.mountPath .Values.anchor.trailPath) }}
+{{- fail "waxseal-server: anchor.trailPath is not under persistence.mountPath, so the anchor CronJob would run against a path that is not on the trail volume — the `.anchors` sidecar is written BESIDE the trail and would land in the container's ephemeral filesystem." }}
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+{{- fail "waxseal-server: anchor.enabled requires persistence.enabled. There is no volume for the CronJob to mount, and an anchor sidecar on an emptyDir is deleted with the pod that wrote it." }}
+{{- end }}
+{{- if not (or .Values.anchor.tsaUrl .Values.anchor.otsCalendar .Values.anchor.witnessUrls) }}
+{{- fail "waxseal-server: anchor.enabled with no sink configured (tsaUrl, otsCalendar, witnessUrls all empty). `waxseal anchor` would write a local .anchors sidecar and publish nothing, which is an anchor in name only: a root the trail's writer can rewrite proves nothing (deployment.md section 5). Configure at least one sink under an authority that is NOT this one." }}
+{{- end }}
+{{- if eq .Values.anchor.image.tag "latest" }}
+{{- fail "waxseal-server: anchor.image.tag must not be `latest`." }}
+{{- end }}
+{{- end }}

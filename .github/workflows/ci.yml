@@ -14,9 +14,9 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # setup-uv stopped publishing moving major tags after v7 — pin the full version.
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: ${{ matrix.python-version }}
       # tests/domain/test_abi.py cross-checks the frozen ABI selectors against
@@ -27,7 +27,7 @@ jobs:
       # Installed on both matrix OSes for the same reason the job runs on both:
       # a claimed check nobody performs is the one thing this project must
       # never ship.
-      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with:
           version: "1.8.1"
       # CLAUDE.md: all green + coverage floor (100%) before any "done" claim.
@@ -53,6 +53,10 @@ jobs:
       - run: uv run --extra dev mypy --platform linux
       - run: uv run --extra dev mypy --platform linux tests/
       - run: uv run --extra dev ruff check .
+      # Formatting is a gate since 0.1.6: 207 files had drifted from `ruff
+      # format` with nothing to say so, and a hand-formatted file the next
+      # formatter run partly undoes is churn in every diff that touches it.
+      - run: uv run --extra dev ruff format --check .
       # CLAUDE.md: golden vectors are cross-checked by scripts that implement
       # SPEC.md prose directly instead of importing waxseal. A vector suite
       # only ever checked against the code it came from checks nothing.
@@ -89,8 +93,8 @@ jobs:
     env:
       WAXSEAL_TEST_DATABASE_URL: postgresql://waxseal:waxseal-dev@127.0.0.1:55432/waxseal
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
       # The load-bearing test in here runs the LIBRARY's own backend-conformance
@@ -103,6 +107,8 @@ jobs:
         working-directory: server
       - run: uv run mypy
         working-directory: server
+      - run: uv run ruff check . && uv run ruff format --check .
+        working-directory: server
 
   # The on-chain contracts (0.1.5, Workstream F2).
   # A separate application like server/: its own toolchain, never packaged into
@@ -110,11 +116,11 @@ jobs:
   contracts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
-      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with:
           version: "1.8.1"
       # The cross vectors are generated FROM the Python side, so they are
@@ -146,13 +152,395 @@ jobs:
   web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
-      - run: npm ci || npm install
+      - run: npm ci
+        working-directory: server/web
+      - run: npm run test
+        working-directory: server/web
+      - run: npm run lint
         working-directory: server/web
       - run: npx vue-tsc --noEmit
         working-directory: server/web
       - run: npm run build
         working-directory: server/web
+
+  # The CLI runtime image (deploy/docker/Dockerfile), exercised through the
+  # interface it actually presents: exit codes.
+  #
+  # docs/architecture/deployment.md §4 is titled "Exit codes are the interface",
+  # and it means it — an operator wires `verify` into a cron job or a CronJob
+  # and branches on 0/1/2/3, never on stdout. So a smoke test that only checks
+  # `--help` runs would pass over the one thing that has to be true. The four
+  # branches below are the whole contract (CLAUDE.md's CLI contract): 0 intact,
+  # 1 broken, 2 intact-but-unverifiable, 3 the path does not exist.
+  #
+  # The trail and the unknown-fingerprint row are built with the REPOSITORY's
+  # own mechanism, not a hand-rolled one: `AuditLog.append` writes the trail,
+  # and the unverifiable row is re-signed with `compute_entry_hash` over a
+  # header whose hash_version this build does not know — the same edit
+  # tests/test_cli_audit.py::make_unverifiable makes, on the LAST row so the
+  # chain stays linked.
+  #
+  # Every container runs --read-only. The image is supposed to write nothing
+  # outside /data and an operator-mounted pin path, and a claim like that is
+  # only worth making if something enforces it.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.13"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: build the CLI image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          load: true
+          tags: waxseal:ci
+          build-args: |
+            VERSION=ci
+            REVISION=${{ github.sha }}
+
+      # `exit-code: "0"` only silences FINDINGS. A vuln-DB download that is
+      # rate-limited would still fail the step, and this step sits before
+      # the exit-code contract checks below - so the scan itself is also
+      # advisory, or a scanner hiccup would hide the contract.
+      - name: trivy image waxseal:ci (advisory)
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        continue-on-error: true
+        with:
+          image-ref: waxseal:ci
+          exit-code: "0"
+          format: table
+
+      # The library, on the runner, only to WRITE the fixtures. The verdicts
+      # below all come from the image.
+      - run: uv sync --extra dev
+
+      - name: build the fixture trails
+        run: |
+          mkdir -p trails
+          uv run --extra dev python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from waxseal import AuditLog
+          from waxseal.domain.hashing import compute_entry_hash
+          from waxseal.domain.header import EntryHeader
+
+          PT = "application/vnd.test.event+json"
+
+
+          def build(path):
+              log = AuditLog.open(path)
+              for i in range(4):
+                  log.append(payload={"i": i}, payload_type=PT)
+
+
+          intact = Path("trails/intact.jsonl")
+          broken = Path("trails/broken.jsonl")
+          unverifiable = Path("trails/unverifiable.jsonl")
+          for p in (intact, broken, unverifiable):
+              build(p)
+
+          # A one-field edit to a header the chain covers. Same edit as
+          # tests/test_cli_audit.py::break_row.
+          lines = broken.read_text().splitlines()
+          obj = json.loads(lines[1])
+          obj["header"]["ts"] = "2027-01-01T00:00:00+00:00"
+          lines[1] = json.dumps(obj)
+          broken.write_text("\n".join(lines) + "\n")
+
+          # Re-signed under a fingerprint no descriptor in this build maps:
+          # the row's own hash is CORRECT, it just cannot be recomputed by
+          # name. That must read as unverifiable, never as tampered.
+          lines = unverifiable.read_text().splitlines()
+          obj = json.loads(lines[-1])
+          obj["header"]["hash_version"] = "e" * 64
+          obj["entry_hash"] = compute_entry_hash(EntryHeader(**obj["header"]))
+          lines[-1] = json.dumps(obj)
+          unverifiable.write_text("\n".join(lines) + "\n")
+          PY
+          chmod -R a+rX trails
+
+      - name: --help runs under --read-only
+        run: docker run --rm --read-only waxseal:ci --help
+
+      - name: exit 0 — an intact trail
+        run: |
+          docker run --rm --read-only -v "$PWD/trails:/data:ro" waxseal:ci \
+            verify /data/intact.jsonl
+          echo "exit 0 confirmed"
+
+      # `!` rather than `|| true`: the assertion is the EXACT code, because
+      # 1 and 2 are different verdicts and a test that accepts "nonzero" would
+      # pass while the library called an unverifiable row tampered.
+      - name: exit 1 — one edited byte
+        run: |
+          set +e
+          docker run --rm --read-only -v "$PWD/trails:/data:ro" waxseal:ci \
+            verify /data/broken.jsonl
+          rc=$?
+          set -e
+          echo "waxseal_exit=$rc"
+          test "$rc" -eq 1 || { echo "expected exit 1, got $rc"; exit 1; }
+
+      - name: exit 2 — a row under an unknown schema fingerprint
+        run: |
+          set +e
+          out=$(docker run --rm --read-only -v "$PWD/trails:/data:ro" waxseal:ci \
+            verify /data/unverifiable.jsonl 2>&1)
+          rc=$?
+          set -e
+          echo "$out"
+          echo "waxseal_exit=$rc"
+          test "$rc" -eq 2 || { echo "expected exit 2, got $rc"; exit 1; }
+          # The verdict must not be an accusation. This is the library's
+          # central promise and the reason exit 2 exists at all.
+          echo "$out" | grep -qi "unverifiable" \
+            || { echo "exit 2 without the word 'unverifiable' in the output"; exit 1; }
+
+      - name: exit 3 — the trail path does not exist
+        run: |
+          set +e
+          docker run --rm --read-only waxseal:ci verify /data/nope.jsonl
+          rc=$?
+          set -e
+          echo "waxseal_exit=$rc"
+          test "$rc" -eq 3 || { echo "expected exit 3, got $rc"; exit 1; }
+
+      # The default image must stay stdlib-only: the rfc3161 and s3 extras are
+      # opt-in build args, and an image that quietly carried cryptography or
+      # boto3 would no longer be the zero-dependency artifact the wheel is.
+      - name: the default image carries no optional dependency
+        run: |
+          docker run --rm --read-only --entrypoint python waxseal:ci -c "
+          import importlib.util, sys
+          leaked = [m for m in ('cryptography', 'boto3', 'psycopg')
+                    if importlib.util.find_spec(m) is not None]
+          if leaked:
+              sys.exit(f'default image carries optional deps: {leaked}')
+          print('stdlib-only: confirmed')
+          "
+
+      - name: it runs unprivileged, as uid 10001
+        run: |
+          uid=$(docker run --rm --read-only --entrypoint id waxseal:ci -u)
+          test "$uid" -eq 10001 || { echo "expected uid 10001, got $uid"; exit 1; }
+
+  # deploy/install.sh and the server's build scripts.
+  #
+  # The load-bearing case is the LAST one: a corrupted SHA256SUMS must make the
+  # installer refuse. An installer that downloads a file and runs it without
+  # checking is worse than no installer, because it looks like the careful
+  # option. So the refusal is asserted, not assumed — and asserted by breaking
+  # the digest on purpose, which is the only way to know the check is wired to
+  # anything.
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.13"
+
+      # One pinned shellcheck, by image digest, shared with `make
+      # install-sh-check`. ubuntu-latest ships 0.9.0, which reads
+      # `A && B || true` as SC2015 while 0.11.0 does not: the first run of the
+      # 0.1.6 release PR was checked locally with one and failed here on the
+      # other. `--shell=sh` on install.sh because it declares `#!/bin/sh` and
+      # must stay POSIX; -x follows `source` and -P SCRIPTDIR resolves the
+      # `# shellcheck source=` directives next to each script.
+      - name: shellcheck (pinned image)
+        run: |
+          set -eu
+          sc() { docker run --rm -v "$PWD:/mnt" \
+            koalaman/shellcheck@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d "$@"; }
+          sc --version | head -2
+          sc --shell=sh deploy/install.sh
+          sc -x -P SCRIPTDIR server/scripts/*.sh
+
+      - run: uv run --extra dev python tools/build_pyz.py
+      - name: publish digests the way the release does
+        run: |
+          cd dist
+          sha256sum waxseal-*.pyz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: offline install, then check the command answers
+        run: |
+          sh deploy/install.sh --method pyz --from-dir dist --prefix "$RUNNER_TEMP/w"
+          "$RUNNER_TEMP/w/bin/waxseal" --help > /dev/null
+          # Not just --help: the wrapper has to preserve the exit code, and
+          # `exec` is what makes that true. A wrapper that ran the pyz as a
+          # child and dropped $? would print a break and exit 0.
+          set +e
+          "$RUNNER_TEMP/w/bin/waxseal" verify "$RUNNER_TEMP/no-such-trail.jsonl"
+          rc=$?
+          set -e
+          test "$rc" -eq 3 || { echo "the wrapper lost the exit code: got $rc, want 3"; exit 1; }
+
+      - name: a corrupted SHA256SUMS must be refused
+        run: |
+          cp -r dist dist-bad
+          # One byte of the digest. The artifact itself is untouched, so the
+          # only thing that can catch this is the comparison.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("dist-bad/SHA256SUMS")
+          t = p.read_text()
+          p.write_text(("0" if t[0] != "0" else "1") + t[1:])
+          PY
+          set +e
+          sh deploy/install.sh --method pyz --from-dir dist-bad --prefix "$RUNNER_TEMP/bad"
+          rc=$?
+          set -e
+          test "$rc" -ne 0 || { echo "the installer accepted a mismatched digest"; exit 1; }
+          test ! -e "$RUNNER_TEMP/bad/bin/waxseal" \
+            || { echo "the installer refused but installed anyway"; exit 1; }
+          echo "refused a mismatched digest with exit $rc, and installed nothing"
+
+      - name: a missing SHA256SUMS must be refused too
+        run: |
+          cp -r dist dist-nosums
+          rm dist-nosums/SHA256SUMS
+          set +e
+          sh deploy/install.sh --method pyz --from-dir dist-nosums --prefix "$RUNNER_TEMP/nosums"
+          rc=$?
+          set -e
+          test "$rc" -ne 0 || { echo "the installer installed an artifact with no published digest"; exit 1; }
+          echo "refused an unlisted artifact with exit $rc"
+
+  # The two Helm charts (deploy/helm/). Neither `helm` nor `kubeconform` is
+  # installed on the development machines this project is written on, so this
+  # job is the ONLY place the charts are mechanically checked — which is
+  # exactly why it renders every value file rather than just linting.
+  #
+  # `helm lint` catches a chart that does not parse. It does not catch a
+  # manifest that parses and is invalid against the Kubernetes schema — a
+  # misspelled `readinessProbe` key, a `replicas` under the wrong parent — and
+  # a chart like that installs happily and silently drops the field. So the
+  # rendered output is validated with kubeconform in STRICT mode, which
+  # rejects unknown fields instead of ignoring them.
+  #
+  # Deliberately NOT a snapshot diff, yet. deploy/helm/tests/snapshots/ was
+  # written by hand, without helm available to produce the real output, so a
+  # byte-for-byte comparison would fail on whitespace and key ordering that
+  # nobody got wrong — and a gate that fails for a reason nobody believes is a
+  # gate people learn to force past. Render-and-validate is the honest gate
+  # today. Promoting the snapshots to a hard diff means regenerating them from
+  # a real `helm template` run first, in a change that says so; until then the
+  # snapshot is a reference an author reads, not a check CI enforces, and this
+  # comment is here so the gap is visible rather than inferred from its
+  # absence.
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - name: install kubeconform
+        run: |
+          version=0.6.7
+          curl -fsSL --proto '=https' --tlsv1.2 \
+            "https://github.com/yannh/kubeconform/releases/download/v${version}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin kubeconform
+          kubeconform -v
+
+      - name: helm lint
+        run: |
+          helm lint deploy/helm/waxseal-server
+          helm lint deploy/helm/waxseal-verifier
+
+      # The chart each value file belongs to is its filename prefix:
+      # server-*.yaml -> waxseal-server, verifier*.yaml -> waxseal-verifier.
+      # Named per pair rather than discovered, so a new value file that nobody
+      # wired up is a visible omission here instead of a silently unrendered
+      # file.
+      #
+      # -strict rejects unknown fields; --summary prints what was actually
+      # checked, so a run that validated zero manifests cannot read as green.
+      # -n=0 (no schema found) is NOT allowed to pass: kubeconform's default
+      # for a kind it has no schema for is to skip it, and a skipped manifest
+      # counted as valid is the same "unmeasured rendered as clean" collapse
+      # this project refuses everywhere else. `--strict` plus
+      # `-schema-location default` keeps that explicit.
+      - name: helm template + kubeconform (strict)
+        run: |
+          set -eu
+          render() {
+            chart="$1"; values="$2"
+            echo "==> $chart <- $(basename "$values")"
+            out=$(mktemp)
+            helm template ci "deploy/helm/$chart" -f "$values" > "$out"
+            test -s "$out" || { echo "rendered nothing"; exit 1; }
+            grep -q '^kind:' "$out" || { echo "rendered no manifests"; exit 1; }
+            kubeconform \
+              -strict \
+              -summary \
+              -schema-location default \
+              "$out"
+          }
+          render waxseal-server   deploy/helm/tests/values/server-minimal.yaml
+          render waxseal-server   deploy/helm/tests/values/server-full.yaml
+          render waxseal-server   deploy/helm/tests/values/server-digest.yaml
+          render waxseal-verifier deploy/helm/tests/values/verifier.yaml
+          render waxseal-verifier deploy/helm/tests/values/verifier-digest.yaml
+
+      # Every value file must be rendered by the step above. A file added to
+      # deploy/helm/tests/values/ and forgotten would otherwise be a test case
+      # that exists and never runs.
+      - name: no value file is left unrendered
+        run: |
+          set -eu
+          expected="server-digest.yaml server-full.yaml server-minimal.yaml verifier-digest.yaml verifier.yaml"
+          actual=$(cd deploy/helm/tests/values && ls -1 *.yaml | sort | tr '\n' ' ')
+          expected=$(printf '%s\n' $expected | sort | tr '\n' ' ')
+          test "$actual" = "$expected" || {
+            echo "deploy/helm/tests/values/ changed and the render step above was not updated."
+            echo "  rendered: $expected"
+            echo "  on disk:  $actual"
+            exit 1
+          }
+          echo "all value files are rendered: $actual"
+
+  # Advisory dependency audit (0.1.6 S3). Findings are labelled, never a
+  # silent 0 and never a merge gate until the owner decides they should be.
+  # Close bar is this file plus the local commands below, not this job going
+  # green on GitHub.
+  #
+  # Local:
+  #   uvx pip-audit
+  #   (cd server && uvx pip-audit)
+  #   (cd server/web && npm audit --audit-level=high)
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: pip-audit library
+        run: uvx pip-audit
+      - name: pip-audit server
+        run: uvx pip-audit
+        working-directory: server
+      - name: npm audit web
+        working-directory: server/web
+        run: |
+          npm ci
+          npm audit --audit-level=high
+      # The container scan lives in job `image`, next to the only image
+      # that exists in CI. It used to be duplicated here behind an
+      # `image inspect` guard that could never succeed (this job builds
+      # nothing), so every run installed a scanner to print UNMEASURED.
+

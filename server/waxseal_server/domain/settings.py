@@ -115,9 +115,7 @@ def spec_for(key: str) -> SettingSpec:
     collapsing them would make the deliberate refusal look like a gap.
     """
     if key in FORBIDDEN:
-        raise NoSuchSetting(
-            f"{key!r} is environment-only ({FORBIDDEN[key]}) and cannot be stored"
-        )
+        raise NoSuchSetting(f"{key!r} is environment-only ({FORBIDDEN[key]}) and cannot be stored")
     spec = BY_KEY.get(key)
     if spec is None:
         raise NoSuchSetting(f"no such setting {key!r}; known: {sorted(BY_KEY)}")

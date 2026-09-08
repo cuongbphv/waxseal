@@ -19,7 +19,7 @@ does and does not buy: [`docs/deployment.md`](docs/deployment.md).
 
 Layered the way the library it serves is layered (CLAUDE.md's architecture
 section), with a one-way dependency arrow and a test that enforces it
-(`tests/test_architecture.py`, which carries its own falsifiability receipt —
+(`tests/test_architecture.py`, which carries its own falsifiability receipt -
 add a forbidden import and it goes red):
 
 ```
@@ -29,7 +29,7 @@ waxseal_server/
     views.py   response bodies shared by the credentialed and public surfaces
   runtime/     adapters to things outside the process: the waxseal CLI, the
                built web bundle, reading a trail for display
-  storage/     persistence — files and locks, no knowledge of requests
+  storage/     persistence - files and locks, no knowledge of requests
   domain/      pure logic: envelope and checkpoint parsing, identifier shapes,
                the receipt chain, the result types. No I/O at all.
   config.py    settings, read from the environment and passed down explicitly
@@ -40,7 +40,7 @@ waxseal_server/
 Two properties this buys, both checked rather than asserted: `domain/` imports
 nothing that touches a filesystem, so the rules are testable without standing a
 server up; and each credential guard is built from one key and handed to one
-router, so the witness router cannot consult the chain key — it never receives
+router, so the witness router cannot consult the chain key - it never receives
 it.
 
 ## Design in one paragraph
@@ -71,6 +71,6 @@ with, that is the claim worth making.
 ## Web UI
 
 Vue 3 + Vite, in `web/`. `npm run build` writes into `waxseal_server/static` and
-the server picks it up on the next start. The API runs fine without it — `/`
+the server picks it up on the next start. The API runs fine without it - `/`
 then serves a page saying the UI was not built, and `GET /v1/meta` reports
 `"web_ui": "not_built"`.

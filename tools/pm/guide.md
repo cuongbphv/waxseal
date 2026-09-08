@@ -18,13 +18,13 @@ tells you where you stand and when it will land. Then you write the next spec an
                 │
                 ▼
         bead-pm-loop ─────────► gates, then one round of work
-           │      │              (bead-loop → bead-take, or bead-fleet)
+           │      │              (bead-loop -> bead-take, or bead-fleet)
            │      └───────────► bead-report    where we stand
            │                    bead-forecast  when it lands
            ▼
         bead-audit ───────────► is "done" actually done?
                 │
-                └─────────────► new work found → back to bead-split
+                └─────────────► new work found -> back to bead-split
 ```
 
 Every skill in that diagram is named the same way on every harness. In Claude Code and Cursor
@@ -47,17 +47,17 @@ bin/bd-kit doctor  --into ~/Projects/my-project   # again: should end in 0 failu
 ```
 
 `install` refuses to write anything if `bd` is not on PATH or the project has no `.beads`
-directory — installing skills into a repo that cannot run them just leaves instructions nobody
+directory - installing skills into a repo that cannot run them just leaves instructions nobody
 can follow. It prints the install commands and `bd init` instead. `--force` overrides that if you
 know what you are doing.
 
 Two of the installed files matter enough to know by name. `.beads/PRIME.md` overrides `bd prime`,
 which is what carries the label and size conventions into every session on every harness whether
-or not a skill happens to be loaded. `scripts/pm/board.py` is where the numbers come from — both
+or not a skill happens to be loaded. `scripts/pm/board.py` is where the numbers come from - both
 `bead-report` and `bead-forecast` call it, which is the only reason they cannot disagree with each
 other.
 
-## 1. Fill the board — `bead-split`
+## 1. Fill the board - `bead-split`
 
 You have a spec, a roadmap, or a plan sitting in a markdown file. This turns it into one epic plus
 its children, and classifies each child by whether an agent can finish it.
@@ -78,13 +78,13 @@ on:
 | Label | What it means | What an agent may do |
 |---|---|---|
 | `auto-ok` | everything needed to close it is code and tests in this repo | all of it, including closing the bead |
-| `auto-partial` | the code is doable here, but closing needs something outside — real CI, a real environment | write the code, then stop and leave a note; **not** close it |
+| `auto-partial` | the code is doable here, but closing needs something outside - real CI, a real environment | write the code, then stop and leave a note; **not** close it |
 | `needs-human` | closing needs a person: credentials, a cost, a third party, a decision | leave it alone |
 
-Anything that cannot be measured is `needs-human`. Never guess a label from a title — an
+Anything that cannot be measured is `needs-human`. Never guess a label from a title - an
 unmeasured bead is not a small bead.
 
-## 2. Make it measurable — `bead-estimate`
+## 2. Make it measurable - `bead-estimate`
 
 A bead with no size is invisible to every later number. This is the step that stops your progress
 report from being a lie of omission.
@@ -102,7 +102,7 @@ Sizes are points, stored as a label so you can see them on the board, and mirror
 `size:XS` 0.5 pt · `size:S` 1 pt · `size:M` 3 pt · `size:L` 8 pt · `size:XL` 13 pt
 
 `size:L` is the largest thing anyone may claim. `size:XL` is not an estimate, it is a note saying
-nobody has understood this work yet — the skill refuses to make it claimable and tells you to split
+nobody has understood this work yet - the skill refuses to make it claimable and tells you to split
 it. Epics are never sized directly; an epic's size is the sum of its children. That is partly a
 principle and partly self-defence: `bd` copies a parent's labels onto new children, so one size
 label on an epic would quietly corrupt every rollup underneath it.
@@ -128,7 +128,7 @@ that matched on nothing but issue type. A reference class of coincidences is wor
 there is none, so there is now a similarity floor and a plausibility floor, and the tool says "no
 usable reference class" instead of inventing one.
 
-## 3. Do the work — `bead-pm-loop`
+## 3. Do the work - `bead-pm-loop`
 
 This is the round you actually run, over and over.
 
@@ -139,14 +139,14 @@ This is the round you actually run, over and over.
 /bead-pm-loop --report-every 3     # report every third round instead of every fifth
 ```
 
-It does not decide which bead is next — `bead-loop` does that, and `bead-take` does the work in a
+It does not decide which bead is next - `bead-loop` does that, and `bead-take` does the work in a
 dedicated git worktree. What `bead-pm-loop` adds is everything a board needs to stay manageable
 across many rounds, and it checks all of it before each round:
 
 - **WIP limit.** One in-progress bead per assignee. Over the limit, finish what is in flight
   instead of claiming more to look busy.
 - **Estimate before claim.** The candidate needs exactly one size label, `size:L` or smaller. No
-  size means it gets sized inside this round rather than skipped — sizing costs minutes, and
+  size means it gets sized inside this round rather than skipped - sizing costs minutes, and
   skipping it costs every forecast afterwards.
 - **Staleness.** Anything untouched for seven days, or in progress for three, gets listed with its
   assignee. It is never silently reassigned.
@@ -163,7 +163,7 @@ You can run the pieces directly when you want to. `/bead-take <id>` for one spec
 worktree, verifies what each agent claims rather than believing it, then rebases and fast-forwards
 them in one at a time.
 
-## 4. See where you stand — `bead-report`
+## 4. See where you stand - `bead-report`
 
 ```
 /bead-report                        # the whole board
@@ -173,14 +173,14 @@ python3 scripts/pm/board.py report   # the same thing, straight from the module
 
 Six sections, always in the same order, so this week's report can be compared with last week's:
 board counts, completion, flow, velocity, risks, next actions. A section with nothing to say prints
-`— none` rather than disappearing.
+`- none` rather than disappearing.
 
 The parts worth reading closely:
 
 **Completion has two numbers and a coverage figure.** By count and by points, and then how many of
 your open beads are actually sized. When coverage is under 60% the report says outright that the
 points figure describes finished work and says almost nothing about what is left. On the first
-board this ran against it read *100% by points* with zero of seventeen open beads sized — true, and
+board this ran against it read *100% by points* with zero of seventeen open beads sized - true, and
 useless without the caveat next to it.
 
 **Blocked work is grouped by what is actually blocking it.** "5 blocked" is not something you can
@@ -193,7 +193,7 @@ pessimistic date named as the one to plan on. Fewer than two and there is no dat
 it would take to earn one. This exists because the first run produced 5.86 points a day out of
 three closed beads, which is nonsense with a decimal point on it.
 
-## 5. See when it lands — `bead-forecast`
+## 5. See when it lands - `bead-forecast`
 
 ```
 /bead-forecast                          # every epic
@@ -201,7 +201,7 @@ three closed beads, which is nonsense with a decimal point on it.
 /bead-forecast --apply                  # record the snapshot on the epic
 ```
 
-Three dates per epic — optimistic, likely, pessimistic — and then, always, the list of what makes
+Three dates per epic - optimistic, likely, pessimistic - and then, always, the list of what makes
 the bands that wide: unsized beads missing from the remaining total, blocked chains and which bead
 the dates assume moves first, `needs-human` work that no agent velocity applies to, and whether the
 duration basis includes time beads spent sitting in the backlog. A forecast without that list is a
@@ -209,12 +209,12 @@ number pretending to be a plan.
 
 With `--apply` it writes the snapshot to the epic as metadata plus a note, and that is the only
 thing this skill writes. The point of recording it is the next run: `forecast` starts by scoring
-its own last prediction — how many points moved, whether the epic is on track against the likely
+its own last prediction - how many points moved, whether the epic is on track against the likely
 date or past the pessimistic one and by how many days, and whether velocity jumped by more than
 double. The arithmetic can tell you a date slipped. Only you can say which of the listed reasons
 turned out to be the one that mattered, and that sentence is the whole value of the exercise.
 
-## 6. Check the claims — `bead-audit`
+## 6. Check the claims - `bead-audit`
 
 ```
 /bead-audit                          # the whole board
@@ -223,7 +223,7 @@ turned out to be the one that mattered, and that sentence is the whole value of 
 ```
 
 Use this when "already done" has started to feel optimistic. It fans out read-only agents to
-re-measure, each returning DONE, NOT DONE or PARTIAL with concrete evidence — a file and line, the
+re-measure, each returning DONE, NOT DONE or PARTIAL with concrete evidence - a file and line, the
 command it ran, the exit code it got. Missing evidence counts as NOT DONE. Testimony counts as
 PARTIAL.
 
@@ -253,7 +253,7 @@ support, which is the only reason to trust the answers it does give.
 
 | Skill | For | Writes to the board? |
 |---|---|---|
-| `bead-split` | markdown spec → epic + sized, classified children | only with `--apply` |
+| `bead-split` | markdown spec -> epic + sized, classified children | only with `--apply` |
 | `bead-estimate` | size beads from measured history | a single id yes; `--backfill` and `--epic` only with `--apply` |
 | `bead-take` | one bead, one worktree, closed with evidence | yes |
 | `bead-loop` | one ready bead per round | yes |
@@ -284,7 +284,7 @@ bin/bd-kit install --into ../my-project
 ```
 
 `docs/authoring.md` covers the token vocabulary and per-surface fields. `docs/transforms.md` lists
-every way the three surfaces differ — if a difference is not on that list, the surfaces do not
+every way the three surfaces differ - if a difference is not on that list, the surfaces do not
 differ that way and anything you find in an installed copy is drift.
 
 ## What has actually been run
@@ -294,7 +294,7 @@ Worth being straight about, since a guide that overstates its own testing is wor
 Measured against a live 75-bead board while this kit was written: `board.py report`, `forecast` and
 `refclass` in every mode, a real `pm.forecast` snapshot written and read back through the
 calibration path, and `bd-kit install`, `diff`, `doctor` and `uninstall`. The three refusals
-described above — the velocity regimes, the coverage caveat, the reference-class floors — exist
+described above - the velocity regimes, the coverage caveat, the reference-class floors - exist
 because that board produced a wrong confident answer first, and each one is covered by a test
 against a fixture that reproduces the case.
 

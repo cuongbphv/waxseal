@@ -152,8 +152,7 @@ def response(
         + _tlv(0x31, _tlv(0x30, _der_oid(SHA256_OID) + _tlv(0x05, b"")))
         + _tlv(
             0x30,
-            _der_oid(OID_TSTINFO)
-            + _tlv(0xA0, _tlv(0x04, tst) if econtent is None else econtent),
+            _der_oid(OID_TSTINFO) + _tlv(0xA0, _tlv(0x04, tst) if econtent is None else econtent),
         )
         + (_tlv(0xA0, der_certs) if der_certs else b"")
         + extra
@@ -191,9 +190,7 @@ def signed_token(
         signature = key.sign(signed_bytes, ec.ECDSA(hashes.SHA256()))
     return response(
         tst=tst,
-        signer_infos=signer_info(
-            cert=cert, attrs=attrs, signature=signature, **signer_info_kwargs
-        ),
+        signer_infos=signer_info(cert=cert, attrs=attrs, signature=signature, **signer_info_kwargs),
         certs=list(certs) if certs is not None else [cert],
         raw_certs=raw_certs,
         extra=extra,
@@ -218,9 +215,7 @@ def tsa(tmp_path: Path) -> tuple[bytes, Path]:
 
 
 class TestValid:
-    def test_a_token_signed_by_the_named_anchor_is_valid(
-        self, tsa: tuple[bytes, Path]
-    ) -> None:
+    def test_a_token_signed_by_the_named_anchor_is_valid(self, tsa: tuple[bytes, Path]) -> None:
         der, ca_file = tsa
         check = verify_token_signature(der, ca_file=ca_file)
         assert check.state == SIGNATURE_VALID
@@ -237,9 +232,7 @@ class TestValid:
         assert "revocation" in label
         assert "NOT checked" in label
 
-    def test_a_chain_through_an_intermediate_carried_in_the_token(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_chain_through_an_intermediate_carried_in_the_token(self, tmp_path: Path) -> None:
         root_key, root_cert = issue("root", ca=True)
         mid_key, mid_cert = issue(
             "intermediate", issuer_key=root_key, issuer_name=root_cert.subject, ca=True
@@ -284,9 +277,7 @@ class TestInvalid:
         assert check.state == SIGNATURE_INVALID
         assert "chain" in check.label
 
-    def test_a_chain_that_runs_out_of_issuers_short_of_the_bundle(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_chain_that_runs_out_of_issuers_short_of_the_bundle(self, tmp_path: Path) -> None:
         root_key, root_cert = issue("root", ca=True)
         mid_key, mid_cert = issue(
             "intermediate", issuer_key=root_key, issuer_name=root_cert.subject, ca=True
@@ -489,9 +480,7 @@ class TestShapesTheParserMustSurvive:
         check = verify_token_signature(der, ca_file=ca_bundle(tmp_path, ca_cert))
         assert check.state == SIGNATURE_VALID
 
-    def test_a_crls_element_beside_the_certificates_is_stepped_over(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_crls_element_beside_the_certificates_is_stepped_over(self, tmp_path: Path) -> None:
         ca_key, ca_cert = issue("root", ca=True)
         leaf_key, leaf_cert = issue("tsa", issuer_key=ca_key, issuer_name=ca_cert.subject)
         # crls [1] IMPLICIT is optional and legal; a parser that assumed the
@@ -504,14 +493,10 @@ class TestShapesTheParserMustSurvive:
 
     def test_an_econtent_that_is_not_an_octet_string(self, tsa: tuple[bytes, Path]) -> None:
         _, ca_file = tsa
-        der = response(
-            tst=tst_info(MESSAGE), signer_infos=b"", econtent=_tlv(0x30, b"")
-        )
+        der = response(tst=tst_info(MESSAGE), signer_infos=b"", econtent=_tlv(0x30, b""))
         assert verify_token_signature(der, ca_file=ca_file).state == SIGNATURE_UNCHECKED
 
-    def test_a_message_digest_attribute_that_is_not_an_octet_string(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_message_digest_attribute_that_is_not_an_octet_string(self, tmp_path: Path) -> None:
         ca_key, ca_cert = issue("root", ca=True)
         leaf_key, leaf_cert = issue("tsa", issuer_key=ca_key, issuer_name=ca_cert.subject)
         attrs = _tlv(0x30, _der_oid(OID_CONTENT_TYPE) + _tlv(0x31, _der_oid(OID_TSTINFO))) + _tlv(

@@ -45,7 +45,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def run_verify(trail: Path) -> tuple[int, str]:
     proc = subprocess.run(
         [sys.executable, "-m", "waxseal.cli", "verify", str(trail)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return proc.returncode, proc.stdout.strip()
 
@@ -86,14 +87,19 @@ def main() -> int:
         for line in trail.read_text().splitlines()
     ]
     phases = [p["phase"] for p in decoded_lines]
-    check("dispatch + result recorded for successful runs",
-          phases.count("dispatch") == 3 and phases.count("result") == 2, str(phases))
+    check(
+        "dispatch + result recorded for successful runs",
+        phases.count("dispatch") == 3 and phases.count("result") == 2,
+        str(phases),
+    )
     check("tool failure recorded via on_tool_error", "error" in phases)
 
     print("\nScenario 5 — secret in tool input never reaches disk")
     decoded = json.dumps(decoded_lines).encode()
-    check("GitHub token absent from decoded payloads",
-          b"ghp_16C7e42F292c6912E7710c838347Ae178B4a" not in decoded)
+    check(
+        "GitHub token absent from decoded payloads",
+        b"ghp_16C7e42F292c6912E7710c838347Ae178B4a" not in decoded,
+    )
     check("redaction marker present in decoded payloads", b"***REDACTED***" in decoded)
 
     print("\nScenario 2 — attacker rewrites a past action")
@@ -104,7 +110,7 @@ def main() -> int:
     payload["input_str"] = "{'command': 'ls'}"  # hide what really ran
     obj["payload_b64"] = base64.b64encode(json.dumps(payload).encode()).decode()
     tampered = tmp / "tampered.jsonl"
-    tampered.write_text("\n".join(lines[:idx] + [json.dumps(obj)] + lines[idx + 1:]) + "\n")
+    tampered.write_text("\n".join(lines[:idx] + [json.dumps(obj)] + lines[idx + 1 :]) + "\n")
     code, out = run_verify(tampered)
     check("edit detected (exit 1)", code == 1, out)
     check(f"break located at seq={idx}", f"seq={idx}" in out)
@@ -132,15 +138,28 @@ def main() -> int:
         prev_hash=last["entry_hash"],
     )
     future = tmp / "future.jsonl"
-    future.write_text("\n".join(lines + [json.dumps({
-        "header": {
-            "seq": header.seq, "ts": header.ts, "hash_version": header.hash_version,
-            "payload_type": header.payload_type, "payload_hash": header.payload_hash,
-            "prev_hash": header.prev_hash,
-        },
-        "entry_hash": compute_entry_hash(header),
-        "payload_b64": base64.b64encode(new_payload).decode(),
-    })]) + "\n")
+    future.write_text(
+        "\n".join(
+            lines
+            + [
+                json.dumps(
+                    {
+                        "header": {
+                            "seq": header.seq,
+                            "ts": header.ts,
+                            "hash_version": header.hash_version,
+                            "payload_type": header.payload_type,
+                            "payload_hash": header.payload_hash,
+                            "prev_hash": header.prev_hash,
+                        },
+                        "entry_hash": compute_entry_hash(header),
+                        "payload_b64": base64.b64encode(new_payload).decode(),
+                    }
+                )
+            ]
+        )
+        + "\n"
+    )
     code, out = run_verify(future)
     check("unknown schema -> exit 2, not broken", code == 2, out)
     check("reported unverifiable, NOT tampering", "NOT evidence of tampering" in out)

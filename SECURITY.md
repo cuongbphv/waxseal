@@ -30,10 +30,10 @@ waxseal is a tamper-evidence library, so the bar is specific:
   before *t*).
 - A scoped tamper-proof claim failing inside its stated scope (DESIGN.md §11):
   `verify` reporting intact while a recorded per-append receipt (SPEC §19),
-  anchor, or pin contradicts the trail — a false negative against recorded
+  anchor, or pin contradicts the trail - a false negative against recorded
   corroboration.
 
 Out of scope: attacks requiring write access inside the window the
 documentation already declares undetectable-by-design (everything since the
-last external reference point — anchor, acknowledged receipt, or witnessed
+last external reference point - anchor, acknowledged receipt, or witnessed
 checkpoint), and false *positives* (those are bugs, report them as issues).

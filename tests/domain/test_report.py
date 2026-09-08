@@ -28,6 +28,10 @@ from waxseal.domain.decision import (
 from waxseal.domain.fingerprint import fingerprint
 from waxseal.domain.hashing import compute_entry_hash
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
+from waxseal.domain.incident import INCIDENT_PAYLOAD_TYPE, IncidentRecord
+from waxseal.domain.incident import to_payload as incident_to_payload
+from waxseal.domain.intervention import INTERVENTION_PAYLOAD_TYPE, InterventionRecord
+from waxseal.domain.intervention import to_payload as intervention_to_payload
 from waxseal.domain.report import AuditReport, CheckSummary, build_report
 from waxseal.domain.separation import SeparationTopology
 from waxseal.domain.witnessing import (
@@ -229,9 +233,7 @@ class TestCompleteness:
         assert report.drops_source is None
 
     def test_measured_zero_is_distinct_from_unmeasured(self) -> None:
-        report = build_report(
-            replace(OK, dropped_writes=0, drops_source="sidecar"), []
-        )
+        report = build_report(replace(OK, dropped_writes=0, drops_source="sidecar"), [])
         assert report.dropped_writes == 0
         assert report.drops_source == "sidecar"
 
@@ -326,9 +328,7 @@ class TestJsonRendering:
         topology = SeparationTopology(
             seal_escrow=False, anchor_sinks=1, witness=False, pin_separate=True
         )
-        obj = json.loads(
-            build_report(OK, [], declared_topology=topology).to_json()
-        )
+        obj = json.loads(build_report(OK, [], declared_topology=topology).to_json())
         assert obj["separation"]["tau"] == 3
         assert obj["separation"]["counted_authorities"] == [
             {"name": "writer", "count": 1},
@@ -344,8 +344,12 @@ class TestMarkdownRendering:
 
     def test_broken_trail_names_the_row_and_the_reason(self) -> None:
         verdict = VerifyResult(
-            ok=False, checked=1, broken_seq=4, reason="entry_hash_mismatch",
-            unverifiable=(), dropped_writes=None,
+            ok=False,
+            checked=1,
+            broken_seq=4,
+            reason="entry_hash_mismatch",
+            unverifiable=(),
+            dropped_writes=None,
         )
         md = build_report(verdict, []).to_markdown()
         assert "4" in md and "entry_hash_mismatch" in md
@@ -505,9 +509,7 @@ class TestWitnessRendering:
         md = build_report(
             OK,
             [],
-            witnesses=(
-                self.verdict(status=WITNESS_UNREACHABLE, checked=0, reason="timed out"),
-            ),
+            witnesses=(self.verdict(status=WITNESS_UNREACHABLE, checked=0, reason="timed out"),),
         ).to_markdown()
         assert "**unreachable**" in md
         assert "not a pass" in md
@@ -550,3 +552,265 @@ class TestUnverifiableSidecarRendering:
         assert "**unverifiable**" in md
         assert "NOT evidence of tampering" in md
         assert "BROKEN" not in md
+
+
+# ============================================================ E3: declared
+# risk tiers, incident records, human-intervention records.
+#
+# Three counts and three third states. A declared tier is the provider's own
+# classification under the Law on AI (Điều 10(1)) and is counted verbatim;
+# "no tier declared" is counted apart from every tier for the same reason
+# `oversight_unrecorded` is counted apart from every mode. `incidents_total`
+# and `interventions_total` carry `None` for "this family was never scanned",
+# which a report read back from an older JSON can be, and which is not the
+# measured zero a scanned-and-empty trail reports.
+
+
+def incident_bytes(**overrides: object) -> bytes:
+    base: dict[str, object] = {
+        "incident_id": "inc-1",
+        "system_id": "agent",
+        "detected_at": "2026-09-01T08:00:00+00:00",
+        "severity": "nghiêm trọng",
+    }
+    base.update(overrides)
+    return json.dumps(incident_to_payload(IncidentRecord(**base))).encode()  # type: ignore[arg-type]
+
+
+def intervention_bytes(**overrides: object) -> bytes:
+    base: dict[str, object] = {
+        "intervention_id": "iv-1",
+        "system_id": "agent",
+        "actor_ref": "queue-7",
+        "action": "override",
+    }
+    base.update(overrides)
+    return json.dumps(
+        intervention_to_payload(InterventionRecord(**base))  # type: ignore[arg-type]
+    ).encode()
+
+
+# Words that assert a finding about a legal obligation rather than a reading
+# of this trail. Matched on WORD boundaries, not as substrings: the renderer
+# legitimately says "the latest row", and a substring search for "late"
+# condemns it. Held as a test in the manner test_cli_preflight.py holds the
+# absence of an unscoped "tamper-proof".
+_FORBIDDEN = ("unreported", "missed", "late", "breach", "violation")
+
+
+def _forbidden_words(text: str) -> list[str]:
+    import re
+
+    return [w for w in _FORBIDDEN if re.search(rf"\b{w}\b", text, re.IGNORECASE)]
+
+
+class TestDeclaredRiskTierSummary:
+    def test_declared_tiers_are_counted_verbatim(self) -> None:
+        # "cao" and "high" are two declarations, not one translated twice.
+        # Folding them would be this build restating a classification the
+        # statute assigns to the provider.
+        entries = chain(
+            entry(0, decision_bytes(risk_tier="high"), DECISION_PAYLOAD_TYPE),
+            entry(1, decision_bytes(risk_tier="cao"), DECISION_PAYLOAD_TYPE),
+            entry(2, decision_bytes(risk_tier="high"), DECISION_PAYLOAD_TYPE),
+        )
+        report = build_report(replace(OK, checked=3), entries)
+        assert dict(report.by_risk_tier) == {"high": 2, "cao": 1}
+        assert report.risk_tier_unrecorded == 0
+
+    def test_an_undeclared_tier_is_counted_apart_from_every_tier(self) -> None:
+        entries = chain(
+            entry(0, decision_bytes(risk_tier="high"), DECISION_PAYLOAD_TYPE),
+            entry(1, decision_bytes(), DECISION_PAYLOAD_TYPE),
+        )
+        report = build_report(replace(OK, checked=2), entries)
+        assert report.risk_tier_unrecorded == 1
+        assert dict(report.by_risk_tier) == {"high": 1}
+
+    def test_a_tier_literally_named_unrecorded_is_not_folded_into_that_count(self) -> None:
+        # An institution may legitimately name a tier "unrecorded". The same
+        # trap `oversight_unrecorded` avoids: a recorded declaration must
+        # never become indistinguishable from the absence of one.
+        entries = chain(entry(0, decision_bytes(risk_tier="unrecorded"), DECISION_PAYLOAD_TYPE))
+        report = build_report(replace(OK, checked=1), entries)
+        assert dict(report.by_risk_tier) == {"unrecorded": 1}
+        assert report.risk_tier_unrecorded == 0
+
+
+class TestIncidentSummary:
+    def test_a_scanned_trail_with_no_incidents_reports_zero_not_none(self) -> None:
+        report = build_report(OK, [])
+        assert report.incidents_total == 0
+        assert report.incidents_no_report_recorded == 0
+
+    def test_rows_restating_one_incident_fold_to_one(self) -> None:
+        entries = chain(
+            entry(0, incident_bytes(), INCIDENT_PAYLOAD_TYPE),
+            entry(1, incident_bytes(report_ref="AI-2026-1"), INCIDENT_PAYLOAD_TYPE),
+        )
+        report = build_report(replace(OK, checked=2), entries)
+        assert report.incidents_total == 1
+        # The latest row records a submission, so the earlier silence is history.
+        assert report.incidents_no_report_recorded == 0
+
+    def test_no_submission_recorded_is_counted_from_the_latest_row(self) -> None:
+        entries = chain(
+            entry(0, incident_bytes(incident_id="a", report_ref="AI-1"), INCIDENT_PAYLOAD_TYPE),
+            entry(1, incident_bytes(incident_id="b"), INCIDENT_PAYLOAD_TYPE),
+        )
+        report = build_report(replace(OK, checked=2), entries)
+        assert report.incidents_total == 2
+        assert report.incidents_no_report_recorded == 1
+
+    def test_declared_severities_are_counted_verbatim(self) -> None:
+        entries = chain(
+            entry(0, incident_bytes(incident_id="a", severity="S1"), INCIDENT_PAYLOAD_TYPE),
+            entry(1, incident_bytes(incident_id="b", severity="S1"), INCIDENT_PAYLOAD_TYPE),
+            entry(2, incident_bytes(incident_id="c", severity="S2"), INCIDENT_PAYLOAD_TYPE),
+        )
+        report = build_report(replace(OK, checked=3), entries)
+        assert dict(report.by_incident_severity) == {"S1": 2, "S2": 1}
+
+    def test_an_unreadable_incident_row_is_listed_not_counted(self) -> None:
+        entries = chain(
+            entry(0, incident_bytes(), INCIDENT_PAYLOAD_TYPE),
+            entry(1, b"not json", INCIDENT_PAYLOAD_TYPE),
+        )
+        report = build_report(replace(OK, checked=2), entries)
+        assert report.incidents_total == 1
+        assert report.incidents_malformed == (1,)
+
+
+class TestInterventionSummary:
+    def test_a_scanned_trail_with_no_interventions_reports_zero_not_none(self) -> None:
+        assert build_report(OK, []).interventions_total == 0
+
+    def test_declared_actions_are_counted_verbatim(self) -> None:
+        entries = chain(
+            entry(0, intervention_bytes(action="override"), INTERVENTION_PAYLOAD_TYPE),
+            entry(1, intervention_bytes(action="dừng khẩn cấp"), INTERVENTION_PAYLOAD_TYPE),
+            entry(2, intervention_bytes(action="override"), INTERVENTION_PAYLOAD_TYPE),
+        )
+        report = build_report(replace(OK, checked=3), entries)
+        assert report.interventions_total == 3
+        assert dict(report.by_intervention_action) == {"override": 2, "dừng khẩn cấp": 1}
+
+    def test_an_unreadable_intervention_row_is_listed_not_counted(self) -> None:
+        entries = chain(
+            entry(0, intervention_bytes(), INTERVENTION_PAYLOAD_TYPE),
+            entry(1, b"{}", INTERVENTION_PAYLOAD_TYPE),
+        )
+        report = build_report(replace(OK, checked=2), entries)
+        assert report.interventions_total == 1
+        assert report.interventions_malformed == (1,)
+
+
+class TestE3JsonRendering:
+    def test_declared_tiers_and_their_absence_are_both_in_the_json(self) -> None:
+        entries = chain(
+            entry(0, decision_bytes(risk_tier="high"), DECISION_PAYLOAD_TYPE),
+            entry(1, decision_bytes(), DECISION_PAYLOAD_TYPE),
+        )
+        obj = json.loads(build_report(replace(OK, checked=2), entries).to_json())
+        assert obj["decisions"]["by_risk_tier"] == {"high": 1}
+        assert obj["decisions"]["risk_tier_unrecorded"] == 1
+        assert "declar" in obj["decisions"]["risk_tier_note"].lower()
+
+    def test_a_scanned_empty_trail_serializes_zero_not_null(self) -> None:
+        obj = json.loads(build_report(OK, []).to_json())
+        assert obj["incidents"]["total"] == 0
+        assert obj["interventions"]["total"] == 0
+
+    def test_a_family_that_was_never_scanned_serializes_null(self) -> None:
+        # Reachable by a JSON reader of an older report and by direct
+        # construction. `null` and `0` are different claims and the renderer
+        # must not launder one into the other.
+        report = replace(
+            build_report(OK, []),
+            incidents_total=None,
+            incidents_no_report_recorded=None,
+            interventions_total=None,
+        )
+        obj = json.loads(report.to_json())
+        assert obj["incidents"]["total"] is None
+        assert obj["incidents"]["no_report_recorded"] is None
+        assert obj["interventions"]["total"] is None
+
+    def test_the_incident_note_says_zero_is_not_evidence_of_none(self) -> None:
+        obj = json.loads(build_report(OK, []).to_json())
+        note = obj["incidents"]["note"].lower()
+        assert "not evidence" in note
+        assert "null" in note
+
+    def test_the_incident_json_never_says_unreported(self) -> None:
+        entries = chain(entry(0, incident_bytes(), INCIDENT_PAYLOAD_TYPE))
+        text = build_report(replace(OK, checked=1), entries).to_json()
+        assert _forbidden_words(text) == []
+
+
+class TestE3MarkdownRendering:
+    def test_the_incident_section_is_rendered_even_when_empty(self) -> None:
+        # Deliberately unlike the decisions section, which is omitted when
+        # empty. An absent section cannot be told apart from "none recorded"
+        # and "not scanned", which is the collapse this whole release is about.
+        md = build_report(OK, []).to_markdown()
+        assert "## Incidents" in md
+        assert "## Human interventions" in md
+        assert "not evidence" in md.lower()
+
+    def test_a_family_that_was_never_scanned_says_not_scanned(self) -> None:
+        report = replace(
+            build_report(OK, []),
+            incidents_total=None,
+            incidents_no_report_recorded=None,
+            interventions_total=None,
+        )
+        md = report.to_markdown()
+        assert "not scanned" in md.lower()
+
+    def test_declared_tiers_render_with_the_undeclared_count_apart(self) -> None:
+        entries = chain(
+            entry(0, decision_bytes(risk_tier="high"), DECISION_PAYLOAD_TYPE),
+            entry(1, decision_bytes(), DECISION_PAYLOAD_TYPE),
+        )
+        md = build_report(replace(OK, checked=2), entries).to_markdown()
+        assert "Declared risk tier" in md
+        assert "not declared" in md.lower()
+
+    def test_recorded_incidents_render_their_counts_and_the_caveat(self) -> None:
+        entries = chain(
+            entry(0, incident_bytes(incident_id="a"), INCIDENT_PAYLOAD_TYPE),
+            entry(1, incident_bytes(incident_id="b", report_ref="AI-1"), INCIDENT_PAYLOAD_TYPE),
+            entry(2, b"not json", INCIDENT_PAYLOAD_TYPE),
+            entry(3, intervention_bytes(), INTERVENTION_PAYLOAD_TYPE),
+        )
+        md = build_report(replace(OK, checked=4), entries).to_markdown()
+        assert "no submission recorded" in md.lower()
+        assert "about this trail" in md.lower()
+        assert "Declared severity" in md
+        assert "Declared action" in md
+
+    def test_the_markdown_never_says_unreported(self) -> None:
+        entries = chain(
+            entry(0, incident_bytes(incident_id="a"), INCIDENT_PAYLOAD_TYPE),
+            entry(1, incident_bytes(incident_id="b", report_ref="AI-1"), INCIDENT_PAYLOAD_TYPE),
+        )
+        md = build_report(replace(OK, checked=2), entries).to_markdown()
+        assert _forbidden_words(md) == []
+
+    def test_the_forbidden_word_detector_fires(self) -> None:
+        # A detector that matches nothing passes the two tests above in
+        # silence, so it is exercised against known positives — and against
+        # the word this repository legitimately uses, "the latest row", which
+        # a substring search for "late" would have wrongly condemned.
+        assert _forbidden_words("the report was late") == ["late"]
+        assert _forbidden_words("an unreported incident") == ["unreported"]
+        assert _forbidden_words("the latest row carries no reference") == []
+
+    def test_unparseable_intervention_payloads_are_named_in_the_markdown(self) -> None:
+        entries = chain(
+            entry(0, intervention_bytes(), INTERVENTION_PAYLOAD_TYPE),
+            entry(1, b"not json", INTERVENTION_PAYLOAD_TYPE),
+        )
+        md = build_report(replace(OK, checked=2), entries).to_markdown()
+        assert "Unparseable intervention payloads at seq 1" in md

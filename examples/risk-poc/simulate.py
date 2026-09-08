@@ -71,7 +71,12 @@ def transactions() -> list[Txn]:
         Txn("TXN-1002", "cust-91bd", "CP-RETAIL-12", 145_000_000, "internet", 11),
         Txn("TXN-1003", "cust-7f3a", "CP-SANCTION-01", 30_000_000, "mobile", 400),
         Txn(
-            "TXN-1004", "cust-04e2", "CP-CORP-05", 780_000_000, "swift", 2200,
+            "TXN-1004",
+            "cust-04e2",
+            "CP-CORP-05",
+            780_000_000,
+            "swift",
+            2200,
             operator_note="reconciled via ops API, Bearer sk-live-9f2ab7c41de85630",
         ),
         Txn("TXN-1005", "cust-91bd", "CP-RETAIL-12", 9_900_000, "internet", 12),
@@ -154,8 +159,10 @@ def stages_for(
     note = str(redacted.get("operator_note") or "")
     payload_bytes = canonical_json(to_payload(record))
     return [
-        Stage("decide", f"{txn.txn_id} {G.arrow} {verdict.outcome} "
-              f"(confidence {verdict.confidence:.2f})"),
+        Stage(
+            "decide",
+            f"{txn.txn_id} {G.arrow} {verdict.outcome} (confidence {verdict.confidence:.2f})",
+        ),
         Stage(
             "redact",
             "secret in operator_note masked BEFORE any hashing"
@@ -167,10 +174,13 @@ def stages_for(
             f"input_commitment {record.input_commitment[:16]}{G.ellipsis} - over the "
             "REDACTED input, so it cannot confirm a guess at the secret",
         ),
-        Stage("canon", f"payload {G.arrow} {len(payload_bytes)} canonical bytes "
-              "(sorted keys, no whitespace)"),
-        Stage("hash", f"payload_hash = sha256(payload) = "
-              f"{sha256_hex(payload_bytes)[:16]}{G.ellipsis}"),
+        Stage(
+            "canon",
+            f"payload {G.arrow} {len(payload_bytes)} canonical bytes (sorted keys, no whitespace)",
+        ),
+        Stage(
+            "hash", f"payload_hash = sha256(payload) = {sha256_hex(payload_bytes)[:16]}{G.ellipsis}"
+        ),
         Stage("chain", f"header seq={seq}; prev_hash commits to every entry before it"),
         Stage("seal", "forward-secure HMAC seal - the key evolves, the old one is gone"),
     ]
@@ -263,9 +273,7 @@ def run(out_dir: Path, *, animate: bool) -> int:
         result,
         entries,
         anchors=anchor_summary(trail, [e.entry_hash for e in entries]),
-        attestations=CheckSummary(
-            ok=attest.ok, checked=attest.checked, reason=attest.reason
-        ),
+        attestations=CheckSummary(ok=attest.ok, checked=attest.checked, reason=attest.reason),
     )
     print(report.to_markdown())
 
@@ -292,11 +300,14 @@ def main(argv: list[str] | None = None) -> int:
     _survive_a_narrow_console()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--out", type=Path, default=Path("examples/poc-out"),
+        "--out",
+        type=Path,
+        default=Path("examples/poc-out"),
         help="directory for the trail and its sidecars (recreated on each run)",
     )
     parser.add_argument(
-        "--no-animation", action="store_true",
+        "--no-animation",
+        action="store_true",
         help="print each stage as a plain line instead of redrawing",
     )
     args = parser.parse_args(argv)

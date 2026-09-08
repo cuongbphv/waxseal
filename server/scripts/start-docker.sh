@@ -17,6 +17,7 @@
 # DIFFERENT values: a witness holding the chain's write key could append forged
 # entries to the very chain it exists to cross-check (REMOTE.md section 8).
 
+# shellcheck source=_lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 COMPOSE=(docker compose -f "$SERVER_DIR/docker-compose.yml")
@@ -52,7 +53,7 @@ case "$ACTION" in
 esac
 
 step "Starting the stack"
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 "${COMPOSE[@]}" up -d ${BUILD[@]+"${BUILD[@]}"}
 
 step "Waiting for the server"
@@ -75,5 +76,8 @@ step "Ready"
 info "portal:      http://127.0.0.1:8000/"
 info "public read: http://127.0.0.1:8000/public/v1/chains"
 info "openapi:     http://127.0.0.1:8000/docs"
-[[ -n "${WAXSEAL_API_KEY:-}" ]] && info "write auth:  bearer required" \
-                                || info "write auth:  OPEN (WAXSEAL_API_KEY unset)"
+if [[ -n "${WAXSEAL_API_KEY:-}" ]]; then
+  info "write auth:  bearer required"
+else
+  info "write auth:  OPEN (WAXSEAL_API_KEY unset)"
+fi

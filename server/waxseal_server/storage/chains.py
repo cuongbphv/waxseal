@@ -35,11 +35,9 @@ growth J3 exists to prevent, arriving by J3's own hand.
 The receipt log's lock is still taken after the chain's is released, never
 nested inside it: the ordering note on `append` is unchanged by any of this.
 
-One import reaches past the library's public API on purpose. `_read_last_line`
-is format-critical: a second implementation of an O(1) JSONL tail read in this
-repository is a second thing that can drift, and it lives in the same repository,
-versioned and CI-run together, so a change to it breaks these tests in the same
-commit.
+The O(1) JSONL tail read lives in the library (`read_last_line`) so this
+server does not grow a second implementation that can drift. It is a public
+helper as of 0.1.6; the import is no longer a reach past a private name.
 """
 
 from __future__ import annotations
@@ -48,54 +46,42 @@ import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 from waxseal import Entry, Verdict
-from waxseal.adapters.filelock import file_lock
-from waxseal.adapters.jsonl import JSONLBackend, _read_last_line
+from waxseal.adapters.jsonl import JSONLBackend, read_last_line
 from waxseal.domain.archive import ArchiveDestination
 from waxseal.domain.segments import SEGMENT_SUFFIX, segment_identity
 from waxseal.sources.rotation import (
     DEFAULT_MAX_SEGMENT_BYTES,
     active_segment,
-    discover_segments,
     open_segmented,
     segments_lock,
 )
 from waxseal_server.domain.envelope import parse_envelope
 from waxseal_server.domain.errors import DamagedReceiptLog, PreconditionFailed
 from waxseal_server.domain.identifiers import require_chain_id
-from waxseal_server.domain.receipts import ReceiptChain
 from waxseal_server.domain.results import (
     AppendResult,
     ChainSummary,
     ReceiptCrossCheck,
     ReceiptLogReport,
 )
-
-TRAIL_NAME: Final = "trail.jsonl"
-RECEIPT_LOG_NAME: Final = "receipts.jsonl"
-
-#: The segment stem every chain's trail rotates under. Segment zero of a chain
-#: is the unnumbered `trail.jsonl` itself: rotation never renames, so the file
-#: an existing deployment already has stays exactly where it is and becomes the
-#: segment "before 0" (`sources/rotation.py`).
-_TRAIL_STEM: Final = TRAIL_NAME.removesuffix(SEGMENT_SUFFIX)
-
-#: Opaque to clients (REMOTE.md section 4). The prefix exists so a cursor from
-#: some other server, or a hand-typed integer, is rejected rather than silently
-#: interpreted as an offset into this one.
-_CURSOR_PREFIX: Final = "e"
-
-#: A cursor names the SEGMENT it was issued against as well as the offset into
-#: it. Without that, a reader whose chain rotated mid-page would resume at its
-#: offset in a file it never saw the start of and get a short page with nothing
-#: to say so — silent incompleteness, which is the failure this project treats
-#: as worse than a loud one.
-_CURSOR_SEGMENT_SEPARATOR: Final = "~"
-
-#: The receipt record shape this build writes and can read back (SPEC.md §19).
-_RECEIPT_VERSION: Final = 1
+from waxseal_server.storage._chain_paging import decode_cursor, encode_cursor
+from waxseal_server.storage._chain_paths import RECEIPT_LOG_NAME, TRAIL_NAME, segments_in
+from waxseal_server.storage._chain_receipts import (
+    acknowledge as acknowledge_receipt,
+)
+from waxseal_server.storage._chain_receipts import (
+    cross_check_receipts as cross_check_receipt_records,
+)
+from waxseal_server.storage._chain_receipts import (
+    load_receipt_records,
+    read_receipt_head,
+)
+from waxseal_server.storage._chain_receipts import (
+    verify_receipt_log as verify_receipt_records,
+)
 
 
 def _log_notice(message: str) -> None:
@@ -167,22 +153,8 @@ class ChainStore:
 
     @staticmethod
     def _segments_in(directory: Path) -> list[Path]:
-        """This trail's segments in `directory`, oldest first.
-
-        `discover_segments` reports nothing for a stem with no NUMBERED
-        segment, which is every chain that has not rotated yet — so the
-        unrotated single file is the fallback, never a special case elsewhere.
-        The filter keeps the receipt log and any other stem out.
-        """
-        found = [
-            path
-            for path in discover_segments(directory)
-            if segment_identity(path.name).partition(".")[0] == _TRAIL_STEM
-        ]
-        if found:
-            return found
-        base = directory / TRAIL_NAME
-        return [base] if base.exists() else []
+        """This trail's segments in `directory`, oldest first."""
+        return segments_in(directory)
 
     # ----------------------------------------------------------------- read
 
@@ -192,7 +164,7 @@ class ChainStore:
         None is REMOTE.md section 4's 404: "no entries yet", which a fresh
         writer reads as `(seq=-1, GENESIS)`. It is never an error.
         """
-        last = _read_last_line(self.active_trail_path(chain_id))
+        last = read_last_line(self.active_trail_path(chain_id))
         if last is None:
             return None
         obj = json.loads(last)
@@ -338,11 +310,7 @@ class ChainStore:
     # ------------------------------------------------------------- receipts
 
     def receipt_head(self, chain_id: str) -> tuple[int, str] | None:
-        last = _read_last_line(self.receipt_log_path(chain_id))
-        if last is None:
-            return None
-        record = json.loads(last)
-        return int(record["receipt_seq"]), str(record["receipt_head"])
+        return read_receipt_head(self.receipt_log_path(chain_id))
 
     def receipt_records(self, chain_id: str) -> list[dict[str, Any]] | None:
         """Every acknowledgment record, or None when the log is absent.
@@ -350,17 +318,7 @@ class ChainStore:
         None is "no log", never an empty list, and a log that cannot be parsed
         raises instead of borrowing either answer (CLAUDE.md rule 5).
         """
-        path = self.receipt_log_path(chain_id)
-        if not path.exists():
-            return None
-        try:
-            return [
-                json.loads(line)
-                for line in path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-        except json.JSONDecodeError as exc:
-            raise DamagedReceiptLog(f"{path}: {exc}") from exc
+        return load_receipt_records(self.receipt_log_path(chain_id))
 
     def verify_receipt_log(self, chain_id: str) -> ReceiptLogReport:
         """Recompute the server's own acknowledgment history from its records.
@@ -370,54 +328,7 @@ class ChainStore:
         the records over, so a third party reaches the same verdict the server
         does. Its three outcomes are SPEC.md section 19's own table.
         """
-        path = self.receipt_log_path(chain_id)
-        if not path.exists():
-            # Absent is not "checked, found nothing" (CLAUDE.md rule 5).
-            return ReceiptLogReport(Verdict.OK, checked=None, reason="not_recorded")
-
-        chain = ReceiptChain()
-        checked = 0
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                record = json.loads(line)
-                version = record["v"]
-            except (json.JSONDecodeError, TypeError, KeyError):
-                return ReceiptLogReport(
-                    Verdict.BROKEN, checked=checked, reason="malformed_receipt_record"
-                )
-            if version != _RECEIPT_VERSION:
-                # A `v` from a newer build: unverifiable by name, never tampered.
-                return ReceiptLogReport(
-                    Verdict.UNVERIFIABLE, checked=checked, reason="unreadable_record_version"
-                )
-            try:
-                stored_seq = int(record["receipt_seq"])
-                stored_head = str(record["receipt_head"])
-                computed_seq, computed_head = chain.acknowledge(str(record["entry_hash"]))
-            except (KeyError, TypeError, ValueError):
-                # Broken bytes inside this project's OWN format are a break, not
-                # an unknown (SPEC.md section 17's asymmetry).
-                return ReceiptLogReport(
-                    Verdict.BROKEN, checked=checked, reason="malformed_receipt_record"
-                )
-            if stored_seq != computed_seq:
-                return ReceiptLogReport(
-                    Verdict.BROKEN,
-                    checked=checked,
-                    reason="receipt_seq_gap",
-                    broken_receipt_seq=stored_seq,
-                )
-            if stored_head != computed_head:
-                return ReceiptLogReport(
-                    Verdict.BROKEN,
-                    checked=checked,
-                    reason="receipt_head_mismatch",
-                    broken_receipt_seq=stored_seq,
-                )
-            checked += 1
-        return ReceiptLogReport(Verdict.OK, checked=checked)
+        return verify_receipt_records(self.receipt_log_path(chain_id))
 
     def cross_check_receipts(self, chain_id: str) -> ReceiptCrossCheck:
         """Compare what this server acknowledged with what it is now storing.
@@ -437,54 +348,8 @@ class ChainStore:
         try:
             records = self.receipt_records(chain_id)
         except DamagedReceiptLog:
-            return ReceiptCrossCheck(
-                Verdict.BROKEN, checked=0, reason="malformed_receipt_record"
-            )
-        if records is None:
-            return ReceiptCrossCheck(Verdict.OK, checked=None, reason="not_recorded")
-
-        # seq -> the hashes stored at that seq, across every segment. A LIST
-        # rather than one hash because seq restarts at 0 in each segment
-        # (SPEC.md section 20), so a rotated chain holds several entries at seq
-        # 3 and a receipt for any of them is satisfied by any of them. Nothing
-        # is given up: an edited or deleted entry changes or removes its hash,
-        # so it is absent from the list either way. On an unrotated chain every
-        # list has exactly one element and this is the check it always was.
-        by_seq: dict[int, list[str]] = {}
-        for obj in self._stored_envelopes(chain_id):
-            by_seq.setdefault(int(obj["header"]["seq"]), []).append(str(obj["entry_hash"]))
-        checked = 0
-        for record in records:
-            if not isinstance(record, dict) or "v" not in record:
-                return ReceiptCrossCheck(
-                    Verdict.BROKEN, checked=checked, reason="malformed_receipt_record"
-                )
-            if record["v"] != _RECEIPT_VERSION:
-                return ReceiptCrossCheck(
-                    Verdict.UNVERIFIABLE, checked=checked, reason="unreadable_record_version"
-                )
-            try:
-                seq = int(record["seq"])
-                acknowledged = str(record["entry_hash"])
-            except (KeyError, TypeError, ValueError):
-                return ReceiptCrossCheck(
-                    Verdict.BROKEN, checked=checked, reason="malformed_receipt_record"
-                )
-            if seq not in by_seq:
-                # The trail is shorter than an acknowledged append: a rollback or
-                # a truncation, not a missing measurement.
-                return ReceiptCrossCheck(
-                    Verdict.BROKEN,
-                    checked=checked,
-                    reason="receipt_beyond_head",
-                    broken_seq=seq,
-                )
-            if acknowledged not in by_seq[seq]:
-                return ReceiptCrossCheck(
-                    Verdict.BROKEN, checked=checked, reason="receipt_mismatch", broken_seq=seq
-                )
-            checked += 1
-        return ReceiptCrossCheck(Verdict.OK, checked=checked)
+            return ReceiptCrossCheck(Verdict.BROKEN, checked=0, reason="malformed_receipt_record")
+        return cross_check_receipt_records(records, self._stored_envelopes(chain_id))
 
     # -------------------------------------------------------------- private
 
@@ -497,52 +362,4 @@ class ChainStore:
         ]
 
     def _acknowledge(self, chain_id: str, entry: Entry) -> tuple[int, str]:
-        log_path = self.receipt_log_path(chain_id)
-        # The lock spans read-tail + append for the same reason the chain's own
-        # does: two acknowledgements must never be issued the same receipt_seq,
-        # which is the one thing REMOTE.md section 10 forbids answering twice.
-        with file_lock(log_path):
-            last = _read_last_line(log_path)
-            if last is None:
-                chain = ReceiptChain()
-            else:
-                prior = json.loads(last)
-                chain = ReceiptChain.resume(
-                    int(prior["receipt_seq"]), str(prior["receipt_head"])
-                )
-            receipt_seq, receipt_head = chain.acknowledge(entry.entry_hash)
-            record = {
-                "entry_hash": entry.entry_hash,
-                "receipt_head": receipt_head,
-                "receipt_seq": receipt_seq,
-                "seq": entry.header.seq,
-                "ts": entry.header.ts,
-                "v": _RECEIPT_VERSION,
-            }
-            with open(log_path, "a", encoding="utf-8", newline="") as handle:
-                handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
-                handle.flush()
-        return receipt_seq, receipt_head
-
-
-def encode_cursor(index: int, identity: str) -> str:
-    return f"{_CURSOR_PREFIX}{index}{_CURSOR_SEGMENT_SEPARATOR}{identity}"
-
-
-def decode_cursor(cursor: str | None) -> tuple[int, str | None]:
-    """`(offset, segment identity)`.
-
-    The identity is `None` only for "no cursor at all" — the first page, which
-    is about whatever segment is active when it is asked for. It is never a
-    guessed segment: a cursor that carries no identity is refused rather than
-    aimed at the active file, because the one thing a resumed read must not do
-    is silently continue in a different file.
-    """
-    if cursor is None:
-        return 0, None
-    if not cursor.startswith(_CURSOR_PREFIX):
-        raise ValueError(f"unrecognized cursor {cursor!r}")
-    offset, _, identity = cursor[len(_CURSOR_PREFIX) :].partition(_CURSOR_SEGMENT_SEPARATOR)
-    if not offset.isdigit() or not identity:
-        raise ValueError(f"unrecognized cursor {cursor!r}")
-    return int(offset), identity
+        return acknowledge_receipt(self.receipt_log_path(chain_id), entry)

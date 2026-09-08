@@ -95,9 +95,7 @@ class TestCodexHome:
         monkeypatch.delenv("WAXSEAL_TRAIL", raising=False)
         monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-state"))
         monkeypatch.setenv("HOME", str(tmp_path / "posix-home"))
-        assert codex._trail_path(EVENT) == (
-            tmp_path / "codex-state" / "waxseal" / ROUTED_TAIL
-        )
+        assert codex._trail_path(EVENT) == (tmp_path / "codex-state" / "waxseal" / ROUTED_TAIL)
 
     def test_explicit_trail_still_beats_codex_home(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

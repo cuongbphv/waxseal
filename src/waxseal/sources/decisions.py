@@ -26,9 +26,7 @@ from waxseal.log import AuditLog
 from waxseal.ports.redact import Redactor
 
 
-def commit_input(
-    payload: dict[str, Any] | bytes, *, redactor: Redactor | None = None
-) -> str:
+def commit_input(payload: dict[str, Any] | bytes, *, redactor: Redactor | None = None) -> str:
     """SHA-256 over the canonical bytes of a model input, which is what a decision
     record commits to instead of the input itself, so the trail carries no
     customer data.
@@ -91,8 +89,6 @@ def iter_decisions(
                 record = from_payload(json.loads(entry.payload))
             except (ValueError, TypeError, UnicodeDecodeError):
                 record = None
-        if decision_type is not None and (
-            record is None or record.decision_type != decision_type
-        ):
+        if decision_type is not None and (record is None or record.decision_type != decision_type):
             continue
         yield entry, record

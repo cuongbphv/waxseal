@@ -22,12 +22,14 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from waxseal_server._version import API_VERSION
 from waxseal_server.api import admin as admin_api
 from waxseal_server.api import chains as chains_api
 from waxseal_server.api import imports as imports_api
 from waxseal_server.api import public as public_api
 from waxseal_server.api import settings as settings_api
 from waxseal_server.api import witness as witness_api
+from waxseal_server.api._body_limit import BodySizeLimitMiddleware
 from waxseal_server.api.deps import Authorizer, Services, guard_for
 from waxseal_server.config import Settings
 from waxseal_server.ports.operators import OperatorStore
@@ -42,8 +44,6 @@ from waxseal_server.storage.operators_postgres import PostgresOperatorStore
 from waxseal_server.storage.settings_memory import InMemorySettingsStore
 from waxseal_server.storage.settings_postgres import PostgresSettingsStore
 from waxseal_server.storage.witness import WitnessStore
-
-API_VERSION = "0.1.5"
 
 
 def build_operator_store(settings: Settings) -> OperatorStore:
@@ -102,6 +102,7 @@ def create_app(
         summary="Self-hosted chain server, witness, and public read point for waxseal trails.",
         version=API_VERSION,
     )
+    app.add_middleware(BodySizeLimitMiddleware)
     app.state.services = services
     app.state.settings = settings
     app.state.authorizer = authz

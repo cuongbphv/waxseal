@@ -56,7 +56,7 @@ class TestReadEntriesForDisplay:
 
     def test_an_empty_trail_reads_as_nothing(self, tmp_path: Path) -> None:
         empty = tmp_path / "empty.jsonl"
-        empty.write_text("")
+        empty.write_text("", encoding="utf-8")
         assert read_entries_for_display(empty, limit=10) == []
 
     def test_a_redacted_payload_stays_redacted(self, tmp_path: Path) -> None:
@@ -78,6 +78,6 @@ class TestReadEntriesForDisplay:
         # Empty and unreadable are different answers. Returning [] for a file
         # waxseal cannot open would render "no entries" over a trail nobody read.
         bad = tmp_path / "trail.txt"
-        bad.write_text("x")
+        bad.write_text("x", encoding="utf-8")
         with pytest.raises(ValueError):
             read_entries_for_display(bad, limit=10)

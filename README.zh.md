@@ -6,8 +6,10 @@
 
 > **关于本页的链接：** 这份中文 README 是一个入口页。它链接到的文档 —— `SPEC.md`、
 > `DESIGN.md`、`REMOTE.md`、`CHANGELOG.md`、`docs/` 下的各篇，以及 `integrations/`
-> 和 `examples/` 里的 README —— **目前只有英文版**。这是一个刻意的决定，不是遗漏：
-> 一份过时的译文会向读不到原文的读者悄悄陈述一个已经作废的说法，那比没有译文更糟。
+> 和 `examples/` 里的 README —— 有英文版；`docs/` 下的对外文档和 `examples/risk-poc`
+> 的 README 另有越南文版（`*.vi.md`）。**这些文档目前都没有中文版**。这是一个刻意的
+> 决定，不是遗漏：一份过时的译文会向读不到原文的读者悄悄陈述一个已经作废的说法，那比
+> 没有译文更糟。
 > 越权威的文档越要读英文原件 —— `SPEC.md` 是字节级规范，`pyproject.toml` 是依赖的
 > 唯一来源。
 
@@ -111,7 +113,7 @@ v53"*。唯一能绕过它的办法，是一个把安全检查彻底关掉的环
 | 版本回滚优雅降级（不可验证 ≠ 被篡改，退出码 2 ≠ 1） | ✅ | ❌ 未知版本 = 报错 | ❌ |
 | 完备性单独上报：`dropped_writes`，`None` ≠ `0` | ✅ | ❌ 链完好被当作一切完好 | ❌ |
 | 并发追加防分叉，**每个后端**的机制都有文档，锁经过可证伪性测试 | ✅ | 不一定，通常假设单写入者 | ❌ |
-| 字节级 SPEC（计划在 v1 冻结）+ 黄金测试向量 → 可移植到 Go/Rust/TS | ✅ | ❌ 格式 = 代码怎么跑就怎么算 | ❌ |
+| 字节级 SPEC（计划在 v1 冻结）+ 黄金测试向量 -> 可移植到 Go/Rust/TS | ✅ | ❌ 格式 = 代码怎么跑就怎么算 | ❌ |
 | 零运行时依赖（S3/Postgres 客户端由调用方注入，永不 import） | ✅ | 常常拖入整套加密/序列化栈 | ✅ |
 | 先脱敏后哈希（密钥永不落盘，哈希承诺的是脱敏后的字节） | ✅ | 偶尔 | ❌ |
 | 内置外部锚定：RFC 3161 TSA、OpenTimestamps、witness，或自写 sink（`anchor_every=N`） | ✅ | ❌ | ❌ |
@@ -119,6 +121,10 @@ v53"*。唯一能绕过它的办法，是一个把安全检查彻底关掉的环
 | 前向安全封印（密钥演进 HMAC，纯标准库）+ 注入式 Ed25519 签名 | ✅ | ❌ | ❌ |
 | FssAgg 聚合标签，即便密钥文件泄露也能堵住截断漏洞 | ✅ | ❌ | ❌ |
 | 远程 HTTP 后端与本地存储完全对等，信任模型写得明明白白 | ✅ | 少见，信任模型不写明 | ❌ |
+| Ledger 三值：live / delinquent / unreachable（`waxseal ledger-status`） | ✅ | ❌ | ❌ |
+| 有范围的 WORM（密封段上的 S3 Object Lock；从不覆盖 live tail） | ✅ | ❌ | ❌ |
+| 密封段 + 轮转绑定（`waxseal segments`） | ✅ | ❌ | ❌ |
+| 成本最优锚定节奏（`waxseal cadence`；不打开 trail） | ✅ | ❌ | ❌ |
 
 前两行正是上文两起事故所属的故障类；每一行背后的文献见 [DESIGN.md](DESIGN.md)。
 
@@ -128,7 +134,7 @@ v53"*。唯一能绕过它的办法，是一个把安全检查彻底关掉的环
 
 ```mermaid
 flowchart LR
-    A["你的 Agent<br/>append(payload)"] --> R["Redactor<br/>密钥 → ***REDACTED***"]
+    A["你的 Agent<br/>append(payload)"] --> R["Redactor<br/>密钥 -> ***REDACTED***"]
     R --> C["规范化字节<br/>payload_hash = sha256"]
     C --> H["在后端锁内构建 EntryHeader<br/>(seq、prev_hash 取自链尾)"]
     H --> EH["entry_hash =<br/>sha256(framed header)"]
@@ -151,14 +157,14 @@ flowchart LR
 ```mermaid
 flowchart TD
     V["waxseal verify"] --> Q1{"seq 连续？"}
-    Q1 -- "否" --> X1["断链: seq_gap → exit 1"]
+    Q1 -- "否" --> X1["断链: seq_gap -> exit 1"]
     Q1 -- "是" --> Q2{"prev_hash 衔接？"}
-    Q2 -- "否" --> X2["断链: prev_hash_mismatch → exit 1"]
+    Q2 -- "否" --> X2["断链: prev_hash_mismatch -> exit 1"]
     Q2 -- "是" --> Q3{"指纹已知？"}
-    Q3 -- "否" --> U["按名不可验证 → exit 2<br/>不是篡改（回滚安全）"]
+    Q3 -- "否" --> U["按名不可验证 -> exit 2<br/>不是篡改（回滚安全）"]
     Q3 -- "是" --> Q4{"entry_hash 与 payload_hash 匹配？"}
-    Q4 -- "否" --> X3["断链 → exit 1"]
-    Q4 -- "是" --> OK["完好 → exit 0"]
+    Q4 -- "否" --> X3["断链 -> exit 1"]
+    Q4 -- "是" --> OK["完好 -> exit 0"]
 ```
 
 ## 安装
@@ -169,6 +175,25 @@ pip install waxseal
 
 已发布于 [PyPI](https://pypi.org/project/waxseal/)。从源码安装：
 `pip install git+https://github.com/cuongbphv/waxseal`
+
+另外四种方式，对应验证器真正需要运行的场景：
+
+```bash
+uv tool install waxseal            # 或：pipx install waxseal
+curl -fsSL https://raw.githubusercontent.com/cuongbphv/waxseal/main/deploy/install.sh | sh
+docker run --rm -v "$PWD:/data:ro" ghcr.io/cuongbphv/waxseal verify /data/trail.jsonl
+python3 waxseal-0.1.6.pyz verify trail.jsonl
+```
+
+安装脚本会先用发布附带的 `SHA256SUMS` 校验产物的 SHA-256，校验通过之前不移动、
+不执行任何文件；无法校验签名时会明确说出来。最后一行是每个发布附带的单文件
+zipapp：由于运行时依赖列表为空，一个文件加一个 `python3` 就是一个完整的验证
+器，这正是离网审阅所需要的。
+
+面向集群或单机部署，`deploy/` 提供运行时镜像、分属两个管理权限域的两个 Helm
+chart、systemd 单元和一个 compose overlay。请先读
+[deploy/README.md](deploy/README.md)：它说明每个部件属于哪个信任域，以及哪两
+个部件绝不能共用同一个权限域。
 
 ## 能力扩展（capability extras）
 
@@ -227,7 +252,7 @@ anvil 链、跑真实 Foundry 合约做过端到端核验
 ```python
 from waxseal import AuditLog
 
-log = AuditLog.open("~/.myagent/audit/trail.jsonl")   # SQLite 则用 trail.db
+log = AuditLog.open("~/.myagent/audit/trail.jsonl")  # SQLite 则用 trail.db
 
 log.append(
     payload={"tool": "bash", "command": "ls -la", "exit_code": 0},
@@ -245,8 +270,10 @@ result = log.verify()
 from waxseal.adapters.redactors import RegexRedactor
 
 log = AuditLog.open("trail.jsonl", redactor=RegexRedactor())
-log.append(payload={"cmd": "curl -H 'Authorization: Bearer sk-...'"},
-           payload_type="application/vnd.myagent.toolcall+json")
+log.append(
+    payload={"cmd": "curl -H 'Authorization: Bearer sk-...'"},
+    payload_type="application/vnd.myagent.toolcall+json",
+)
 # 明文永远不落盘；哈希承诺的是脱敏后的 payload
 ```
 
@@ -262,6 +289,10 @@ waxseal anchor trail.jsonl     # 把一个 checkpoint 追加到本地 .anchors �
 waxseal verify --anchors trail.jsonl  # 额外用 .anchors 校验 trail 历史
 waxseal preflight trail.jsonl  # 当前配置挡住攻击者能力的哪一档；恒为退出码 0（3：路径不存在）
 waxseal segments trail-dir/    # 校验目录内每个已封存段与轮转绑定；只读
+waxseal cadence --lam RATE --c COST --w HARM --rho RATE --delta SEC --t-max SEC  # 成本最优 N*；不打开 trail
+waxseal reconcile-tickets trail.jsonl --issuer NAME --lease-size L [--issued SPEC]
+waxseal receipt trail.jsonl --out DIR   # 导出已存 RFC 3161 / OTS 回执；只写入 --out
+waxseal verify --tsa-ca-file bundle.pem trail.jsonl  # 原生 CMS/X.509 校验（waxseal[rfc3161]）
 
 # 除 `anchor` 外，以上命令都可以接受一个远程 chain server 的 URL：
 waxseal verify http://chain.example.com/v1/chains/default
@@ -270,6 +301,7 @@ waxseal verify http://chain.example.com/v1/chains/default
 waxseal ledger-status trail.jsonl --liveness 0xADDR --rpc https://rpc1 --rpc https://rpc2
 waxseal registry publish --descriptor-of FINGERPRINT --registry 0xADDR --rpc https://rpc1 --rpc https://rpc2
 waxseal bond deposit --bond 0xADDR --amount-wei 1000000000000000000 --rpc https://rpc1 --rpc https://rpc2
+waxseal bond prove proof.json --bond 0xADDR --rpc https://rpc1 --rpc https://rpc2
 ```
 
 ## 存储后端
@@ -336,7 +368,7 @@ log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 ```python
 from waxseal.sources.files import record_file, current_matches_last
 
-record_file(log, "SPEC.md", doc_id="spec")          # 把内容哈希快照进链
+record_file(log, "SPEC.md", doc_id="spec")  # 把内容哈希快照进链
 current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None（从未记录）
 ```
 
@@ -358,17 +390,26 @@ from waxseal.sources.decisions import commit_input, record_decision
 redactor = RegexRedactor()
 log = AuditLog.open("decisions.jsonl", redactor=redactor)
 
-record_decision(log, DecisionRecord(
-    decision_id="DEC-1001",
-    decision_type="transaction_approval",
-    system_id="screening-agent",
-    model=ModelRef(name="my-model", version="2026.08.1"),
-    input_commitment=commit_input(model_input, redactor=redactor),  # 先脱敏，再哈希
-    outcome="approve",
-    rationale="低于阈值，且为已有往来的交易对手",
-    human_oversight=HumanOversight(mode="automated"),  # None = 未记录，不等于 automated
-))
+record_decision(
+    log,
+    DecisionRecord(
+        decision_id="DEC-1001",
+        decision_type="transaction_approval",
+        system_id="screening-agent",
+        model=ModelRef(name="my-model", version="2026.08.1"),
+        input_commitment=commit_input(model_input, redactor=redactor),  # 先脱敏，再哈希
+        outcome="approve",
+        rationale="低于阈值，且为已有往来的交易对手",
+        human_oversight=HumanOversight(mode="automated"),  # None = 未记录，不等于 automated
+        risk_tier="high",  # 提供者自己的风险分级；None = 未申报
+        classification_ref="RC-2026-014/v2",  # 指向分级档案的指针，绝不是档案内容
+    ),
+)
 ```
+
+`risk_tier` 按原样记录，绝不做解释：`"high"` 与 `"cao"` 是两条不同的申报，
+把它们合并等于替提供者重述一个本该由其自行作出的分级。`None` 表示未申报任何
+分级，报告会把这种情形与每一个分级分开计数，绝不呈现为最低的那一级。
 
 用 `iter_decisions` 读回决策——它按链序遍历 trail，逐条 yield `(entry, record)`。
 字节已无法解析为决策的行仍会被 yield（`record=None`），而不是被悄悄跳过；
@@ -381,7 +422,7 @@ for entry, record in iter_decisions(log, decision_type="transaction_approval"):
     if record is None:
         print(f"seq {entry.header.seq}: 无法解析 —— 请运行 `waxseal verify`")
     else:
-        print(f"seq {entry.header.seq}: {record.decision_id} → {record.outcome}")
+        print(f"seq {entry.header.seq}: {record.decision_id} -> {record.outcome}")
 ```
 
 审计方读一份报告，并且不需要拿到整个日志就能核验其中某一条决策：
@@ -391,6 +432,52 @@ waxseal report decisions.jsonl              # Markdown；--json 供 SIEM/GRC 使
 waxseal export-proof decisions.jsonl 3 > proof.json
 waxseal verify-proof proof.json             # 离线核验；不需要 trail
 ```
+
+### 事故与人工干预
+
+再增加两个证据族，对应监管者在决策日志之后会追问的两件事：系统出错时发生了
+什么，以及是谁介入的。
+
+```python
+from waxseal import IncidentRecord, InterventionRecord
+from waxseal.sources.incidents import record_incident
+from waxseal.sources.interventions import record_intervention
+
+record_incident(
+    log,
+    IncidentRecord(
+        incident_id="INC-2026-0007",
+        system_id="screening-agent",
+        detected_at="2026-09-01T07:10:00+00:00",
+        confirmed_at="2026-09-01T08:00:00+00:00",  # 报告时限从这一刻开始起算
+        severity="serious",
+        summary="更换数据源后评分发生漂移",  # 先脱敏，再参与哈希
+        report_ref=None,  # 此处没有提交记录 —— 绝不等于「未上报」
+    ),
+)
+
+record_intervention(
+    log,
+    InterventionRecord(
+        intervention_id="IV-41",
+        system_id="screening-agent",
+        actor_ref="risk-queue-7",  # 化名，与 reviewer_ref 一致
+        action="halt",
+        decision_ref="DEC-1001",  # None = 并非针对某一条已记录决策的动作
+    ),
+)
+```
+
+```bash
+waxseal incidents decisions.jsonl --report-window-h 72 --as-of 2026-09-05T08:00:00+00:00
+```
+
+这条命令只读取，不作判定。它的退出码是 0、2 和 3 —— 永远不会是 1 —— 因为其中
+涉及的每一个时间戳都是写入方自己声明的，而时间窗是运维人员输入的一个数字。
+读数 `no_report_recorded_past_window` 是关于这条 trail 的陈述，而不是「已错过
+时限」的结论：waxseal 没有通往任何主管机关的通道，无法看到报告是否已经提交。
+提交真的发生时，请用同一个 `incident_id` 追加一条新行并带上受理凭据；不修改
+任何内容，最新一行作为整条记录生效，行数保持可见，从而使重述历史仍可读。
 
 一个 proof bundle 就是一条 entry 加上它的 Merkle 路径，因此回答关于某一个主体的问题，
 不会泄露 trail 中其他所有决策。报告会把**没有执行**的检查打印为 *not checked*，
@@ -416,8 +503,7 @@ waxseal verify-proof proof.json             # 离线核验；不需要 trail
 from waxseal import AuditLog
 from waxseal.adapters.anchors import FileAnchorSink
 
-log = AuditLog.open("trail.jsonl",
-                    anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
+log = AuditLog.open("trail.jsonl", anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
 # 每追加 100 次，就在写入路径之外尽力发布一次 checkpoint；
 # 锚定失败永远不会阻塞写入 —— 只会计入 anchor_failures
 ```
@@ -442,12 +528,12 @@ waxseal anchor trail.jsonl --witness https://witness.example/anchor
 waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https://witness.example/anchor
 ```
 
-- **RFC 3161** 让 `ts` 从"自己声称"变成"有外部作证"。waxseal 只对回执做*结构性*检查
-  —— status、message imprint、nonce、digest 算法 —— 并且在它打印的每一行里都写明这一点。
-  它默认**不**验证 CMS/X.509 签名；那一步被委托给 `openssl ts -verify`，具体做法见文档。
-  它读不懂的回执算*不可验证*（exit 2）；只有为不同字节作证的回执才算*断链*（exit 1）。
-  装上 `rfc3161` extra 并用 `--tsa-ca-file` 指名一份 CA bundle 之后，签名这一维也会被
-  校验 —— 而校验不成的 token 是 exit 2 并附标签，绝不会是一次沉默的放行。
+- **RFC 3161** 让 `ts` 从"自己声称"变成"有外部作证"。原生路径是 `waxseal[rfc3161]`
+  加上 `--tsa-ca-file`：waxseal 自己校验 CMS/X.509 签名，校验不成的 token 是
+  exit 2 并附标签，绝不会是一次沉默的放行。没有 extra 或没有该标志时，只对回执做
+  *结构性*检查（status、message imprint、nonce、digest 算法），签名一步留给
+  `openssl ts -verify` 作为回退（具体做法见文档）。读不懂的回执算*不可验证*
+  （exit 2）；只有为不同字节作证的回执才算*断链*（exit 1）。
 - **OpenTimestamps** 存的是一份*待定（pending）*的比特币证明，不透明是有意为之。
   日后用 `ots upgrade` / `ots verify` 把它补完。
 - 这两者**可以在同一次 `anchor` 运行中一起使用**，把同一个 checkpoint 同时发布到两边
@@ -474,10 +560,12 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
   `verify`/`report --pin` 现在接受 `--expect-anchor-binding`（一个开关）、
   `--max-anchor-age-s SECONDS`，以及 `--declare-topology SPEC`（一次性给出
   `SeparationTopology` 的全部四个子字段，例如
-  `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`）来写入这三项声明 ——
+  `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`，外加可选的
+  `ledger=true`/`ledger=false`）来写入这些声明 ——
   每一个都必须搭配 `--pin`，只在真正推进 pin 的那次运行才会生效，而
-  `--declare-topology` 只给出四个子字段中的一部分会被当作 CLI 用法错误，绝不会被
-  静默地补上默认值。不带这些参数的一次 pin 前进会原样保留此前已声明的内容。你仍然可以
+  `--declare-topology` 只给出四个必填子字段中的一部分会被当作 CLI 用法错误，绝不会被
+  静默地补上默认值。省略 `ledger=` 解析为 `ledger=None`（"从未询问"），不是声明为假。
+  不带这些参数的一次 pin 前进会原样保留此前已声明的内容。你仍然可以
   直接手改 pin 状态的 JSON，格式仍是 SPEC section 13.1。`waxseal verify`/`waxseal report`
   在每次运行时都会打印 `declared_topology` 所描述的分离度 τ —— 见
   [docs/paper/conformance.md](docs/paper/conformance.md) 的 G2（已完成）。
@@ -493,8 +581,8 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
   tamper-*proof*、面对拜占庭式的链服务器客户端能检测到什么、又可证明地检测不到什么，
   以及如何在不夸大的前提下引用 waxseal 的输出
 - [docs/paper/conformance.md](docs/paper/conformance.md) —— 一份对本库的独立形式化再分析
-  提出了什么要求、0.1.4 交付了什么，以及逐行附证据地说明还有什么没做。包括此前任何
-  release note 都未曾声明的那部分
+  提出了什么要求。0.1.5 已关闭合约层（liveness、bond、fingerprint registry）、成本最优
+  cadence，以及有范围的 WORM；正文仍是逐行证据账本，记录哪一行已交付、哪一个缺口仍开着。
 
 ## 签名与前向安全封印
 
@@ -522,9 +610,8 @@ from waxseal import AuditLog
 from waxseal.adapters.attest import FileAttestor
 from waxseal.domain.sealing import generate_key
 
-k0 = generate_key()                      # 把 A_0 托管给验证方，离开这台机器
-log = AuditLog.open("trail.jsonl",
-                    attestor=FileAttestor("trail.jsonl", initial_key=k0))
+k0 = generate_key()  # 把 A_0 托管给验证方，离开这台机器
+log = AuditLog.open("trail.jsonl", attestor=FileAttestor("trail.jsonl", initial_key=k0))
 log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 
 log.verify_attestations(initial_key=k0)  # AttestResult(ok=True, checked=1, ...)
@@ -535,8 +622,7 @@ log.verify_attestations(initial_key=k0)  # AttestResult(ok=True, checked=1, ...)
 
 ```python
 # 任何具有 .algorithm、.key_id、.sign(bytes) -> bytes 的对象
-log = AuditLog.open("trail.jsonl",
-                    attestor=FileAttestor("trail.jsonl", signer=my_ed25519_signer))
+log = AuditLog.open("trail.jsonl", attestor=FileAttestor("trail.jsonl", signer=my_ed25519_signer))
 log.verify_attestations(verifier=my_ed25519_verifier)
 ```
 
@@ -622,6 +708,9 @@ waxseal install hermes        # 或 claude-code / codex / cursor / hermes-gatewa
 | hermes-agent | plugin + gateway hook | [integrations/hermes/](integrations/hermes/) |
 | OpenClaw | 审计账本导出器（`openclaw audit --json`，非 hook） | [integrations/openclaw/](integrations/openclaw/) |
 | Microsoft AGT | AuditSink Protocol（挂接到 AGT 自己的 `AuditLog`） | [`waxseal.integrations.agt`](src/waxseal/integrations/agt.py) |
+
+Claude Code、Codex 与 Cursor 通过 `open_segmented` 打开 trail（SPEC 第 20 节）：
+活动文件超过 16 MiB 后滚入密封段，`waxseal segments <dir>` 校验每个段及其轮转绑定。
 
 对编码工具类集成的范围说明：这些 hook 给你一份并行的、篡改可检测（tamper-evident）的、**不含密钥**的
 行动记录。它们不会（也无法）改写工具自身的 transcript 文件 —— 如果密钥已经落入

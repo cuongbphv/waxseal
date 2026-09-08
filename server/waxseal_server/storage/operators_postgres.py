@@ -68,9 +68,7 @@ CREATE INDEX IF NOT EXISTS waxseal_api_keys_username_idx
 """
 
 _OPERATOR_COLUMNS: Final = "username, display_name, email, role, created_at, active"
-_KEY_COLUMNS: Final = (
-    "key_id, username, label, fingerprint, created_at, last_used_at, revoked_at"
-)
+_KEY_COLUMNS: Final = "key_id, username, label, fingerprint, created_at, last_used_at, revoked_at"
 
 
 def _operator(row: tuple[Any, ...]) -> Operator:
@@ -153,8 +151,7 @@ class PostgresOperatorStore:
         with self._connect() as conn:
             cur = conn.cursor()
             cur.execute(
-                f"SELECT {_OPERATOR_COLUMNS} FROM waxseal_operators "
-                "WHERE username = %s FOR UPDATE",
+                f"SELECT {_OPERATOR_COLUMNS} FROM waxseal_operators WHERE username = %s FOR UPDATE",
                 (username,),
             )
             row = cur.fetchone()
@@ -163,9 +160,7 @@ class PostgresOperatorStore:
             current = _operator(row)
             updated = Operator(
                 username=current.username,
-                display_name=(
-                    current.display_name if display_name is None else display_name
-                ),
+                display_name=(current.display_name if display_name is None else display_name),
                 email=None if clear_email else (current.email if email is None else email),
                 role=current.role if role is None else role,
                 created_at=current.created_at,
@@ -238,9 +233,7 @@ class PostgresOperatorStore:
         with self._connect() as conn:
             cur = conn.cursor()
             if username is None:
-                cur.execute(
-                    f"SELECT {_KEY_COLUMNS} FROM waxseal_api_keys ORDER BY ordinal DESC"
-                )
+                cur.execute(f"SELECT {_KEY_COLUMNS} FROM waxseal_api_keys ORDER BY ordinal DESC")
             else:
                 cur.execute(
                     f"SELECT {_KEY_COLUMNS} FROM waxseal_api_keys "
@@ -268,9 +261,7 @@ class PostgresOperatorStore:
     def has_active_key(self) -> bool:
         with self._connect() as conn:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT 1 FROM waxseal_api_keys WHERE revoked_at IS NULL LIMIT 1"
-            )
+            cur.execute("SELECT 1 FROM waxseal_api_keys WHERE revoked_at IS NULL LIMIT 1")
             return bool(cur.fetchone() is not None)
 
     def authenticate(self, plaintext: str) -> Principal | None:

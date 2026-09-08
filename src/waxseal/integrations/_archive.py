@@ -99,9 +99,7 @@ def archive_destination(
         # server answers 401. A refusal invented here would report "not
         # attempted" about a server that might not require a credential at
         # all; the server's own status is the honest answer.
-        return server_import_destination(
-            value, api_key=environ.get(ENV_ARCHIVE_API_KEY)
-        )
+        return server_import_destination(value, api_key=environ.get(ENV_ARCHIVE_API_KEY))
     return _unusable(
         f"scheme {scheme or '(none)'!r}",
         f"{ENV_ARCHIVE} names a scheme this build does not archive to "

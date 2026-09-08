@@ -112,7 +112,5 @@ def render_archive_state(report: ArchiveReport) -> list[str]:
     """
     return [
         f"{report.state.value}: "
-        + _ARCHIVE_LABEL[report.state].format(
-            destination=report.destination, detail=report.detail
-        )
+        + _ARCHIVE_LABEL[report.state].format(destination=report.destination, detail=report.detail)
     ]

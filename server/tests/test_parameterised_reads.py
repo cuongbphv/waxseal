@@ -86,18 +86,14 @@ class TestConsistency:
     ) -> None:
         # A root this chain never had is a positively detected disagreement, and
         # the comparison is deterministic — so it is a break, never an unknown.
-        body = stocked.get(
-            f"/v1/chains/default/consistency?old_seq=1&old_root={HEX64}"
-        ).json()
+        body = stocked.get(f"/v1/chains/default/consistency?old_seq=1&old_root={HEX64}").json()
         assert body["verdict"] == "broken"
 
     @pytest.mark.parametrize("seq", ["-1", "x", "1.5", ""])
     def test_a_seq_that_is_not_a_whole_number_never_reaches_argv(
         self, stocked: TestClient, seq: str
     ) -> None:
-        response = stocked.get(
-            f"/v1/chains/default/consistency?old_seq={seq}&old_root={HEX64}"
-        )
+        response = stocked.get(f"/v1/chains/default/consistency?old_seq={seq}&old_root={HEX64}")
         assert response.status_code == 400
         assert response.json()["error"] == "invalid_seq"
 
@@ -129,9 +125,7 @@ class TestVerifyHandoff:
         assert response.status_code == 400
         assert response.json()["error"] == "invalid_origin_id"
 
-    def test_a_missing_origin_parameter_is_a_400_not_a_verdict(
-        self, stocked: TestClient
-    ) -> None:
+    def test_a_missing_origin_parameter_is_a_400_not_a_verdict(self, stocked: TestClient) -> None:
         assert stocked.get("/v1/chains/default/verify-handoff").status_code == 422
 
 
@@ -140,9 +134,7 @@ class TestReconcileTickets:
         # Rule 5, and the reason this route exists at all: with no `--issued`
         # range the answer is "unmeasured", which must never render as "0 drops
         # detected".
-        body = stocked.get(
-            "/v1/chains/default/reconcile-tickets?issuer=acme&lease_size=10"
-        ).json()
+        body = stocked.get("/v1/chains/default/reconcile-tickets?issuer=acme&lease_size=10").json()
         assert body["verdict"] == "unverifiable"
         assert body["reconciliation"]["measured"] is False
         assert body["reconciliation"]["missing"] is None
@@ -150,9 +142,7 @@ class TestReconcileTickets:
     def test_the_parsed_reconciliation_is_returned_beside_the_stdout(
         self, stocked: TestClient
     ) -> None:
-        body = stocked.get(
-            "/v1/chains/default/reconcile-tickets?issuer=acme&lease_size=10"
-        ).json()
+        body = stocked.get("/v1/chains/default/reconcile-tickets?issuer=acme&lease_size=10").json()
         assert body["reconciliation"]["issuer"] == "acme"
 
     @pytest.mark.parametrize("size", ["0", "-4", "x", ""])
@@ -191,14 +181,10 @@ class TestReconcileTickets:
         assert response.status_code == 400
         assert response.json()["error"] == "invalid_issued"
 
-    def test_an_unreadable_report_leaves_the_parsed_field_null(
-        self, client: TestClient
-    ) -> None:
+    def test_an_unreadable_report_leaves_the_parsed_field_null(self, client: TestClient) -> None:
         # An absent chain prints nothing. None is "no reconciliation", never an
         # empty one that could read as "nothing missing".
-        body = client.get(
-            "/v1/chains/nope/reconcile-tickets?issuer=acme&lease_size=10"
-        ).json()
+        body = client.get("/v1/chains/nope/reconcile-tickets?issuer=acme&lease_size=10").json()
         assert body["reconciliation"] is None
 
 
@@ -322,9 +308,7 @@ class TestLedgerStatus:
     ADDRESS = "0x" + "ab" * 20
     PAIR = "https://rpc-a.example.test,https://rpc-b.example.test"
 
-    def test_an_unconfigured_ledger_is_a_state_not_an_error(
-        self, stocked: TestClient
-    ) -> None:
+    def test_an_unconfigured_ledger_is_a_state_not_an_error(self, stocked: TestClient) -> None:
         body = stocked.get("/v1/chains/default/ledger-status")
         assert body.status_code == 200
         assert body.json() == {
@@ -386,9 +370,7 @@ class TestLedgerStatus:
         assert "--bond" in argv
         assert "--writer" in argv
 
-    def test_every_optional_contract_reaches_argv_when_set(
-        self, stocked: TestClient
-    ) -> None:
+    def test_every_optional_contract_reaches_argv_when_set(self, stocked: TestClient) -> None:
         for key in (
             "ledger_liveness_address",
             "ledger_registry_address",
@@ -412,9 +394,7 @@ class TestLedgerStatus:
         ).json()["outcome"]["argv"]
         assert not any("attacker" in arg for arg in argv)
 
-    def test_a_bad_chain_id_is_refused_before_anything_runs(
-        self, client: TestClient
-    ) -> None:
+    def test_a_bad_chain_id_is_refused_before_anything_runs(self, client: TestClient) -> None:
         response = client.get("/v1/chains/a%20b/ledger-status")
         assert response.status_code == 400
         assert response.json()["error"] == "invalid_chain_id"

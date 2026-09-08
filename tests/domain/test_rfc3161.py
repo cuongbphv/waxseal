@@ -87,8 +87,7 @@ def sha256_algid() -> bytes:
 def message_imprint(message: bytes = b"message", *, algid: bytes | None = None) -> bytes:
     return _tlv(
         0x30,
-        (sha256_algid() if algid is None else algid)
-        + _tlv(0x04, hashlib.sha256(message).digest()),
+        (sha256_algid() if algid is None else algid) + _tlv(0x04, hashlib.sha256(message).digest()),
     )
 
 
@@ -114,9 +113,7 @@ def tst_info(
 
 def signed_data(tst: bytes, *, encap: bytes | None = None, items: bytes | None = None) -> bytes:
     encapsulated = (
-        _tlv(0x30, _der_oid(TSTINFO_OID) + _tlv(0xA0, _tlv(0x04, tst)))
-        if encap is None
-        else encap
+        _tlv(0x30, _der_oid(TSTINFO_OID) + _tlv(0xA0, _tlv(0x04, tst))) if encap is None else encap
     )
     body = _der_int(3) + _tlv(0x31, b"") + encapsulated + _tlv(0x31, b"")
     return _tlv(0x30, items if items is not None else body)
@@ -230,8 +227,7 @@ class TestCheckedAndFalse:
     def test_a_replayed_token_is_caught_by_the_nonce(self) -> None:
         der, message, expect = granted()
         assert (
-            check_timestamp_resp(der, message, expected_nonce=expect["nonce"] + 1)
-            == NONCE_MISMATCH
+            check_timestamp_resp(der, message, expected_nonce=expect["nonce"] + 1) == NONCE_MISMATCH
         )
 
     def test_a_rejection_is_reported_as_a_rejection(self) -> None:
@@ -284,9 +280,7 @@ class TestUnreadable:
     def test_a_genTime_without_a_trailing_z_is_unreadable(self) -> None:
         der, message, _ = granted()
         _, _, expect = granted()
-        broken = der.replace(
-            expect["gen_time"].encode(), expect["gen_time"][:-1].encode() + b"+"
-        )
+        broken = der.replace(expect["gen_time"].encode(), expect["gen_time"][:-1].encode() + b"+")
         assert broken != der
         assert check_timestamp_resp(broken, message) == MALFORMED_TOKEN
 
@@ -362,8 +356,10 @@ class TestEveryWayAResponseCanBeUnreadable:
             ("status INTEGER is empty", response(status=_tlv(0x30, _tlv(0x02, b"")))),
             (
                 "a third top-level element",
-                _tlv(0x30, _tlv(0x30, _der_int(0)) + content_info(signed_data(tst_info()))
-                     + _der_int(1)),
+                _tlv(
+                    0x30,
+                    _tlv(0x30, _der_int(0)) + content_info(signed_data(tst_info())) + _der_int(1),
+                ),
             ),
             (
                 "ContentInfo has one element",
@@ -383,23 +379,48 @@ class TestEveryWayAResponseCanBeUnreadable:
             ),
             (
                 "encapContentInfo has no eContent",
-                response(content_info(signed_data(tst_info(), encap=_tlv(0x30, _der_oid(
-                    TSTINFO_OID))))),
+                response(
+                    content_info(signed_data(tst_info(), encap=_tlv(0x30, _der_oid(TSTINFO_OID))))
+                ),
             ),
             (
                 "eContentType is not TSTInfo",
-                response(content_info(signed_data(tst_info(), encap=_tlv(
-                    0x30, _der_oid("1.2.3.4") + _tlv(0xA0, _tlv(0x04, tst_info())))))),
+                response(
+                    content_info(
+                        signed_data(
+                            tst_info(),
+                            encap=_tlv(
+                                0x30, _der_oid("1.2.3.4") + _tlv(0xA0, _tlv(0x04, tst_info()))
+                            ),
+                        )
+                    )
+                ),
             ),
             (
                 "eContent is not [0] EXPLICIT",
-                response(content_info(signed_data(tst_info(), encap=_tlv(
-                    0x30, _der_oid(TSTINFO_OID) + _tlv(0xA1, _tlv(0x04, tst_info())))))),
+                response(
+                    content_info(
+                        signed_data(
+                            tst_info(),
+                            encap=_tlv(
+                                0x30, _der_oid(TSTINFO_OID) + _tlv(0xA1, _tlv(0x04, tst_info()))
+                            ),
+                        )
+                    )
+                ),
             ),
             (
                 "eContent is not an OCTET STRING",
-                response(content_info(signed_data(tst_info(), encap=_tlv(
-                    0x30, _der_oid(TSTINFO_OID) + _tlv(0xA0, _tlv(0x30, tst_info())))))),
+                response(
+                    content_info(
+                        signed_data(
+                            tst_info(),
+                            encap=_tlv(
+                                0x30, _der_oid(TSTINFO_OID) + _tlv(0xA0, _tlv(0x30, tst_info()))
+                            ),
+                        )
+                    )
+                ),
             ),
             ("TSTInfo is missing fields", well_formed(gen_time=b"")),
             ("version is not an INTEGER", well_formed(version=_tlv(0x04, b"\x01"))),

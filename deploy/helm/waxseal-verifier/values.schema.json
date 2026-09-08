@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "waxseal-verifier values",
+  "description": "Scheduled verification and reporting, in a different namespace or cluster from the chain server. CronJobs only: no Deployment, no Service, no trail volume, no write credential.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["image", "trailUrl", "credentials", "verify", "report"],
+  "properties": {
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "tag", "pullPolicy"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": {
+          "description": "Never `latest`. `unverifiable` is a statement about which build read the trail, so the build has to be nameable.",
+          "type": "string",
+          "minLength": 1,
+          "not": { "const": "latest" }
+        },
+        "digest": {
+          "description": "Optional. `sha256:<64 hex>` of the published image; when set it pins the bytes and the tag only names the release. Images are cosign-signed by digest.",
+          "type": "string",
+          "pattern": "^(|sha256:[0-9a-f]{64})$"
+        },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "imagePullSecrets": { "type": "array", "items": { "type": "object" } },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "type": "object" },
+        "automountServiceAccountToken": { "type": "boolean" }
+      }
+    },
+    "podAnnotations": { "type": "object" },
+    "podLabels": { "type": "object" },
+    "trailUrl": {
+      "description": "REQUIRED at install time. The chain server's base URL. Empty is refused by templates/validate.yaml rather than defaulted: a verifier pointed at a URL somebody else chose is a verifier nobody aimed.",
+      "type": "string",
+      "pattern": "^(|https?://.+)$"
+    },
+    "credentials": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A VIEWER or AUDITOR key. The variable name WAXSEAL_API_KEY is shared with the chain server's bootstrap credential; the value must not be.",
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "apiKey": { "type": "string" }
+      }
+    },
+    "verify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "schedule", "pin"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "schedule": { "type": "string", "minLength": 1 },
+        "anchors": {
+          "description": "No effect against a URL target: a remote trail has no local .anchors sidecar. The CLI says so on stderr.",
+          "type": "boolean"
+        },
+        "pin": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "mountPath", "fileName"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "mountPath": { "type": "string", "pattern": "^/" },
+            "fileName": { "type": "string", "minLength": 1 },
+            "size": { "type": "string", "minLength": 1 },
+            "storageClass": { "type": "string" },
+            "accessMode": { "enum": ["ReadWriteOnce", "ReadWriteOncePod"] },
+            "existingClaim": { "type": "string" }
+          }
+        },
+        "witnessUrls": { "type": "array", "items": { "type": "string", "pattern": "^https?://" } },
+        "expectAnchorBinding": { "type": "boolean" },
+        "maxAnchorAgeSeconds": {
+          "description": "null means the declaration is not made at all, which is not the same claim as a very large number.",
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "concurrencyPolicy": { "enum": ["Forbid", "Replace", "Allow"] },
+        "backoffLimit": { "type": "integer", "minimum": 0 },
+        "successfulJobsHistoryLimit": { "type": "integer", "minimum": 0 },
+        "failedJobsHistoryLimit": { "type": "integer", "minimum": 1 },
+        "resources": { "type": "object" }
+      }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "schedule"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "schedule": { "type": "string", "minLength": 1 },
+        "concurrencyPolicy": { "enum": ["Forbid", "Replace", "Allow"] },
+        "backoffLimit": { "type": "integer", "minimum": 0 },
+        "successfulJobsHistoryLimit": { "type": "integer", "minimum": 0 },
+        "failedJobsHistoryLimit": { "type": "integer", "minimum": 1 },
+        "resources": { "type": "object" }
+      }
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "properties": {
+        "runAsNonRoot": { "const": true },
+        "runAsUser": { "type": "integer", "minimum": 1 },
+        "fsGroup": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "containerSecurityContext": {
+      "type": "object",
+      "properties": {
+        "allowPrivilegeEscalation": { "const": false },
+        "readOnlyRootFilesystem": { "type": "boolean" }
+      }
+    },
+    "nodeSelector": { "type": "object" },
+    "tolerations": { "type": "array" },
+    "affinity": { "type": "object" },
+    "extraEnv": { "type": "array", "items": { "type": "object", "required": ["name"] } }
+  }
+}

@@ -1,0 +1,123 @@
+waxseal-server {{ .Chart.AppVersion }} installed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+  Service:  {{ include "waxseal-server.fullname" . }}:{{ .Values.service.port }} (ClusterIP)
+  Data dir: {{ .Values.persistence.mountPath }}{{ if not .Values.persistence.enabled }}  ** emptyDir — DELETED WITH THE POD **{{ end }}
+  Replicas: {{ .Values.replicaCount }} (locked; one writer per trail, CLAUDE.md rule 7)
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "waxseal-server.fullname" . }} 8000:{{ .Values.service.port }}
+
+FOUR AUTHORITIES, AND THIS RELEASE IS ONE OF THEM
+=================================================
+docs/architecture/deployment.md section 1: the load-bearing property of the
+reference topology is that the application, chain, anchor and verifier domains
+are four different ADMINISTRATIVE AUTHORITIES, not four boxes on a diagram.
+Every detection that survives an attacker with write access survives because
+something they needed was under someone else's control.
+
+This release is the CHAIN domain. It must not also hold:
+
+  * the anchor destination — if the chain server owns it, an attacker who can
+    rewrite the trail can rewrite the roots that would have contradicted it;
+  * the verifier's pin file — a pin's entire value is that it lives where the
+    trail's writer cannot reach (adapters/pinstore.py says so in the code);
+  * the seal key A0 — it is escrowed with the verifier and never written to a
+    writing host.
+
+A WITNESS INSTALLED BY THIS SAME RELEASE WITNESSES NOTHING. It answers to this
+namespace, this RBAC boundary and this release's upgraders, so it can be forked
+alongside the chain it is meant to cross-check. That is why this chart has no
+witness template. Host a witness for ANOTHER team's chain, and let another team
+host yours.
+
+Run the verifier from the other chart, in another namespace or another cluster:
+
+  helm install waxseal-verifier deploy/helm/waxseal-verifier \
+    --namespace waxseal-audit --create-namespace \
+    --set trailUrl=http://{{ include "waxseal-server.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+{{- if not (include "waxseal-server.hasDatabase" .) }}
+
+NO DATABASE CONFIGURED — THIS DEPLOYMENT IS DEVELOPMENT-ONLY
+============================================================
+WAXSEAL_SERVER_DATABASE_URL is not configured for this release, so:
+
+  * operators and API keys live in MEMORY and are forgotten on every restart;
+  * the settings store is in memory too and reverts on restart, so a
+    deployment that looks configured silently is not;
+  * the post-install seed hook was NOT rendered. `waxseal-server-admin seed`
+    runs in its own pod: with no database it would write operators into that
+    pod's memory and discard them on exit. A hook reporting success while
+    having seeded nothing reachable is worse than no hook.
+
+Set secrets.databaseUrl (or point secrets.existingSecret at a Secret carrying
+WAXSEAL_SERVER_DATABASE_URL and set secrets.declaresDatabaseUrl=true) before
+this is anything but a demo. PostgreSQL is external on purpose: no subchart.
+{{- end }}
+{{- if not .Values.secrets.existingSecret }}
+{{- if not (or .Values.secrets.apiKey .Values.secrets.witnessApiKey) }}
+
+WRITE AUTH IS OPEN
+==================
+No WAXSEAL_API_KEY is configured and no key has been minted, so this server
+accepts writes from anyone who can reach it. It says so itself at
+GET /v1/meta ("write_auth": "open") and in the portal — a fail-open that
+described itself as secured would be the false-confidence half of the collapse
+this project exists to prevent, so it is a labelled state rather than a silent
+one. Seeding is what closes it:
+
+  kubectl -n {{ .Release.Namespace }} exec sts/{{ include "waxseal-server.fullname" . }} -- \
+    waxseal-server-admin key-mint --username user-waxseal --label agent-hook
+
+Give a hook the WRITER key, never the admin one.
+{{- end }}
+{{- if .Values.secrets.apiKey }}
+
+CREDENTIALS WERE SUPPLIED INLINE
+================================
+They are in this release's stored manifest, readable by anyone who can read
+Helm releases in {{ .Release.Namespace }}. Development shape only. Move them to
+a Secret you create outside the chart and set secrets.existingSecret.
+{{- end }}
+{{- end }}
+{{- if .Values.secrets.existingSecret }}
+
+EXISTING SECRET: {{ .Values.secrets.existingSecret }}
+Helm cannot read a cluster Secret at render time, so the chart could NOT check
+that WAXSEAL_API_KEY and WAXSEAL_WITNESS_API_KEY differ in it. That check is
+yours. A witness holding the chain's write credential could append forged
+entries to the very chain it exists to cross-check (REMOTE.md section 8).
+{{- end }}
+{{- if .Values.anchor.enabled }}
+
+ANCHOR CLIENT ENABLED — schedule {{ .Values.anchor.schedule }}
+Trail: {{ .Values.anchor.trailPath }}
+Sinks:{{ with .Values.anchor.tsaUrl }} tsa={{ . }}{{ end }}{{ with .Values.anchor.otsCalendar }} ots={{ . }}{{ end }}{{ range .Values.anchor.witnessUrls }} witness={{ . }}{{ end }}
+The client is here on purpose; every sink above must answer to an authority
+that is NOT this one. Check each URL against that before you call the trail
+anchored.
+{{- end }}
+{{- if not .Values.anchor.enabled }}
+
+NOT ANCHORED
+============
+No anchor client is scheduled for this release. Chain verification still
+detects an edit, a deletion, an insertion and a reorder, but nothing yet bounds
+a consistent rewrite of the whole trail by someone with write access — that
+bound is anchoring into a domain they do not control (deployment.md section 5).
+This is a labelled absence, not a failure: rollout step 3 of deployment.md
+section 7 is where it closes, and scenarios 5 and 6 of the PoC walkthrough only
+become detectable then.
+{{- end }}
+
+TLS
+===
+{{- if .Values.ingress.enabled }}
+Ingress is enabled for {{ .Values.ingress.host }}{{ if not .Values.ingress.tls.enabled }} WITHOUT TLS. Terminate TLS at the proxy before this is reachable from anywhere that matters{{ else }}; TLS terminates at the proxy using secret {{ .Values.ingress.tls.secretName }}{{ end }}.
+{{- else }}
+No Ingress. The Service is ClusterIP and the container speaks plain HTTP.
+Terminate TLS at a reverse proxy or load balancer in front of it; this project
+does not ship a PKI story and will not invent one.
+{{- end }}
+
+Read before this matters: docs/architecture/deployment.md (topology, separation
+of duties, exit codes), server/docs/deployment.md (environment, data layout,
+seeding), deploy/README.md (what is in deploy/ and which authority owns it).

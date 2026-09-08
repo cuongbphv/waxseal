@@ -70,7 +70,7 @@ most of them do not do. It comes from a survey of Python audit-log libraries in 
 | Version rollback degrades gracefully (unverifiable ≠ tampered, exit 2 ≠ exit 1) | ✅ | ❌ unknown version = error | ❌ |
 | Completeness reported separately: `dropped_writes`, `None` ≠ `0` | ✅ | ❌ chain-ok implies all-ok | ❌ |
 | Fork-proof concurrent appends, with the mechanism documented **per backend** and a falsifiability-tested lock | ✅ | varies, usually single-writer assumed | ❌ |
-| Byte-level SPEC (freeze planned for v1) + golden test vectors → portable to Go/Rust/TS | ✅ | ❌ format = whatever the code does | ❌ |
+| Byte-level SPEC (freeze planned for v1) + golden test vectors -> portable to Go/Rust/TS | ✅ | ❌ format = whatever the code does | ❌ |
 | Zero runtime dependencies (S3/Postgres clients are injected, never imported) | ✅ | often pulls crypto/serialization stacks | ✅ |
 | Redact-before-hash (secrets never reach disk, hash commits to redacted bytes) | ✅ | sometimes | ❌ |
 | Built-in external anchoring: RFC 3161 TSA, OpenTimestamps, witness, or your own sink (`anchor_every=N`) | ✅ | ❌ | ❌ |
@@ -78,6 +78,10 @@ most of them do not do. It comes from a survey of Python audit-log libraries in 
 | Forward-secure seals (key-evolving HMAC, stdlib only) + injected Ed25519 signatures | ✅ | ❌ | ❌ |
 | FssAgg aggregate tag closing the truncation gap even if the keyfile leaks | ✅ | ❌ | ❌ |
 | Remote HTTP backend as a full peer to local storage, with an explicit trust model | ✅ | rare, undocumented trust model | ❌ |
+| Ledger ternary: live / delinquent / unreachable (`waxseal ledger-status`) | ✅ | ❌ | ❌ |
+| Scoped WORM for sealed segments (S3 Object Lock; never the live tail) | ✅ | ❌ | ❌ |
+| Sealed segments + rotation bindings (`waxseal segments`) | ✅ | ❌ | ❌ |
+| Cost-optimal anchoring cadence (`waxseal cadence`; opens no trail) | ✅ | ❌ | ❌ |
 
 The first two rows are the failure class from the two incidents above.
 
@@ -87,7 +91,7 @@ Every append follows this path:
 
 ```mermaid
 flowchart LR
-    A["your agent<br/>append(payload)"] --> R["Redactor<br/>secrets → ***REDACTED***"]
+    A["your agent<br/>append(payload)"] --> R["Redactor<br/>secrets -> ***REDACTED***"]
     R --> C["canonical bytes<br/>payload_hash = sha256"]
     C --> H["EntryHeader built under<br/>the backend's lock<br/>(seq, prev_hash from tail)"]
     H --> EH["entry_hash =<br/>sha256(framed header)"]
@@ -111,14 +115,14 @@ the tampering ones:
 ```mermaid
 flowchart TD
     V["waxseal verify"] --> Q1{"seq contiguous?"}
-    Q1 -- "no" --> X1["BROKEN: seq_gap → exit 1"]
+    Q1 -- "no" --> X1["BROKEN: seq_gap -> exit 1"]
     Q1 -- "yes" --> Q2{"prev_hash links?"}
-    Q2 -- "no" --> X2["BROKEN: prev_hash_mismatch → exit 1"]
+    Q2 -- "no" --> X2["BROKEN: prev_hash_mismatch -> exit 1"]
     Q2 -- "yes" --> Q3{"fingerprint known?"}
-    Q3 -- "no" --> U["unverifiable by name → exit 2<br/>NOT tampering (rollback-safe)"]
+    Q3 -- "no" --> U["unverifiable by name -> exit 2<br/>NOT tampering (rollback-safe)"]
     Q3 -- "yes" --> Q4{"entry_hash & payload_hash match?"}
-    Q4 -- "no" --> X3["BROKEN → exit 1"]
-    Q4 -- "yes" --> OK["ok → exit 0"]
+    Q4 -- "no" --> X3["BROKEN -> exit 1"]
+    Q4 -- "yes" --> OK["ok -> exit 0"]
 ```
 
 ## Install
@@ -129,6 +133,26 @@ pip install waxseal
 
 Released on [PyPI](https://pypi.org/project/waxseal/). From source:
 `pip install git+https://github.com/cuongbphv/waxseal`
+
+Four other ways, for the places a verifier actually has to run:
+
+```bash
+uv tool install waxseal            # or: pipx install waxseal
+curl -fsSL https://raw.githubusercontent.com/cuongbphv/waxseal/main/deploy/install.sh | sh
+docker run --rm -v "$PWD:/data:ro" ghcr.io/cuongbphv/waxseal verify /data/trail.jsonl
+python3 waxseal-0.1.6.pyz verify trail.jsonl
+```
+
+The installer script verifies the artifact's SHA-256 against the release's
+`SHA256SUMS` before anything is moved or executed, and says so out loud when it
+cannot check a signature. The last line is the single-file zipapp attached to
+each release: because the runtime dependency list is empty, one file plus a
+`python3` is a complete verifier, which is what an air-gapped review needs.
+
+For a cluster or a host, `deploy/` carries the runtime image, two Helm charts
+under separate administrative authorities, systemd units and a compose overlay.
+Read [deploy/README.md](deploy/README.md) first - it says which piece belongs to
+which trust domain, and which two must never share one.
 
 ## Capability extras
 
@@ -147,15 +171,15 @@ Shipped today:
 |---|---|---|---|
 | `s3` | `pip install waxseal[s3]` | `boto3` | an S3 client for `S3Backend` (conditional-PUT appends) |
 | `postgres` | `pip install waxseal[postgres]` | `psycopg[binary]>=3.1` | a connection factory for `PostgresBackend` |
-| `rfc3161` | `pip install waxseal[rfc3161]` | `cryptography>=40` | nothing — see the note below |
-| `evm` | `pip install waxseal[evm]` | none — deliberately empty, see below | a `Signer` for the on-chain ledger layer's write path |
+| `rfc3161` | `pip install waxseal[rfc3161]` | `cryptography>=40` | nothing - see the note below |
+| `evm` | `pip install waxseal[evm]` | none - deliberately empty, see below | a `Signer` for the on-chain ledger layer's write path |
 
 `rfc3161` is the one extra waxseal does import itself, inside a single function
 (`adapters/rfc3161_verify.py`), which is why its "inject" column is empty. It
 turns on the optional signature dimension of `verify`/`report`, and only when
 you name a CA bundle with `--tsa-ca-file`: a token whose CMS signature or
 certificate chain fails is exit 1, and anything that could not be checked at
-all — the extra absent included — is exit 2 with a label saying which, never a
+all - the extra absent included - is exit 2 with a label saying which, never a
 silent exit 0. Without the flag nothing changes: receipts are checked
 structurally, exactly as before. See [SPEC.md](SPEC.md) section 17.1.
 
@@ -164,14 +188,14 @@ the on-chain ledger layer (`ports/ledger.py`, `domain/bond.py`,
 `domain/liveness.py`, `domain/abi.py`, `domain/registry.py`,
 `adapters/evm.py`) reads a contract over the same stdlib JSON-RPC `Transport`
 `RemoteBackend` already uses (`eth_call`, no client to fetch) and writes
-through a `Signer` the operator constructs and injects — there is nothing for
+through a `Signer` the operator constructs and injects - there is nothing for
 `pip` to pull in. The extra exists only so `pip install waxseal[evm]` is a
 valid thing to type and the capability has a name in the metadata; it never
 becomes a route by which a crypto library reaches the core. The layer is
-chain-agnostic behind the port — EVM is the first adapter, not the design.
+chain-agnostic behind the port - EVM is the first adapter, not the design.
 CLI surface: `waxseal ledger-status`, `waxseal registry publish`, `waxseal
 bond deposit`/`bond prove`, and `verify`/`report --rpc/--liveness/--registry`,
-`anchor --evm-liveness` (see the CLI list under [Usage](#usage) below) —
+`anchor --evm-liveness` (see the CLI list under [Usage](#usage) below) -
 checked end-to-end against two live anvil chains running real Foundry contracts
 (`contracts/src/AnchoringLiveness.sol`, `BondedCheckpoints.sol`,
 `FingerprintRegistry.sol`; commits `26b074c`/`c21e0e6`/`20f2762`/`26e3e91`).
@@ -197,7 +221,7 @@ extra and you edit that table; the other two READMEs need touching only when the
 ```python
 from waxseal import AuditLog
 
-log = AuditLog.open("~/.myagent/audit/trail.jsonl")   # or trail.db for SQLite
+log = AuditLog.open("~/.myagent/audit/trail.jsonl")  # or trail.db for SQLite
 
 log.append(
     payload={"tool": "bash", "command": "ls -la", "exit_code": 0},
@@ -215,8 +239,10 @@ Redact secrets **before** they are hashed and stored:
 from waxseal.adapters.redactors import RegexRedactor
 
 log = AuditLog.open("trail.jsonl", redactor=RegexRedactor())
-log.append(payload={"cmd": "curl -H 'Authorization: Bearer sk-...'"},
-           payload_type="application/vnd.myagent.toolcall+json")
+log.append(
+    payload={"cmd": "curl -H 'Authorization: Bearer sk-...'"},
+    payload_type="application/vnd.myagent.toolcall+json",
+)
 # cleartext never reaches disk; the hash commits to the redacted payload
 ```
 
@@ -227,11 +253,15 @@ waxseal verify trail.jsonl   # exit 0 intact / 1 broken / 2 unverifiable present
 waxseal tail trail.jsonl -n 20
 waxseal inspect trail.jsonl
 waxseal head trail.jsonl       # print the chain head (seq + entry_hash) for anchoring
-waxseal checkpoint trail.jsonl # print {seq, entry_hash, root} — a batch root, not just the tip
+waxseal checkpoint trail.jsonl # print {seq, entry_hash, root} - a batch root, not just the tip
 waxseal anchor trail.jsonl     # append a checkpoint to the local .anchors sidecar
 waxseal verify --anchors trail.jsonl  # also check trail history against .anchors
 waxseal preflight trail.jsonl  # which attacker-capability rung this config stops; always exit 0 (exit 3: no such trail)
 waxseal segments trail-dir/    # verify every sealed segment + rotation binding in a directory; read-only
+waxseal cadence --lam RATE --c COST --w HARM --rho RATE --delta SEC --t-max SEC  # cost-optimal N*; opens no trail
+waxseal reconcile-tickets trail.jsonl --issuer NAME --lease-size L [--issued SPEC]
+waxseal receipt trail.jsonl --out DIR   # extract stored RFC 3161 / OTS receipts; writes only under --out
+waxseal verify --tsa-ca-file bundle.pem trail.jsonl  # native CMS/X.509 check (waxseal[rfc3161])
 
 # Any of the above except `anchor` also accepts a remote chain server URL:
 waxseal verify http://chain.example.com/v1/chains/default
@@ -240,6 +270,7 @@ waxseal verify http://chain.example.com/v1/chains/default
 waxseal ledger-status trail.jsonl --liveness 0xADDR --rpc https://rpc1 --rpc https://rpc2
 waxseal registry publish --descriptor-of FINGERPRINT --registry 0xADDR --rpc https://rpc1 --rpc https://rpc2
 waxseal bond deposit --bond 0xADDR --amount-wei 1000000000000000000 --rpc https://rpc1 --rpc https://rpc2
+waxseal bond prove proof.json --bond 0xADDR --rpc https://rpc1 --rpc https://rpc2
 ```
 
 ## Storage backends
@@ -257,7 +288,7 @@ concurrent writers can never fork the chain.
 | Remote (HTTP) | `waxseal.adapters.remote` | server-side compare-and-swap on `(seq, prev_hash)`, client retries on `409` | none (stdlib `urllib`) |
 
 ```python
-# S3 — the client is injected; waxseal itself stays dependency-free
+# S3 - the client is injected; waxseal itself stays dependency-free
 import boto3
 from waxseal import AuditLog
 from waxseal.adapters.s3 import S3Backend
@@ -265,7 +296,7 @@ from waxseal.adapters.s3 import S3Backend
 backend = S3Backend(boto3.client("s3"), bucket="my-audit", prefix="agent-1")
 log = AuditLog(backend)
 
-# PostgreSQL — same pattern with a connection factory
+# PostgreSQL - same pattern with a connection factory
 import psycopg
 from waxseal.adapters.postgres import PostgresBackend
 
@@ -311,7 +342,7 @@ Beyond agent actions, chain any file/document history:
 ```python
 from waxseal.sources.files import record_file, current_matches_last
 
-record_file(log, "SPEC.md", doc_id="spec")          # snapshot content hash into the chain
+record_file(log, "SPEC.md", doc_id="spec")  # snapshot content hash into the chain
 current_matches_last(log, "SPEC.md", doc_id="spec")  # True / False / None (never recorded)
 ```
 
@@ -333,17 +364,27 @@ from waxseal.sources.decisions import commit_input, record_decision
 redactor = RegexRedactor()
 log = AuditLog.open("decisions.jsonl", redactor=redactor)
 
-record_decision(log, DecisionRecord(
-    decision_id="DEC-1001",
-    decision_type="transaction_approval",
-    system_id="screening-agent",
-    model=ModelRef(name="my-model", version="2026.08.1"),
-    input_commitment=commit_input(model_input, redactor=redactor),  # redacted, then hashed
-    outcome="approve",
-    rationale="below thresholds, established counterparty",
-    human_oversight=HumanOversight(mode="automated"),  # None = not recorded, NOT automated
-))
+record_decision(
+    log,
+    DecisionRecord(
+        decision_id="DEC-1001",
+        decision_type="transaction_approval",
+        system_id="screening-agent",
+        model=ModelRef(name="my-model", version="2026.08.1"),
+        input_commitment=commit_input(model_input, redactor=redactor),  # redacted, then hashed
+        outcome="approve",
+        rationale="below thresholds, established counterparty",
+        human_oversight=HumanOversight(mode="automated"),  # None = not recorded, NOT automated
+        risk_tier="high",  # the PROVIDER's own classification; None = not declared
+        classification_ref="RC-2026-014/v2",  # pointer to the dossier, never its contents
+    ),
+)
 ```
+
+`risk_tier` is recorded verbatim and never interpreted: `"high"` and `"cao"` stay
+two distinct declarations, because folding them would restate a classification
+that is the provider's to make. `None` means no tier was declared, which the
+report counts apart from every tier and never renders as the lowest one.
 
 Read decisions back with `iter_decisions`, which walks the trail in chain order and
 yields `(entry, record)`. A row whose bytes no longer parse as a decision is still
@@ -355,9 +396,9 @@ from waxseal.sources.decisions import iter_decisions
 
 for entry, record in iter_decisions(log, decision_type="transaction_approval"):
     if record is None:
-        print(f"seq {entry.header.seq}: unparseable — run `waxseal verify`")
+        print(f"seq {entry.header.seq}: unparseable - run `waxseal verify`")
     else:
-        print(f"seq {entry.header.seq}: {record.decision_id} → {record.outcome}")
+        print(f"seq {entry.header.seq}: {record.decision_id} -> {record.outcome}")
 ```
 
 An auditor reads a report, and can check one decision without being handed the log:
@@ -367,6 +408,54 @@ waxseal report decisions.jsonl              # Markdown; --json for SIEM/GRC
 waxseal export-proof decisions.jsonl 3 > proof.json
 waxseal verify-proof proof.json             # offline; no trail needed
 ```
+
+### Incidents and human interventions
+
+Two more evidence families, for the two things a regulator asks about after a
+decision log: what happened when the system went wrong, and who stepped in.
+
+```python
+from waxseal import IncidentRecord, InterventionRecord
+from waxseal.sources.incidents import record_incident
+from waxseal.sources.interventions import record_intervention
+
+record_incident(
+    log,
+    IncidentRecord(
+        incident_id="INC-2026-0007",
+        system_id="screening-agent",
+        detected_at="2026-09-01T07:10:00+00:00",
+        confirmed_at="2026-09-01T08:00:00+00:00",  # the moment a reporting clock starts from
+        severity="serious",
+        summary="scoring drifted after a data-source change",  # redacted before it is hashed
+        report_ref=None,  # no submission recorded HERE - never "not reported"
+    ),
+)
+
+record_intervention(
+    log,
+    InterventionRecord(
+        intervention_id="IV-41",
+        system_id="screening-agent",
+        actor_ref="risk-queue-7",  # pseudonymous, like reviewer_ref
+        action="halt",
+        decision_ref="DEC-1001",  # None = not an act on one recorded decision
+    ),
+)
+```
+
+```bash
+waxseal incidents decisions.jsonl --report-window-h 72 --as-of 2026-09-05T08:00:00+00:00
+```
+
+That command reads, it does not judge. Its exit codes are 0, 2 and 3 - never 1 -
+because every timestamp involved is one a writer asserted and the window is a
+number an operator typed. A reading of `no_report_recorded_past_window` is a
+statement about this trail, not a finding that a deadline was missed: waxseal has
+no channel to any authority and cannot see whether a report was filed. When a
+submission does happen, append a new row with the same `incident_id` carrying the
+receipt; nothing is edited, the newest row wins as a whole record, and the row
+count stays visible so the restatement history is readable.
 
 A proof bundle is one entry plus its Merkle path, so answering a question about one
 subject does not disclose every other decision in the trail. The report prints a check
@@ -396,10 +485,9 @@ cannot close on its own.
 from waxseal import AuditLog
 from waxseal.adapters.anchors import FileAnchorSink
 
-log = AuditLog.open("trail.jsonl",
-                    anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
+log = AuditLog.open("trail.jsonl", anchor_sink=FileAnchorSink("trail.jsonl"), anchor_every=100)
 # every 100th append best-effort publishes a checkpoint outside the write path;
-# a failed anchor never blocks a write — it only counts against anchor_failures
+# a failed anchor never blocks a write - it only counts against anchor_failures
 ```
 
 `waxseal verify --anchors` replays every recorded checkpoint against the
@@ -423,14 +511,14 @@ waxseal anchor trail.jsonl --witness https://witness.example/anchor
 waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https://witness.example/anchor
 ```
 
-- **RFC 3161** makes `ts` attested rather than asserted. waxseal checks the reply
-  *structurally* (status, message imprint, nonce, digest algorithm) and says so in every
-  line it prints. By default it does **not** verify the CMS/X.509 signature; that is
-  delegated to `openssl ts -verify` and the recipe is in the docs. A receipt it cannot
-  read is *unverifiable* (exit 2); only one that attests different bytes is *broken*
-  (exit 1). With the `rfc3161` extra installed and a CA bundle you name
-  (`--tsa-ca-file`), the signature dimension is checked too — and a token it could not
-  check is exit 2 with a label, never a silent pass.
+- **RFC 3161** makes `ts` attested rather than asserted. The native path is
+  `waxseal[rfc3161]` plus `--tsa-ca-file`: waxseal checks the CMS/X.509 signature
+  itself, and a token it could not check is exit 2 with a label, never a silent
+  pass. Without the extra or the flag, receipts are checked *structurally*
+  (status, message imprint, nonce, digest algorithm) and the signature step is
+  left to `openssl ts -verify` as a fallback (recipe in the docs). A receipt it
+  cannot read is *unverifiable* (exit 2); only one that attests different bytes
+  is *broken* (exit 1).
 - **OpenTimestamps** stores a *pending* Bitcoin proof, opaquely and on purpose. Finish it
   later with `ots upgrade` / `ots verify`.
 - The two can be given **together on one `anchor` run**, publishing the same checkpoint to
@@ -461,11 +549,12 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 
   `verify`/`report --pin` accept `--expect-anchor-binding` (a flag), `--max-anchor-age-s
   SECONDS`, and `--declare-topology SPEC` (all four `SeparationTopology` subfields together,
-  e.g. `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`) to write these three
-  declarations. Each of them requires `--pin`, each only lands on a run that actually
-  advances the pin, and a `--declare-topology` naming some but not all four subfields is a
-  CLI usage error
-  rather than a silent default. A pin advance with none of these flags preserves whatever
+  e.g. `seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true`, plus an optional
+  fifth `ledger=true`/`ledger=false`) to write these declarations. Each of them requires
+  `--pin`, each only lands on a run that actually advances the pin, and a
+  `--declare-topology` naming some but not all four required subfields is a CLI usage error
+  rather than a silent default. Omitting `ledger=` parses as `ledger=None` ("never asked"),
+  not as declared-false. A pin advance with none of these flags preserves whatever
   was already declared. You can still hand-edit the pin state JSON directly; the format is
   SPEC section 13.1. `waxseal verify`/`waxseal report` print the separation degree τ that
   `declared_topology` describes on every run; see
@@ -473,7 +562,7 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
 - **`--witness`** is the outside channel a pin cannot be. A pin catches a server that
   rewrites history for you; only a witness in a *different* trust domain catches one
   showing two clients two different histories. An unreachable witness prints
-  `unreachable — NOT checked` and exits 2 (unverifiable): a check that did not
+  `unreachable - NOT checked` and exits 2 (unverifiable): a check that did not
   run is neither a pass nor tampering.
 
 - [docs/anchoring-external-time.md](docs/anchoring-external-time.md) has the `openssl ts`
@@ -484,15 +573,17 @@ waxseal verify trail.jsonl --anchors --pin ~/.waxseal/prod.pin --witness https:/
   detect against a Byzantine chain server, and how to cite waxseal output without
   overclaiming.
 - [docs/paper/conformance.md](docs/paper/conformance.md) records what an independent
-  formal re-analysis of this library asked for, what 0.1.4 delivered, and, row by row
-  with evidence, what it did not, including the parts no release note had declared.
+  formal re-analysis of this library asked for. 0.1.5 closed the contract layer
+  (liveness, bond, fingerprint registry), cost-optimal cadence, and scoped WORM;
+  the body is still the evidence ledger of which row shipped and which gap stayed
+  open.
 
 ## Signatures & forward-secure seals
 
 A keyless hash chain can be recomputed by anyone with write access. The attestation
 layer closes that gap, and it does so without adding a single dependency.
 
-**Forward-secure seals (stdlib HMAC, Bellare–Yee / Schneier–Kelsey construction):**
+**Forward-secure seals (stdlib HMAC, Bellare-Yee / Schneier-Kelsey construction):**
 the seal key evolves one-way per entry (`A_{j+1} = SHA-256(A_j)`) and the old key is
 discarded, so an attacker who compromises the machine at epoch *t* cannot forge or
 re-seal anything written before *t*. A consistently rewritten suffix now fails
@@ -505,7 +596,7 @@ sequenceDiagram
     participant S as .attest sidecar
     W->>K: read A_j
     W->>S: seal_j = HMAC-SHA256(A_j, entry_hash_j)
-    W->>K: A_j+1 = SHA-256(A_j) — A_j is gone
+    W->>K: A_j+1 = SHA-256(A_j) - A_j is gone
     Note over K,S: compromise at epoch t ⇒ seals < t unforgeable
 ```
 
@@ -514,9 +605,8 @@ from waxseal import AuditLog
 from waxseal.adapters.attest import FileAttestor
 from waxseal.domain.sealing import generate_key
 
-k0 = generate_key()                      # escrow A_0 with your verifier, off this machine
-log = AuditLog.open("trail.jsonl",
-                    attestor=FileAttestor("trail.jsonl", initial_key=k0))
+k0 = generate_key()  # escrow A_0 with your verifier, off this machine
+log = AuditLog.open("trail.jsonl", attestor=FileAttestor("trail.jsonl", initial_key=k0))
 log.append(payload={...}, payload_type="application/vnd.myagent.toolcall+json")
 
 log.verify_attestations(initial_key=k0)  # AttestResult(ok=True, checked=1, ...)
@@ -527,8 +617,7 @@ never imports a crypto library itself:
 
 ```python
 # any object with .algorithm, .key_id, .sign(bytes) -> bytes
-log = AuditLog.open("trail.jsonl",
-                    attestor=FileAttestor("trail.jsonl", signer=my_ed25519_signer))
+log = AuditLog.open("trail.jsonl", attestor=FileAttestor("trail.jsonl", signer=my_ed25519_signer))
 log.verify_attestations(verifier=my_ed25519_verifier)
 ```
 
@@ -627,6 +716,10 @@ import WaxsealCallbackHandler`.
 | OpenClaw | audit-ledger exporter (`openclaw audit --json`, no hook) | [integrations/openclaw/](integrations/openclaw/) |
 | Microsoft AGT | `AuditSink` Protocol (attach to AGT's own `AuditLog`) | [`waxseal.integrations.agt`](src/waxseal/integrations/agt.py) |
 
+Claude Code, Codex, and Cursor open trails through `open_segmented` (SPEC section 20):
+the active file rolls into a sealed segment past 16 MiB, and `waxseal segments <dir>`
+verifies every segment plus its rotation binding.
+
 Scope note for the coding tools: these hooks give you a parallel,
 tamper-evident, **secret-free** record of every action. They do not (and cannot)
 rewrite the tool's own transcript files. If a key lands in one of those, rotate it. The
@@ -635,7 +728,7 @@ waxseal trail is the copy you can keep, share, and verify.
 ## Self-hosted server
 
 `server/` is a self-hosted chain server, witness, and public read point, with
-a read-only Vue 3 web portal — a separate application on its own FastAPI +
+a read-only Vue 3 web portal - a separate application on its own FastAPI +
 uvicorn stack, not part of the `waxseal` wheel (CLAUDE.md rule 1 constrains
 the library's dependencies, not this directory's; nothing here is packaged
 into it). Its write path uses `waxseal` as a library; every read/verify route
@@ -643,18 +736,18 @@ shells out to `python -m waxseal.cli` and reports the exit code, so the CLI
 stays the one verdict authority and no route ever edits, deletes, reorders,
 or repairs an entry. Three credentials stay apart: the chain API key, the
 witness key, and a credential-free public read point with no write route at
-all. Operators, roles, and API keys live in PostgreSQL — trails themselves
+all. Operators, roles, and API keys live in PostgreSQL - trails themselves
 stay plain JSONL files a third party can verify with the stock `waxseal
 verify`, never something only this server can read.
 
-![waxseal server portal — dashboard](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/01-dashboard.png)
+![waxseal server portal - dashboard](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/01-dashboard.png)
 
 | | |
 |---|---|
 | ![verify output, verbatim from the CLI](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/03-trail-output.png) | ![on-chain ledger status](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/12-ledger.png) |
-| **Trail** — every verdict carries the `argv` that produced it, so an operator can reproduce it. | **Ledger** — liveness, registry and bond readings; `unreachable` is its own value, never "0 findings". |
+| **Trail** - every verdict carries the `argv` that produced it, so an operator can reproduce it. | **Ledger** - liveness, registry and bond readings; `unreachable` is its own value, never "0 findings". |
 | ![anchoring cadence](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/11-cadence.png) | ![consistency proof](https://raw.githubusercontent.com/cuongbphv/waxseal/main/server/docs/screenshots/en/08-consistency.png) |
-| **Cadence** — cost-optimal anchoring interval from the operator's own measurements. Opens no trail. | **Consistency** — RFC 9162 proof that a later head extends an earlier one, without replaying the log. |
+| **Cadence** - cost-optimal anchoring interval from the operator's own measurements. Opens no trail. | **Consistency** - RFC 9162 proof that a later head extends an earlier one, without replaying the log. |
 
 <sub>Read-only portal. Every verdict on these screens is the exit code of a `python -m waxseal.cli` run, printed verbatim. Full sets, desktop and phone, in [`server/docs/screenshots/en/`](server/docs/screenshots/en/) and [`server/docs/screenshots/vi/`](server/docs/screenshots/vi/); regenerate with `server/scripts/screenshots.sh`.</sub>
 

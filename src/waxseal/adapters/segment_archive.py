@@ -88,9 +88,7 @@ def s3_destination(
                 now_fn=now_fn,
             )
         except Exception as e:  # noqa: BLE001 - labelled, never swallowed (rule 6)
-            return ArchiveReport(
-                state=ArchiveState.FAILED, destination=destination, detail=_why(e)
-            )
+            return ArchiveReport(state=ArchiveState.FAILED, destination=destination, detail=_why(e))
         if not upload.uploaded:
             # J1's ONLY non-raising way to not upload: the extra is absent, so
             # nothing was asked. Not a failure and not a success (rule 5).
@@ -143,14 +141,10 @@ def server_import_destination(
             encoded, content_type = _multipart(name, body)
             headers["Content-Type"] = content_type
             response = send(
-                RemoteRequest(
-                    method="POST", url=destination, headers=headers, body=encoded
-                )
+                RemoteRequest(method="POST", url=destination, headers=headers, body=encoded)
             )
         except Exception as e:  # noqa: BLE001 - labelled, never swallowed (rule 6)
-            return ArchiveReport(
-                state=ArchiveState.FAILED, destination=destination, detail=_why(e)
-            )
+            return ArchiveReport(state=ArchiveState.FAILED, destination=destination, detail=_why(e))
         if response.status != 201:
             return ArchiveReport(
                 state=ArchiveState.FAILED,

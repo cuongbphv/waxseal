@@ -1,4 +1,4 @@
-# Reference architecture — verifiable AI decision logs in a regulated institution
+# Reference architecture - verifiable AI decision logs in a regulated institution
 
 *[Tiếng Việt](deployment.vi.md)*
 
@@ -20,26 +20,26 @@ against each framework.
 
 ```mermaid
 flowchart TB
-    subgraph AT["Application trust domain — the AI system"]
+    subgraph AT["Application trust domain - the AI system"]
         AG["AI agent / decision service<br/>(N replicas)"]
         RD["Redactor<br/>runs BEFORE any hash"]
         AG --> RD
     end
 
-    subgraph CT["Chain trust domain — separate admin authority"]
+    subgraph CT["Chain trust domain - separate admin authority"]
         CS["chain server<br/>(REMOTE.md wire contract)"]
         DB[("append-only store<br/>Postgres · SQLite · S3")]
         CS --> DB
     end
 
-    subgraph XT["Anchor trust domain — third authority"]
+    subgraph XT["Anchor trust domain - third authority"]
         TS["RFC 3161 TSA<br/>· OpenTimestamps<br/>· git remote<br/>· counterparty's log"]
     end
 
-    subgraph VT["Verifier trust domain — second line / internal audit"]
+    subgraph VT["Verifier trust domain - second line / internal audit"]
         KE["key escrow: A₀<br/>never on a writing host"]
         VF["verifier job<br/>waxseal verify --anchors<br/>verify_attestations"]
-        RP["waxseal report<br/>→ SIEM / GRC"]
+        RP["waxseal report<br/>-> SIEM / GRC"]
         KE --> VF
         VF --> RP
     end
@@ -72,25 +72,32 @@ attacker who can rewrite the trail can rewrite the roots that would have contrad
 
 ```
 agent decision
-  → Redactor                      secrets masked, BEFORE any hash
-  → canonical JSON                sorted keys, compact separators, one owner
-  → payload_hash = sha256(bytes)
-  → EntryHeader built under the backend's critical section
+  -> Redactor                      secrets masked, BEFORE any hash
+  -> canonical JSON                sorted keys, compact separators, one owner
+  -> payload_hash = sha256(bytes)
+  -> EntryHeader built under the backend's critical section
       (seq and prev_hash read from the tail inside the same lock)
-  → entry_hash = sha256(framed header)
-  → attestation sidecar           forward-secure HMAC seal; key epoch advances
-  → every N entries: Merkle checkpoint published to the anchor domain
+  -> entry_hash = sha256(framed header)
+  -> attestation sidecar           forward-secure HMAC seal; key epoch advances
+  -> every N entries: Merkle checkpoint published to the anchor domain
 ```
 
 Two rules from `CLAUDE.md` govern this path and are not deployment choices:
 
-- **Redact before hash.** A redaction miss is unrecoverable by design — the cleartext is
+- **Redact before hash.** A redaction miss is unrecoverable by design - the cleartext is
   what would have been hashed and stored. The redactor runs first for that reason, not
   because it is optional.
 - **Read-tail + append is one critical section.** Concurrent writers must never both
   extend the same `prev_hash`. Every backend enforces this: a file lock for JSONL,
   `BEGIN IMMEDIATE` for SQLite, `pg_advisory_xact_lock` for Postgres, a conditional PUT
   for S3, and a server-side compare-and-swap on `(seq, prev_hash)` for `RemoteBackend`.
+
+**POST body limit.** The chain server refuses a write body over 1 MiB with HTTP
+413 and `{error: payload_too_large}` (REMOTE.md section 4). It counts streamed
+bytes, so a chunked POST that omits `Content-Length` does not skip the stop.
+An ingress `proxy-body-size` (the Helm sample sets 8m) is a coarser outer cap
+on the same path, not a substitute and not the contract a client should
+branch on.
 
 ### Multi-replica agents
 
@@ -119,12 +126,12 @@ oversight mode. Two fields deserve deployment attention:
 
 | Duty | Who | Why not the writer |
 |---|---|---|
-| Append decisions | application service account | — |
+| Append decisions | application service account | - |
 | Hold A₀ (seal key escrow) | verifier / second line | forward-secure seals detect suffix rewrites only if the attacker cannot obtain an earlier key epoch |
-| Publish checkpoints | chain server → anchor domain | a root the writer can rewrite proves nothing |
+| Publish checkpoints | chain server -> anchor domain | a root the writer can rewrite proves nothing |
 | Run verification | verifier, on a schedule | a self-verifying writer reports on itself |
-| Read reports | second line, internal audit, regulators on request | — |
-| Rotate/decommission | change management, dual control | — |
+| Read reports | second line, internal audit, regulators on request | - |
+| Rotate/decommission | change management, dual control | - |
 
 **A₀ handling.** The initial seal key is generated once per chain, handed to the verifier,
 and never written to a writing host. The PoC writes `sealkey.escrow` next to the trail
@@ -145,15 +152,15 @@ entries table and nothing more; in S3, object lock with a retention period.
 | Attestation verify | daily | `verify_attestations(initial_key=A₀)` | `ok=False` |
 | Auditor report | daily, retained | `waxseal report <trail> --json` | any check not ok |
 | Consistency proof vs. last root | per checkpoint | `waxseal consistency <trail> --old-seq N --old-root HEX` (RFC 9162 §2.1.4) | exit 1 |
-| Selective disclosure | on request | `waxseal export-proof` → `verify-proof` | — |
+| Selective disclosure | on request | `waxseal export-proof` -> `verify-proof` | - |
 
 ### Exit codes are the interface
 
 | Exit | Meaning | Operational response |
 |---:|---|---|
 | 0 | intact | none |
-| 1 | broken — first break printed with seq and reason | **security incident**: preserve, do not repair |
-| 2 | intact, but rows this build cannot verify by name | **not** an incident — a version-skew signal |
+| 1 | broken - first break printed with seq and reason | **security incident**: preserve, do not repair |
+| 2 | intact, but rows this build cannot verify by name | **not** an incident - a version-skew signal |
 | 3 | the trail path does not exist | configuration error: nothing was read, nothing was created |
 
 Exit 2 exists because of the two incidents in `CLAUDE.md`. A rollback that leaves rows
@@ -162,7 +169,7 @@ be silently recomputed under the wrong field tuple and reported intact. Route ex
 release management, not to the SOC.
 
 **Never wire an automatic remediation to exit 1.** waxseal reports; it does not repair.
-No code path may rewrite, reorder, or "fix" entries, and neither may the runbook — which
+No code path may rewrite, reorder, or "fix" entries, and neither may the runbook - which
 row is the tamper is a decision only an operator can make, and a repair destroys the
 evidence that a court or a regulator would need.
 
@@ -171,7 +178,7 @@ evidence that a court or a regulator would need.
 `waxseal report --json` is the integration point. Ship it, not the trail. It carries the
 chain verdict, the completeness measure and its source, inventory by payload type and
 schema fingerprint, decision counts by type and oversight mode, and the status of each
-sidecar check. Fields that were **not checked** are reported as not checked — an alerting
+sidecar check. Fields that were **not checked** are reported as not checked - an alerting
 rule must not treat a missing check as a pass.
 
 ---
@@ -186,12 +193,12 @@ State these to reviewers before they infer something stronger.
 - **A remote chain server is a *trusted writer*, not Byzantine-fault-tolerant.** A
   dishonest chain server can serve a consistently-forged rewrite that chain verification
   alone does not catch. A pinned head catches a rewrite of history this verifier already
-  confirmed, and a witness catches a split-view — but only while the pin file and the
+  confirmed, and a witness catches a split-view - but only while the pin file and the
   witness host answer to a different authority than the chain server. That is also why
   the anchor sink must point at a service other than the chain server.
 - **Chain integrity is not trail completeness.** A decision that was never written leaves
   no `seq` gap and no broken link. `dropped_writes` measures completeness separately, and
-  `None` means *not measured* — never zero. A `.drops` sidecar can itself be deleted, and
+  `None` means *not measured* - never zero. A `.drops` sidecar can itself be deleted, and
   a disk too broken to hold a drop record cannot bear witness to its own failure. Treat
   the number as a measured minimum.
 - **Commitments are not encryption.** If an input has few possible values, anyone holding
@@ -209,7 +216,7 @@ State these to reviewers before they infer something stronger.
 
 **Retention.** Under Regulation (EU) 2024/1689, providers of high-risk AI systems must
 keep the automatically generated logs under their control "for a period appropriate to the
-intended purpose … of at least six months, unless provided otherwise in the applicable
+intended purpose ... of at least six months, unless provided otherwise in the applicable
 Union or national law" (Art. 19), and deployers carry a parallel at-least-six-months duty
 for logs under their control (Art. 26(6)). Art. 19 further provides that providers that
 are financial institutions subject to internal-governance requirements under Union
@@ -219,7 +226,7 @@ period is whichever is longest across the regimes that apply, which is a determi
 the deploying institution's legal function, not for this document.
 
 Mechanically: **waxseal does not enforce retention.** It is append-only, so it will not
-delete on its own — which satisfies a minimum-retention duty by construction and
+delete on its own - which satisfies a minimum-retention duty by construction and
 complicates a maximum-retention or erasure duty by the same construction. Plan chain
 rotation (a new chain per period, with the closing head anchored and cross-referenced as
 the new chain's genesis context) rather than deletion within a chain.
@@ -228,14 +235,14 @@ the new chain's genesis context) rather than deletion within a chain.
 requirements. The trail can be restored from a replica; a lost `.attest` sidecar means
 seals cannot be verified for the covered range, and a lost anchor record means the
 published-root defence is gone for that range. Back up sidecars with the trail, and keep
-the anchor domain's copy of the roots independent of the chain domain's backups — a single
+the anchor domain's copy of the roots independent of the chain domain's backups - a single
 backup system that holds both reintroduces the shared authority the topology exists to
 avoid.
 
 **Capacity.** Growth is linear in decisions; the header is fixed-size and the payload is
 whatever the decision record serializes to (the PoC's records are ~580 bytes canonical).
 Verification is a single pass over the chain, so full-trail verification cost grows
-linearly with the trail — for long-lived chains, verify incrementally from the last
+linearly with the trail - for long-lived chains, verify incrementally from the last
 anchored checkpoint using a consistency proof rather than re-verifying from genesis on
 every run.
 
@@ -247,13 +254,19 @@ every run.
    depends on the trail yet; the goal is to find redaction gaps and payload-shape churn
    while a miss is still cheap.
 2. **Verified.** Stand up the verifier domain, escrow A₀, run scheduled verification, and
-   wire exit codes to the right destinations (1 → SOC, 2 → release management).
+   wire exit codes to the right destinations (1 -> SOC, 2 -> release management).
 3. **Anchored.** Add the anchor domain under a different administrative authority. Only
    at this point do scenarios 5 and 6 become detectable.
 4. **Disclosed.** Exercise `export-proof` / `verify-proof` end to end with the audit
    function before a regulator asks. The first time a selective disclosure is performed
    should not be under a deadline.
 
+For *what to install and where*, rather than in what order to turn it on, see
+[deploy-options.md](deploy-options.md) and [`deploy/README.md`](../../deploy/README.md):
+the first chooses between packaging options and states the one class of traffic that
+leaves the premises, the second maps every file under `deploy/` to the authority that
+should own it.
+
 Each step is independently useful, and each one adds a detection the previous step did not
-have. Ordering them the other way — anchoring before the redactor is trustworthy — commits
+have. Ordering them the other way - anchoring before the redactor is trustworthy - commits
 unredacted content to an append-only chain in a domain you cannot clean up.

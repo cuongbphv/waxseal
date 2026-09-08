@@ -30,6 +30,7 @@ from waxseal import AuditLog
 HOOK_PATH = Path(__file__).parent.parent.parent / "src" / "waxseal" / "integrations" / "codex.py"
 SRC = str(Path(__file__).parent.parent.parent / "src")
 
+
 def _spawn_env(**overrides: str) -> dict[str, str]:
     """A scrubbed env that can still start CPython on Windows.
 
@@ -47,7 +48,6 @@ def _spawn_env(**overrides: str) -> dict[str, str]:
     return base
 
 
-
 def run_hook(
     event: dict[str, Any] | str, trail: Path, **env_overrides: str
 ) -> subprocess.CompletedProcess[str]:
@@ -57,7 +57,12 @@ def run_hook(
     stdin = event if isinstance(event, str) else json.dumps(event)
     return subprocess.run(
         [sys.executable, str(HOOK_PATH)],
-        input=stdin, capture_output=True, text=True, env=env, timeout=30,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+        encoding="utf-8",
     )
 
 
@@ -79,10 +84,8 @@ def pre_tool_use(**overrides: object) -> dict[str, Any]:
 
 
 def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
-    line = trail.read_text().splitlines()[line_no]
-    result: dict[str, Any] = json.loads(
-        base64.b64decode(json.loads(line)["payload_b64"])
-    )
+    line = trail.read_text(encoding="utf-8").splitlines()[line_no]
+    result: dict[str, Any] = json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
     return result
 
 
@@ -172,7 +175,7 @@ class TestNeverBlocks:
         # Exit 2 blocks the tool call: a broken audit disk must degrade to a
         # stderr notice, never a veto.
         blocked = tmp_path / "blocked"
-        blocked.write_text("a file where the trail dir should be")
+        blocked.write_text("a file where the trail dir should be", encoding="utf-8")
         proc = run_hook(pre_tool_use(), blocked / "trail.jsonl")
         assert proc.returncode == 0
         assert proc.stdout == ""
@@ -184,15 +187,22 @@ class TestDefaultTrailLocation:
         proc = subprocess.run(
             [sys.executable, str(HOOK_PATH)],
             input=json.dumps(pre_tool_use()),
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
             env=_spawn_env(HOME=str(tmp_path)),
+            encoding="utf-8",
         )
         assert proc.returncode == 0
         from waxseal.domain.segments import project_slug
 
         trail = (
-            tmp_path / ".codex" / "waxseal" / "trails"
-            / project_slug(pre_tool_use()["cwd"]) / "trail.00000.jsonl"
+            tmp_path
+            / ".codex"
+            / "waxseal"
+            / "trails"
+            / project_slug(pre_tool_use()["cwd"])
+            / "trail.00000.jsonl"
         )
         assert AuditLog.open(trail).verify(measure_drops=False).checked == 1
 
@@ -201,14 +211,21 @@ class TestDefaultTrailLocation:
         proc = subprocess.run(
             [sys.executable, str(HOOK_PATH)],
             input=json.dumps(pre_tool_use()),
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
             env=_spawn_env(HOME=str(tmp_path), CODEX_HOME=str(tmp_path / "cx")),
+            encoding="utf-8",
         )
         assert proc.returncode == 0
         from waxseal.domain.segments import project_slug
 
         trail = (
-            tmp_path / "cx" / "waxseal" / "trails"
-            / project_slug(pre_tool_use()["cwd"]) / "trail.00000.jsonl"
+            tmp_path
+            / "cx"
+            / "waxseal"
+            / "trails"
+            / project_slug(pre_tool_use()["cwd"])
+            / "trail.00000.jsonl"
         )
         assert AuditLog.open(trail).verify(measure_drops=False).checked == 1

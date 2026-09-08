@@ -91,6 +91,9 @@ class TestTheAppFactory:
         # exercising a different app from the one deployed.
         monkeypatch.setenv("WAXSEAL_SERVER_DATA_DIR", str(tmp_path / "data"))
         built: list[object] = []
-        main([], env={"WAXSEAL_SERVER_DATA_DIR": str(tmp_path / "data")},
-             run=lambda app, **_: built.append(app))
+        main(
+            [],
+            env={"WAXSEAL_SERVER_DATA_DIR": str(tmp_path / "data")},
+            run=lambda app, **_: built.append(app),
+        )
         assert built[0].state.settings.data_dir == build().state.settings.data_dir

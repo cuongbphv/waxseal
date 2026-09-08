@@ -188,9 +188,7 @@ class TestS3DestinationDoesNotCollapseItsThreeStates:
 class TestServerImportDestination:
     def test_a_sealed_segment_reaches_the_import_endpoint_byte_for_byte(self) -> None:
         server = FakeImportServer()
-        report = server_import_destination("https://audit.example", transport=server)(
-            NAME, SEGMENT
-        )
+        report = server_import_destination("https://audit.example", transport=server)(NAME, SEGMENT)
         assert report.state is ArchiveState.STORED
         assert server.files == {NAME: SEGMENT}
 
@@ -202,9 +200,9 @@ class TestServerImportDestination:
 
     def test_the_api_key_travels_as_a_bearer_header_never_in_the_url(self) -> None:
         server = FakeImportServer()
-        server_import_destination(
-            "https://audit.example", transport=server, api_key="s3cret"
-        )(NAME, SEGMENT)
+        server_import_destination("https://audit.example", transport=server, api_key="s3cret")(
+            NAME, SEGMENT
+        )
         assert server.requests[0].headers["Authorization"] == "Bearer s3cret"
         assert "s3cret" not in server.requests[0].url
 
@@ -215,17 +213,13 @@ class TestServerImportDestination:
 
     def test_a_rejected_upload_is_failed_with_the_status_and_the_body(self) -> None:
         server = FakeImportServer(status=403)
-        report = server_import_destination("https://audit.example", transport=server)(
-            NAME, SEGMENT
-        )
+        report = server_import_destination("https://audit.example", transport=server)(NAME, SEGMENT)
         assert report.state is ArchiveState.FAILED
         assert "403" in report.detail and "denied" in report.detail
 
     def test_an_unreachable_server_is_failed_and_labelled_not_a_crash(self) -> None:
         server = FakeImportServer(raises=OSError("connection refused"))
-        report = server_import_destination("https://audit.example", transport=server)(
-            NAME, SEGMENT
-        )
+        report = server_import_destination("https://audit.example", transport=server)(NAME, SEGMENT)
         assert report.state is ArchiveState.FAILED
         assert "connection refused" in report.detail
 
@@ -247,9 +241,7 @@ class TestTheMultipartBodyIsNeverSilentlyCorrupted:
         # instead (rule 6).
         server = FakeImportServer()
         hostile = b'{"payload_b64": "--' + _MULTIPART_BOUNDARY.encode("ascii") + b'"}\n'
-        report = server_import_destination("https://audit.example", transport=server)(
-            NAME, hostile
-        )
+        report = server_import_destination("https://audit.example", transport=server)(NAME, hostile)
         assert report.state is ArchiveState.FAILED
         assert "boundary" in report.detail
         assert server.requests == []
@@ -269,9 +261,7 @@ class TestTheMultipartBodyIsNeverSilentlyCorrupted:
 class TestTheStoredLineCarriesTheHandleForRestoring:
     def test_the_servers_import_id_is_reported_so_the_copy_can_be_fetched_back(self) -> None:
         server = FakeImportServer()
-        report = server_import_destination("https://audit.example", transport=server)(
-            NAME, SEGMENT
-        )
+        report = server_import_destination("https://audit.example", transport=server)(NAME, SEGMENT)
         assert "import_id=imp-0001" in report.detail
 
     def test_a_201_whose_body_names_no_import_id_is_still_stored(self) -> None:

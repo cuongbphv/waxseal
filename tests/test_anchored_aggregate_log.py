@@ -61,14 +61,14 @@ class TestAnchorCarriesTheBinding:
         log.anchor()
 
         _, _, agg = FileAttestor(path, initial_key=KEY).read_aggregate()  # type: ignore[misc]
-        assert agg not in Path(str(path) + ".anchors").read_text()
+        assert agg not in Path(str(path) + ".anchors").read_text(encoding="utf-8")
 
     def test_record_is_version_2_when_bound(self, tmp_path: Path) -> None:
         path = tmp_path / "trail.jsonl"
         log = sealed_log(path)
         log.append(payload={"i": 0}, payload_type=PT)
         log.anchor()
-        record = json.loads(Path(str(path) + ".anchors").read_text().strip())
+        record = json.loads(Path(str(path) + ".anchors").read_text(encoding="utf-8").strip())
         assert record["v"] == 2
         assert record["agg_epoch"] == 1
 
@@ -80,7 +80,7 @@ class TestAnchorCarriesTheBinding:
         log = AuditLog.open(path, anchor_sink=FileAnchorSink(path))
         log.append(payload={"i": 0}, payload_type=PT)
         log.anchor()
-        record = json.loads(Path(str(path) + ".anchors").read_text().strip())
+        record = json.loads(Path(str(path) + ".anchors").read_text(encoding="utf-8").strip())
         assert record["v"] == 1
         assert "agg_commit" not in record
 
@@ -114,16 +114,19 @@ class TestVerifyAnchoredAggregates:
         return (
             json.dumps(
                 {
-                    "entry_hash": "a" * 64, "receipt": None, "root": "b" * 64,
-                    "seq": 0, "sink": "file", "ts": "t", "v": 99,
+                    "entry_hash": "a" * 64,
+                    "receipt": None,
+                    "root": "b" * 64,
+                    "seq": 0,
+                    "sink": "file",
+                    "ts": "t",
+                    "v": 99,
                 }
             )
             + "\n"
         )
 
-    def test_a_record_this_build_cannot_read_is_named_not_swallowed(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_record_this_build_cannot_read_is_named_not_swallowed(self, tmp_path: Path) -> None:
         # The API path and `verify --anchors` read the same sidecar and must
         # not disagree about it: the CLI already reports
         # `unreadable_record_version`, while this returned ok with reason None
@@ -135,7 +138,9 @@ class TestVerifyAnchoredAggregates:
             log.append(payload={"i": i}, payload_type=PT)
         log.anchor()
         anchors = Path(str(path) + ".anchors")
-        anchors.write_text(anchors.read_text() + self.unreadable_record(), encoding="utf-8")
+        anchors.write_text(
+            anchors.read_text(encoding="utf-8") + self.unreadable_record(), encoding="utf-8"
+        )
 
         result = log.verify_anchored_aggregates(initial_key=KEY)
         assert result.ok  # the readable record still verified
@@ -154,9 +159,7 @@ class TestVerifyAnchoredAggregates:
         assert result.checked == 0
         assert result.reason == "unreadable_record_version"
 
-    def test_replayed_aggregate_over_a_truncated_trail_is_caught(
-        self, tmp_path: Path
-    ) -> None:
+    def test_replayed_aggregate_over_a_truncated_trail_is_caught(self, tmp_path: Path) -> None:
         path = tmp_path / "trail.jsonl"
         log = sealed_log(path)
         for i in range(5):
@@ -175,7 +178,9 @@ class TestVerifyAnchoredAggregates:
         for i in range(2):
             replay_log.append(payload={"i": i}, payload_type=PT)
 
-        path.write_text("\n".join(replay.read_text().splitlines()[:2]) + "\n")
+        path.write_text(
+            "\n".join(replay.read_text(encoding="utf-8").splitlines()[:2]) + "\n", encoding="utf-8"
+        )
         agg_path.write_bytes(Path(str(replay) + ".sealagg").read_bytes())
         key_path.write_bytes(Path(str(replay) + ".sealkey").read_bytes())
         attest_path.write_bytes(Path(str(replay) + ".attest").read_bytes())
@@ -200,9 +205,9 @@ class TestVerifyAnchoredAggregates:
         log.anchor()
 
         anchors = Path(str(path) + ".anchors")
-        record = json.loads(anchors.read_text().strip())
+        record = json.loads(anchors.read_text(encoding="utf-8").strip())
         record["agg_commit"] = "ab" * 32
-        anchors.write_text(json.dumps(record) + "\n")
+        anchors.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
         result = log.verify_anchored_aggregates(initial_key=KEY)
         assert not result.ok
@@ -229,7 +234,8 @@ class TestVerifyAnchoredAggregates:
                     "v": 1,
                 }
             )
-            + "\n"
+            + "\n",
+            encoding="utf-8",
         )
 
         result = log.verify_anchored_aggregates(initial_key=KEY)
@@ -311,7 +317,7 @@ class TestVerifyAnchoredAggregates:
         path = tmp_path / "trail.jsonl"
         log = sealed_log(path)
         log.append(payload={"i": 0}, payload_type=PT)
-        Path(str(path) + ".anchors").write_text("{ not json\n")
+        Path(str(path) + ".anchors").write_text("{ not json\n", encoding="utf-8")
 
         result = log.verify_anchored_aggregates(initial_key=KEY)
         assert not result.ok
@@ -327,20 +333,32 @@ class TestReadAnchorRecords:
                 [
                     json.dumps(
                         {
-                            "entry_hash": "a" * 64, "receipt": None, "root": "b" * 64,
-                            "seq": 0, "sink": "file", "ts": "t", "v": 1,
+                            "entry_hash": "a" * 64,
+                            "receipt": None,
+                            "root": "b" * 64,
+                            "seq": 0,
+                            "sink": "file",
+                            "ts": "t",
+                            "v": 1,
                         }
                     ),
                     json.dumps(
                         {
-                            "entry_hash": "c" * 64, "receipt": "r", "root": "d" * 64,
-                            "seq": 1, "sink": "http", "ts": "t", "v": 2,
-                            "agg_commit": "e" * 64, "agg_epoch": 2,
+                            "entry_hash": "c" * 64,
+                            "receipt": "r",
+                            "root": "d" * 64,
+                            "seq": 1,
+                            "sink": "http",
+                            "ts": "t",
+                            "v": 2,
+                            "agg_commit": "e" * 64,
+                            "agg_epoch": 2,
                         }
                     ),
                 ]
             )
-            + "\n"
+            + "\n",
+            encoding="utf-8",
         )
         sidecar = read_anchor_records(path)
         assert [r.checkpoint.seq for r in sidecar.records] == [0, 1]
@@ -349,19 +367,23 @@ class TestReadAnchorRecords:
         assert sidecar.records[1].receipt == "r"
         assert sidecar.unreadable_versions == ()
 
-    def test_a_record_from_a_newer_version_is_unreadable_not_fatal(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_record_from_a_newer_version_is_unreadable_not_fatal(self, tmp_path: Path) -> None:
         # The beads-v1.2.2 class applied to the sidecar's own version field.
         path = tmp_path / "trail.jsonl"
         Path(str(path) + ".anchors").write_text(
             json.dumps(
                 {
-                    "entry_hash": "a" * 64, "receipt": None, "root": "b" * 64,
-                    "seq": 0, "sink": "file", "ts": "t", "v": 99,
+                    "entry_hash": "a" * 64,
+                    "receipt": None,
+                    "root": "b" * 64,
+                    "seq": 0,
+                    "sink": "file",
+                    "ts": "t",
+                    "v": 99,
                 }
             )
-            + "\n"
+            + "\n",
+            encoding="utf-8",
         )
         sidecar = read_anchor_records(path)
         assert sidecar.records == ()
@@ -372,10 +394,8 @@ class TestReadAnchorRecords:
         # definition; refusing them would strand every existing sidecar.
         path = tmp_path / "trail.jsonl"
         Path(str(path) + ".anchors").write_text(
-            json.dumps(
-                {"entry_hash": "a" * 64, "root": "b" * 64, "seq": 0}
-            )
-            + "\n"
+            json.dumps({"entry_hash": "a" * 64, "root": "b" * 64, "seq": 0}) + "\n",
+            encoding="utf-8",
         )
         sidecar = read_anchor_records(path)
         assert len(sidecar.records) == 1
@@ -391,7 +411,7 @@ class TestReadAnchorRecords:
         # A verdict of malformed_anchor belongs to the CLI, which knows the
         # exit code; the reader's job is only to refuse to invent data.
         path = tmp_path / "trail.jsonl"
-        Path(str(path) + ".anchors").write_text("{ not json\n")
+        Path(str(path) + ".anchors").write_text("{ not json\n", encoding="utf-8")
         with pytest.raises(ValueError):
             read_anchor_records(path)
 
@@ -400,7 +420,8 @@ class TestReadAnchorRecords:
         Path(str(path) + ".anchors").write_text(
             "\n"
             + json.dumps({"entry_hash": "a" * 64, "root": "b" * 64, "seq": 0, "v": 1})
-            + "\n\n"
+            + "\n\n",
+            encoding="utf-8",
         )
         assert len(read_anchor_records(path).records) == 1
 
@@ -408,7 +429,7 @@ class TestReadAnchorRecords:
         # Valid JSON, not a record. Reading index 0 of it and calling the
         # result a checkpoint would invent data.
         path = tmp_path / "trail.jsonl"
-        Path(str(path) + ".anchors").write_text("[1, 2, 3]\n")
+        Path(str(path) + ".anchors").write_text("[1, 2, 3]\n", encoding="utf-8")
         with pytest.raises(ValueError, match="JSON object"):
             read_anchor_records(path)
 
@@ -434,8 +455,7 @@ class TestHTTPAnchorSinkBinding:
 
         sink = HTTPAnchorSink("http://witness/anchor", transport=transport)
         sink.anchor(
-            Checkpoint(seq=1, entry_hash="a" * 64, root="b" * 64, agg_commit="c" * 64,
-                       agg_epoch=2)
+            Checkpoint(seq=1, entry_hash="a" * 64, root="b" * 64, agg_commit="c" * 64, agg_epoch=2)
         )
         body = json.loads(sent[0])
         assert body["agg_commit"] == "c" * 64
@@ -499,11 +519,17 @@ class TestCliLabelsTheUncheckedBinding:
         Path(str(path) + ".anchors").write_text(
             json.dumps(
                 {
-                    "entry_hash": "a" * 64, "receipt": None, "root": "b" * 64,
-                    "seq": 0, "sink": "file", "ts": "t", "v": 99,
+                    "entry_hash": "a" * 64,
+                    "receipt": None,
+                    "root": "b" * 64,
+                    "seq": 0,
+                    "sink": "file",
+                    "ts": "t",
+                    "v": 99,
                 }
             )
-            + "\n"
+            + "\n",
+            encoding="utf-8",
         )
         assert main(["verify", str(path), "--anchors"]) == 2
         out = capsys.readouterr().out
@@ -656,7 +682,7 @@ class TestFaultInjectionBetweenAnchorsAndSealagg:
         log = sealed_log(path)
         for i in range(3):
             log.append(payload={"i": i}, payload_type=PT)
-        (tmp_path / "trail.jsonl.sealagg").write_text("{not json at all")
+        (tmp_path / "trail.jsonl.sealagg").write_text("{not json at all", encoding="utf-8")
 
         with pytest.raises(RuntimeError, match="sealagg.*malformed"):
             log.anchor()

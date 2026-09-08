@@ -77,8 +77,14 @@ class TestVerifyLiveness:
         urls = two_nodes(liveness_node(deadline=3600))
         code = main(
             [
-                "verify", str(path), "--liveness", LIVENESS_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "verify",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -103,8 +109,14 @@ class TestVerifyLiveness:
         )
         code = main(
             [
-                "verify", str(path), "--liveness", LIVENESS_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "verify",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -122,8 +134,14 @@ class TestVerifyLiveness:
         try:
             code = main(
                 [
-                    "verify", str(path), "--liveness", LIVENESS_ADDR,
-                    "--rpc", url_a, "--rpc", url_b,
+                    "verify",
+                    str(path),
+                    "--liveness",
+                    LIVENESS_ADDR,
+                    "--rpc",
+                    url_a,
+                    "--rpc",
+                    url_b,
                 ]
             )
         finally:
@@ -139,17 +157,13 @@ class TestVerifyLiveness:
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
-        code = main(
-            ["verify", str(path), "--liveness", LIVENESS_ADDR, "--rpc", "http://only-one"]
-        )
+        code = main(["verify", str(path), "--liveness", LIVENESS_ADDR, "--rpc", "http://only-one"])
         out = capsys.readouterr().out
         assert code == 2
         assert "ledger:" in out
         assert "unverifiable" in out.lower()
 
-    def test_trail_id_without_liveness_or_registry_is_a_usage_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_trail_id_without_liveness_or_registry_is_a_usage_error(self, tmp_path: Path) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
         with pytest.raises(SystemExit) as exc:
@@ -178,8 +192,14 @@ class TestVerifyLiveness:
         urls = two_nodes(liveness_node(deadline=3600))
         code = main(
             [
-                "verify", str(path), "--liveness", LIVENESS_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "verify",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -200,8 +220,16 @@ class TestVerifyRegistry:
         urls = two_nodes(full_node(deadline=3600, lookup=lookup))
         code = main(
             [
-                "verify", str(path), "--liveness", LIVENESS_ADDR,
-                "--registry", REGISTRY_ADDR, "--rpc", urls[0], "--rpc", urls[1],
+                "verify",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--registry",
+                REGISTRY_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -220,8 +248,16 @@ class TestVerifyRegistry:
         urls = two_nodes(full_node(deadline=3600, lookup=wrong))
         code = main(
             [
-                "verify", str(path), "--liveness", LIVENESS_ADDR,
-                "--registry", REGISTRY_ADDR, "--rpc", urls[0], "--rpc", urls[1],
+                "verify",
+                str(path),
+                "--liveness",
+                LIVENESS_ADDR,
+                "--registry",
+                REGISTRY_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         out = capsys.readouterr().out
@@ -279,8 +315,14 @@ class TestVerifyRegistry:
         try:
             code = main(
                 [
-                    "verify", str(path), "--registry", REGISTRY_ADDR,
-                    "--rpc", url_a, "--rpc", url_b,
+                    "verify",
+                    str(path),
+                    "--registry",
+                    REGISTRY_ADDR,
+                    "--rpc",
+                    url_a,
+                    "--rpc",
+                    url_b,
                 ]
             )
         finally:
@@ -303,8 +345,15 @@ class TestReport:
         urls = two_nodes(liveness_node(deadline=3600))
         code = main(
             [
-                "report", str(path), "--json", "--liveness", LIVENESS_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "report",
+                str(path),
+                "--json",
+                "--liveness",
+                LIVENESS_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         payload = json.loads(capsys.readouterr().out)
@@ -348,8 +397,15 @@ class TestReport:
         )
         code = main(
             [
-                "report", str(path), "--json", "--liveness", LIVENESS_ADDR,
-                "--rpc", urls[0], "--rpc", urls[1],
+                "report",
+                str(path),
+                "--json",
+                "--liveness",
+                LIVENESS_ADDR,
+                "--rpc",
+                urls[0],
+                "--rpc",
+                urls[1],
             ]
         )
         payload = json.loads(capsys.readouterr().out)

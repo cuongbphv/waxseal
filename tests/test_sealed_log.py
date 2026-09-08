@@ -37,7 +37,7 @@ class TestSealedAppend:
         log = open_sealed(tmp_path, k0)
         for i in range(3):
             log.append(payload={"i": i}, payload_type=PT)
-        seal_lines = (tmp_path / "trail.jsonl.attest").read_text().splitlines()
+        seal_lines = (tmp_path / "trail.jsonl.attest").read_text(encoding="utf-8").splitlines()
         assert len(seal_lines) == 3
         epochs = [json.loads(line)["seq"] for line in seal_lines]
         assert epochs == [0, 1, 2]
@@ -49,7 +49,7 @@ class TestSealedAppend:
         log = open_sealed(tmp_path, k0)
         for i in range(3):
             log.append(payload={"i": i}, payload_type=PT)
-        keyfile = json.loads((tmp_path / "trail.jsonl.sealkey").read_text())
+        keyfile = json.loads((tmp_path / "trail.jsonl.sealkey").read_text(encoding="utf-8"))
         assert keyfile["epoch"] == 3
         from waxseal.domain.sealing import evolve_key
 
@@ -58,7 +58,7 @@ class TestSealedAppend:
             expected = evolve_key(expected)
         assert bytes.fromhex(keyfile["key"]) == expected
         for old in (k0,):
-            assert old.hex() not in (tmp_path / "trail.jsonl.sealkey").read_text()
+            assert old.hex() not in (tmp_path / "trail.jsonl.sealkey").read_text(encoding="utf-8")
 
     def test_verify_attestations_ok_with_k0(self, tmp_path: Path) -> None:
         k0 = generate_key()
@@ -81,13 +81,13 @@ class TestSealedAppend:
         # Attacker rewrites the attestation line for seq=1 with a self-made
         # seal under a random key (they never saw A_1).
         attest_path = tmp_path / "trail.jsonl.attest"
-        lines = attest_path.read_text().splitlines()
+        lines = attest_path.read_text(encoding="utf-8").splitlines()
         from waxseal.domain.sealing import seal_entry
 
         forged = json.loads(lines[1])
         forged["value"] = seal_entry(generate_key(), forged["entry_hash"])
         lines[1] = json.dumps(forged)
-        attest_path.write_text("\n".join(lines) + "\n")
+        attest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
@@ -98,7 +98,9 @@ class TestSealedAppend:
         log = open_sealed(tmp_path, k0)
         log.append(payload={"x": 1}, payload_type=PT)
         entry = next(iter(log._backend.entries()))
-        seal = json.loads((tmp_path / "trail.jsonl.attest").read_text().splitlines()[0])
+        seal = json.loads(
+            (tmp_path / "trail.jsonl.attest").read_text(encoding="utf-8").splitlines()[0]
+        )
         assert seal["entry_hash"] == entry.entry_hash
 
 
@@ -134,11 +136,11 @@ class TestInjectedSigner:
         assert log.verify_attestations(verifier=signer).ok
 
         attest_path = tmp_path / "trail.jsonl.attest"
-        lines = attest_path.read_text().splitlines()
+        lines = attest_path.read_text(encoding="utf-8").splitlines()
         obj = json.loads(lines[2])
         obj["value"] = "00" * 32
         lines[2] = json.dumps(obj)
-        attest_path.write_text("\n".join(lines) + "\n")
+        attest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         result = log.verify_attestations(verifier=signer)
         assert not result.ok
         assert result.broken_seq == 2
@@ -163,18 +165,16 @@ class TestJournaldLessons:
         for i in range(3):
             log.append(payload={"i": i}, payload_type=PT)
         attest_path = tmp_path / "trail.jsonl.attest"
-        lines = attest_path.read_text().splitlines()
+        lines = attest_path.read_text(encoding="utf-8").splitlines()
         obj = json.loads(lines[1])
         obj["seq"] = 2
         lines[1] = json.dumps(obj)
-        attest_path.write_text("\n".join(lines) + "\n")
+        attest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
         assert result.reason == "seal_sequence_mismatch"
 
-    def test_truncating_trail_and_sidecar_together_is_detected(
-        self, tmp_path: Path
-    ) -> None:
+    def test_truncating_trail_and_sidecar_together_is_detected(self, tmp_path: Path) -> None:
         # Ma-Tsudik truncation attack: chop the tail of BOTH files. The chain
         # and the remaining seals are internally valid — but the keyfile epoch
         # is one-way: the attacker holds A_5, cannot compute A_3, so the
@@ -185,7 +185,9 @@ class TestJournaldLessons:
             log.append(payload={"i": i}, payload_type=PT)
         for name in ("trail.jsonl", "trail.jsonl.attest"):
             p = tmp_path / name
-            p.write_text("\n".join(p.read_text().splitlines()[:3]) + "\n")
+            p.write_text(
+                "\n".join(p.read_text(encoding="utf-8").splitlines()[:3]) + "\n", encoding="utf-8"
+            )
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
         assert result.reason == "keyfile_epoch_mismatch"
@@ -198,11 +200,11 @@ class TestJournaldLessons:
         for i in range(3):
             log.append(payload={"i": i}, payload_type=PT)
         trail = tmp_path / "trail.jsonl"
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         obj = json.loads(lines[1])
         obj["header"]["ts"] = "2027-01-01T00:00:00+00:00"
         lines[1] = json.dumps(obj)
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
         assert result.reason == "attest_trail_mismatch"
@@ -233,23 +235,21 @@ class TestMalformedSidecar:
         for i in range(2):
             log.append(payload={"i": i}, payload_type=PT)
         attest_path = tmp_path / "trail.jsonl.attest"
-        lines = attest_path.read_text().splitlines()
+        lines = attest_path.read_text(encoding="utf-8").splitlines()
         obj = json.loads(lines[1])
         obj["value"] = "zz-not-hex"
         lines[1] = json.dumps(obj)
-        attest_path.write_text("\n".join(lines) + "\n")
+        attest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         result = log.verify_attestations(verifier=signer)
         assert not result.ok
         assert result.reason == "malformed_attestation"
         assert result.broken_seq == 1
 
-    def test_malformed_json_line_in_sidecar_is_malformed_not_a_crash(
-        self, tmp_path: Path
-    ) -> None:
+    def test_malformed_json_line_in_sidecar_is_malformed_not_a_crash(self, tmp_path: Path) -> None:
         k0 = generate_key()
         log = open_sealed(tmp_path, k0)
         log.append(payload={"i": 0}, payload_type=PT)
-        with open(tmp_path / "trail.jsonl.attest", "a") as f:
+        with open(tmp_path / "trail.jsonl.attest", "a", encoding="utf-8") as f:
             f.write("{this is not json\n")
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
@@ -281,20 +281,19 @@ class TestMalformedSidecar:
             "entry_hash": evil_hash,
             "payload_b64": base64.b64encode(b"{}").decode("ascii"),
         }
-        with open(tmp_path / "trail.jsonl", "a") as f:
+        with open(tmp_path / "trail.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(trail_row) + "\n")
-        att_row = {"seq": 1, "entry_hash": evil_hash, "scheme": "fs-hmac-sha256-v1",
-                   "value": "00"}
-        with open(tmp_path / "trail.jsonl.attest", "a") as f:
+        att_row = {"seq": 1, "entry_hash": evil_hash, "scheme": "fs-hmac-sha256-v1", "value": "00"}
+        with open(tmp_path / "trail.jsonl.attest", "a", encoding="utf-8") as f:
             f.write(json.dumps(att_row) + "\n")
         # Key evolution is public (SHA-256), so an attacker CAN advance the
         # keyfile to match the extra row — only rolling back is impossible.
         from waxseal.domain.sealing import evolve_key
 
-        keyfile = json.loads((tmp_path / "trail.jsonl.sealkey").read_text())
+        keyfile = json.loads((tmp_path / "trail.jsonl.sealkey").read_text(encoding="utf-8"))
         advanced = evolve_key(bytes.fromhex(keyfile["key"]))
         (tmp_path / "trail.jsonl.sealkey").write_text(
-            json.dumps({"epoch": 2, "key": advanced.hex()})
+            json.dumps({"epoch": 2, "key": advanced.hex()}), encoding="utf-8"
         )
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
@@ -305,7 +304,9 @@ class TestMalformedSidecar:
         log = open_sealed(tmp_path, k0)
         for i in range(2):
             log.append(payload={"i": i}, payload_type=PT)
-        (tmp_path / "trail.jsonl.sealkey").write_text('{"epoch": 2, "key": "zz-not-hex"}')
+        (tmp_path / "trail.jsonl.sealkey").write_text(
+            '{"epoch": 2, "key": "zz-not-hex"}', encoding="utf-8"
+        )
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
         assert result.reason == "malformed_keyfile"
@@ -322,9 +323,7 @@ class TestAttestationCriticalSection:
     macOS (measured 2026-08-21: 80 entries, 1-2 attestations, the rest
     RuntimeError epoch mismatches)."""
 
-    def test_shared_log_concurrent_sealed_appends_attest_every_entry(
-        self, tmp_path: Path
-    ) -> None:
+    def test_shared_log_concurrent_sealed_appends_attest_every_entry(self, tmp_path: Path) -> None:
         from concurrent.futures import ThreadPoolExecutor
 
         k0 = generate_key()
@@ -343,9 +342,7 @@ class TestAttestationCriticalSection:
         assert len(list(attestor(log).attestations())) == total
         assert log.verify_attestations(initial_key=k0).ok
 
-    def test_attest_failure_after_persist_is_not_a_dropped_write(
-        self, tmp_path: Path
-    ) -> None:
+    def test_attest_failure_after_persist_is_not_a_dropped_write(self, tmp_path: Path) -> None:
         # The entry IS durably on the chain when attest raises; counting it as
         # dropped would make dropped_writes lie (CLAUDE.md rule 5). The loss
         # that actually happened (a missing seal) gets its own counter.
@@ -393,8 +390,8 @@ class TestAttestationCriticalSection:
         for i in range(3):
             log.append(payload={"i": i}, payload_type=PT)
         attest_path = tmp_path / "trail.jsonl.attest"
-        lines = attest_path.read_text().splitlines()
-        attest_path.write_text("\n".join(lines[:2]) + "\n")
+        lines = attest_path.read_text(encoding="utf-8").splitlines()
+        attest_path.write_text("\n".join(lines[:2]) + "\n", encoding="utf-8")
         result = log.verify_attestations(verifier=signer)
         assert not result.ok
         assert result.reason == "attestation_gap"
@@ -406,9 +403,7 @@ def open_agg_sealed(tmp_path: Path, k0: bytes) -> AuditLog:
 
     return AuditLog.open(
         tmp_path / "trail.jsonl",
-        attestor=FileAttestor(
-            tmp_path / "trail.jsonl", initial_key=k0, scheme=FS_HMAC_AGG_SCHEME
-        ),
+        attestor=FileAttestor(tmp_path / "trail.jsonl", initial_key=k0, scheme=FS_HMAC_AGG_SCHEME),
         now_fn=lambda: "2026-08-22T06:00:00+00:00",
     )
 
@@ -434,7 +429,7 @@ class TestFssAggregate:
             log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
         agg_path = tmp_path / "trail.jsonl.sealagg"
         assert agg_path.exists()
-        obj = json.loads(agg_path.read_text())
+        obj = json.loads(agg_path.read_text(encoding="utf-8"))
         assert set(obj) == {"agg", "agg_start", "epoch"}
         assert obj["epoch"] == 3
         assert obj["agg_start"] == 0
@@ -474,7 +469,9 @@ class TestFssAggregate:
         # keyfile-only rollback WOULD miss if it could roll back at all).
         for name in ("trail.jsonl", "trail.jsonl.attest"):
             p = tmp_path / name
-            p.write_text("\n".join(p.read_text().splitlines()[:3]) + "\n")
+            p.write_text(
+                "\n".join(p.read_text(encoding="utf-8").splitlines()[:3]) + "\n", encoding="utf-8"
+            )
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
         # The plain keyfile-epoch check fires first (still one epoch ahead
@@ -491,11 +488,11 @@ class TestFssAggregate:
         for i in range(3):
             log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
         attest_path = tmp_path / "trail.jsonl.attest"
-        lines = attest_path.read_text().splitlines()
+        lines = attest_path.read_text(encoding="utf-8").splitlines()
         obj = json.loads(lines[1])
         obj["value"] = "00" * 32
         lines[1] = json.dumps(obj)
-        attest_path.write_text("\n".join(lines) + "\n")
+        attest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
         assert result.reason == "seal_mismatch"
@@ -514,13 +511,15 @@ class TestFssAggregate:
         for i in range(3):
             log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
         agg_path = tmp_path / "trail.jsonl.sealagg"
-        saved_agg = agg_path.read_text()
+        saved_agg = agg_path.read_text(encoding="utf-8")
         for i in range(3, 5):
             log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
         for name in ("trail.jsonl", "trail.jsonl.attest"):
             p = tmp_path / name
-            p.write_text("\n".join(p.read_text().splitlines()[:3]) + "\n")
-        agg_path.write_text(saved_agg)  # replay the OLD (matching) sealagg
+            p.write_text(
+                "\n".join(p.read_text(encoding="utf-8").splitlines()[:3]) + "\n", encoding="utf-8"
+            )
+        agg_path.write_text(saved_agg, encoding="utf-8")  # replay the OLD (matching) sealagg
         # The keyfile is still 2 epochs ahead of the truncated sidecar (it
         # cannot be rolled back — SHA-256 is one-way), so THAT gate still
         # fires; this pins that the honest limit is specific to the
@@ -542,9 +541,9 @@ class TestFssAggregate:
         for i in range(2):
             log.append(payload={"i": i}, payload_type=PT)
         agg_path = tmp_path / "trail.jsonl.sealagg"
-        stale_agg = agg_path.read_text()  # epoch=2
+        stale_agg = agg_path.read_text(encoding="utf-8")  # epoch=2
         log.append(payload={"i": 2}, payload_type=PT)  # keyfile/attest now at 3
-        agg_path.write_text(stale_agg)  # only .sealagg rolled back, independently
+        agg_path.write_text(stale_agg, encoding="utf-8")  # only .sealagg rolled back, independently
         with pytest.raises(AttestationFailure):
             log.append(payload={"i": 3}, payload_type=PT)
 
@@ -583,15 +582,13 @@ class TestFssAggregate:
 
         signer = TestInjectedSigner.FakeEd25519()
         with pytest.raises(ValueError, match="scheme"):
-            FileAttestor(
-                tmp_path / "trail.jsonl", signer=signer, scheme=FS_HMAC_AGG_SCHEME
-            )
+            FileAttestor(tmp_path / "trail.jsonl", signer=signer, scheme=FS_HMAC_AGG_SCHEME)
 
     def test_malformed_sealagg_json_is_a_verdict_not_a_crash(self, tmp_path: Path) -> None:
         k0 = generate_key()
         log = open_agg_sealed(tmp_path, k0)
         log.append(payload={"i": 0}, payload_type="application/vnd.test.event+json")
-        (tmp_path / "trail.jsonl.sealagg").write_text("{this is not json")
+        (tmp_path / "trail.jsonl.sealagg").write_text("{this is not json", encoding="utf-8")
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
         assert result.reason == "malformed_aggregate"
@@ -607,16 +604,14 @@ class TestFssAggregate:
         for i in range(3):
             log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
         agg_path = tmp_path / "trail.jsonl.sealagg"
-        obj = json.loads(agg_path.read_text())
+        obj = json.loads(agg_path.read_text(encoding="utf-8"))
         obj["agg"] = "ff" * 32
-        agg_path.write_text(json.dumps(obj))
+        agg_path.write_text(json.dumps(obj), encoding="utf-8")
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
         assert result.reason == "aggregate_mismatch"
 
-    def test_attestor_without_read_aggregate_skips_the_aggregate_gate(
-        self, tmp_path: Path
-    ) -> None:
+    def test_attestor_without_read_aggregate_skips_the_aggregate_gate(self, tmp_path: Path) -> None:
         # A minimal custom Attestor (not FileAttestor) that never implements
         # read_aggregate: the gate must be optional, not a hard requirement
         # of the AttestResult protocol — verify_attestations falls back to
@@ -629,8 +624,9 @@ class TestFssAggregate:
                 from waxseal.domain.sealing import seal_entry
 
                 value = seal_entry(k0_evolved(seq), entry_hash)
-                att = Attestation(seq=seq, entry_hash=entry_hash, scheme=FS_HMAC_SCHEME,
-                                   value=value)
+                att = Attestation(
+                    seq=seq, entry_hash=entry_hash, scheme=FS_HMAC_SCHEME, value=value
+                )
                 self._rows.append(att)
                 return att
 
@@ -669,13 +665,13 @@ class TestFssAggregate:
         # Same epoch key continuity: FileAttestor reads the persisted keyfile.
         for i in range(2, 5):
             log.append(payload={"i": i}, payload_type="application/vnd.test.event+json")
-        obj = json.loads((tmp_path / "trail.jsonl.sealagg").read_text())
+        obj = json.loads((tmp_path / "trail.jsonl.sealagg").read_text(encoding="utf-8"))
         assert obj["agg_start"] == 2
         assert obj["epoch"] == 5
-        assert [json.loads(line)["scheme"] for line in
-                (tmp_path / "trail.jsonl.attest").read_text().splitlines()] == (
-            [FS_HMAC_SCHEME] * 2 + [FS_HMAC_AGG_SCHEME] * 3
-        )
+        assert [
+            json.loads(line)["scheme"]
+            for line in (tmp_path / "trail.jsonl.attest").read_text(encoding="utf-8").splitlines()
+        ] == ([FS_HMAC_SCHEME] * 2 + [FS_HMAC_AGG_SCHEME] * 3)
         result = log.verify_attestations(initial_key=k0)
         assert result.ok
 
@@ -719,9 +715,13 @@ class TestFaultInjectionBetweenDependentSidecarWrites:
         # .sealkey completed (the first of the three writes); .sealagg did
         # not (the second, patched to explode); .attest never even reached
         # the third write below it in the source.
-        assert json.loads((tmp_path / "trail.jsonl.sealkey").read_text())["epoch"] == 2
-        assert json.loads((tmp_path / "trail.jsonl.sealagg").read_text())["epoch"] == 1
-        assert len((tmp_path / "trail.jsonl.attest").read_text().splitlines()) == 1
+        assert (
+            json.loads((tmp_path / "trail.jsonl.sealkey").read_text(encoding="utf-8"))["epoch"] == 2
+        )
+        assert (
+            json.loads((tmp_path / "trail.jsonl.sealagg").read_text(encoding="utf-8"))["epoch"] == 1
+        )
+        assert len((tmp_path / "trail.jsonl.attest").read_text(encoding="utf-8").splitlines()) == 1
 
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
@@ -756,9 +756,13 @@ class TestFaultInjectionBetweenDependentSidecarWrites:
 
         # Both dependent writes ahead of the .attest line completed; only
         # the line itself (the third write) never landed.
-        assert json.loads((tmp_path / "trail.jsonl.sealkey").read_text())["epoch"] == 2
-        assert json.loads((tmp_path / "trail.jsonl.sealagg").read_text())["epoch"] == 2
-        assert len((tmp_path / "trail.jsonl.attest").read_text().splitlines()) == 1
+        assert (
+            json.loads((tmp_path / "trail.jsonl.sealkey").read_text(encoding="utf-8"))["epoch"] == 2
+        )
+        assert (
+            json.loads((tmp_path / "trail.jsonl.sealagg").read_text(encoding="utf-8"))["epoch"] == 2
+        )
+        assert len((tmp_path / "trail.jsonl.attest").read_text(encoding="utf-8").splitlines()) == 1
 
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
@@ -786,9 +790,13 @@ class TestFaultInjectionBetweenDependentSidecarWrites:
         # Nothing downstream of the refused first write moved at all — the
         # sidecars are left exactly as consistent with EACH OTHER as before
         # the second append was attempted.
-        assert json.loads((tmp_path / "trail.jsonl.sealkey").read_text())["epoch"] == 1
-        assert json.loads((tmp_path / "trail.jsonl.sealagg").read_text())["epoch"] == 1
-        assert len((tmp_path / "trail.jsonl.attest").read_text().splitlines()) == 1
+        assert (
+            json.loads((tmp_path / "trail.jsonl.sealkey").read_text(encoding="utf-8"))["epoch"] == 1
+        )
+        assert (
+            json.loads((tmp_path / "trail.jsonl.sealagg").read_text(encoding="utf-8"))["epoch"] == 1
+        )
+        assert len((tmp_path / "trail.jsonl.attest").read_text(encoding="utf-8").splitlines()) == 1
 
         result = log.verify_attestations(initial_key=k0)
         assert not result.ok
@@ -885,7 +893,11 @@ class TestSignerModeUnverifiableSchemes:
             log.append(payload={"i": i}, payload_type=PT)
 
         sidecar = Path(str(path) + ".attest")
-        rows = [json.loads(line) for line in sidecar.read_text().splitlines() if line.strip()]
+        rows = [
+            json.loads(line)
+            for line in sidecar.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
         rows[0]["scheme"] = "sig-dilithium3-v1"
         sidecar.write_text(
             "".join(f"{json.dumps(row, sort_keys=True)}\n" for row in rows), encoding="utf-8"

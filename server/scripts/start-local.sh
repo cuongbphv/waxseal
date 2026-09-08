@@ -17,6 +17,7 @@
 # and the portal says so, because a fail-open that describes itself as secured is
 # the failure this project exists to prevent.
 
+# shellcheck source=_lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 PORT=8000
@@ -53,10 +54,13 @@ fi
 step "Starting on http://127.0.0.1:$PORT"
 info "data dir: $DATA_DIR"
 info "operator + settings store: memory (no WAXSEAL_SERVER_DATABASE_URL)"
-[[ -n "${WAXSEAL_API_KEY:-}" ]] && info "write auth: bearer required" \
-                                || info "write auth: OPEN (WAXSEAL_API_KEY unset)"
+if [[ -n "${WAXSEAL_API_KEY:-}" ]]; then
+  info "write auth: bearer required"
+else
+  info "write auth: OPEN (WAXSEAL_API_KEY unset)"
+fi
 
-cd "$SERVER_DIR"
+cd "$SERVER_DIR" || exit 1
 # `--factory` so uvicorn builds the app itself, which is what `--reload`
 # requires. `__main__.build` reads the same environment the container path reads,
 # so a local run cannot be exercising a differently-configured app.

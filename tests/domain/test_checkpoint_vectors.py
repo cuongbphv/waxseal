@@ -62,9 +62,7 @@ class TestVectorsAreFrozen:
 
 
 class TestCheckpointFrames:
-    @pytest.mark.parametrize(
-        "vector", vectors()["checkpoint_frames"], ids=lambda v: v["name"]
-    )
+    @pytest.mark.parametrize("vector", vectors()["checkpoint_frames"], ids=lambda v: v["name"])
     def test_matches_the_independently_derived_bytes(self, vector: dict[str, Any]) -> None:
         cp = Checkpoint(
             seq=vector["seq"],
@@ -77,9 +75,7 @@ class TestCheckpointFrames:
         assert frame.hex() == vector["frame_hex"]
         assert hashlib.sha256(frame).hexdigest() == vector["frame_sha256"]
 
-    @pytest.mark.parametrize(
-        "vector", vectors()["checkpoint_frames"], ids=lambda v: v["name"]
-    )
+    @pytest.mark.parametrize("vector", vectors()["checkpoint_frames"], ids=lambda v: v["name"])
     def test_the_prefix_matches_the_binding(self, vector: dict[str, Any]) -> None:
         # SPEC section 15: no binding -> byte-identical v1 output (every anchor
         # taken before the binding existed keeps verifying); a binding -> the
@@ -93,9 +89,7 @@ class TestCheckpointFrames:
 
 
 class TestAggregateCommits:
-    @pytest.mark.parametrize(
-        "vector", vectors()["aggregate_commits"], ids=lambda v: v["name"]
-    )
+    @pytest.mark.parametrize("vector", vectors()["aggregate_commits"], ids=lambda v: v["name"])
     def test_matches_the_independently_derived_commitment(self, vector: dict[str, Any]) -> None:
         assert aggregate_commit(vector["epoch"], vector["agg"]) == vector["commit"]
 
@@ -108,11 +102,7 @@ class TestBindingEndToEnd:
         # aggregate_commit implementation over (source_epoch, source_agg).
         # waxseal must arrive at the same commitment AND the same frame, or
         # the binding a witness attests is not the binding verify checks.
-        vector = next(
-            v
-            for v in vectors()["checkpoint_frames"]
-            if "source_agg" in v
-        )
+        vector = next(v for v in vectors()["checkpoint_frames"] if "source_agg" in v)
         commit = aggregate_commit(vector["source_epoch"], vector["source_agg"])
         assert commit == vector["agg_commit"]
         cp = Checkpoint(

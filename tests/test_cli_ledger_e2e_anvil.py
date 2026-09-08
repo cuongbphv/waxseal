@@ -113,7 +113,13 @@ def _base_env() -> dict[str, str]:
 
 def _run(*args: str, cwd: Path | None = None) -> str:
     done = subprocess.run(
-        list(args), cwd=cwd, env=_base_env(), capture_output=True, text=True, timeout=180
+        list(args),
+        cwd=cwd,
+        env=_base_env(),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        encoding="utf-8",
     )
     if done.returncode != 0:
         raise AssertionError(f"{' '.join(args)} failed ({done.returncode}):\n{done.stderr}")
@@ -156,8 +162,14 @@ def _start_anvil() -> Node:
     # or `finalized` would never catch up to a transaction's block at all.
     process = subprocess.Popen(
         [
-            f"{FOUNDRY_BIN}/anvil", "--port", str(port),
-            "--slots-in-an-epoch", "1", "--block-time", "1", "--silent",
+            f"{FOUNDRY_BIN}/anvil",
+            "--port",
+            str(port),
+            "--slots-in-an-epoch",
+            "1",
+            "--block-time",
+            "1",
+            "--silent",
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -250,22 +262,38 @@ class _CastSigner:
 
     def sign(self, digest32: bytes) -> bytes:
         signature = _run(
-            f"{FOUNDRY_BIN}/cast", "wallet", "sign", "--no-hash",
-            "--private-key", self._key, "0x" + digest32.hex(),
+            f"{FOUNDRY_BIN}/cast",
+            "wallet",
+            "sign",
+            "--no-hash",
+            "--private-key",
+            self._key,
+            "0x" + digest32.hex(),
         )
         return bytes.fromhex(signature[2:])
 
     def sign_transaction(self, fields: Mapping[str, object]) -> bytes:
         raw = _run(
-            f"{FOUNDRY_BIN}/cast", "mktx", "--private-key", self._key,
-            "--rpc-url", self._url,
-            "--chain", str(fields["chainId"]),
-            "--nonce", str(fields["nonce"]),
-            "--gas-limit", str(fields["gas"]),
-            "--gas-price", str(fields["maxFeePerGas"]),
-            "--priority-gas-price", str(fields["maxPriorityFeePerGas"]),
-            "--value", str(fields["value"]),
-            str(fields["to"]), str(fields["data"]),
+            f"{FOUNDRY_BIN}/cast",
+            "mktx",
+            "--private-key",
+            self._key,
+            "--rpc-url",
+            self._url,
+            "--chain",
+            str(fields["chainId"]),
+            "--nonce",
+            str(fields["nonce"]),
+            "--gas-limit",
+            str(fields["gas"]),
+            "--gas-price",
+            str(fields["maxFeePerGas"]),
+            "--priority-gas-price",
+            str(fields["maxPriorityFeePerGas"]),
+            "--value",
+            str(fields["value"]),
+            str(fields["to"]),
+            str(fields["data"]),
         )
         return bytes.fromhex(raw[2:])
 
@@ -283,9 +311,7 @@ def _bootstrap_sink(chain: Deployment, url: str) -> EvmLedgerSink:
     )
 
 
-def _register_on_both(
-    chain: Deployment, trail: str, writer: str, deadline_s: int
-) -> None:
+def _register_on_both(chain: Deployment, trail: str, writer: str, deadline_s: int) -> None:
     for url in chain.urls:
         _bootstrap_sink(chain, url).register_trail(trail, writer, deadline_s)
 
@@ -298,7 +324,7 @@ def _register_on_both(
 # fake stands in for the same protocol against no real chain at all. This is
 # the layer between those two: a real signer, real key, real cast.
 
-_SIGNER_SCRIPT = '''
+_SIGNER_SCRIPT = """
 import json
 import os
 import subprocess
@@ -339,13 +365,13 @@ def main() -> None:
 
 
 main()
-'''
+"""
 
 
 @pytest.fixture(scope="module")
 def signer_script(tmp_path_factory: pytest.TempPathFactory) -> Path:
     path = tmp_path_factory.mktemp("e2e-signer") / "signer.py"
-    path.write_text(_SIGNER_SCRIPT)
+    path.write_text(_SIGNER_SCRIPT, encoding="utf-8")
     return path
 
 
@@ -372,6 +398,7 @@ def _waxseal(*args: str, env: dict[str, str]) -> subprocess.CompletedProcess[str
         capture_output=True,
         text=True,
         timeout=90,
+        encoding="utf-8",
     )
 
 
@@ -381,9 +408,7 @@ def make_trail(path: Path, n: int = 2) -> None:
         log.append(payload={"i": i}, payload_type=PT)
 
 
-def _anchor_on_both(
-    chain: Deployment, trail: Path, trail_id: str, signer_script: Path
-) -> None:
+def _anchor_on_both(chain: Deployment, trail: Path, trail_id: str, signer_script: Path) -> None:
     """`anchor --evm-liveness` (CLI subprocess) once per node, matching
     `tests/adapters/test_evm_anvil.py::_register_and_anchor`'s own pattern:
     "any party may submit a checkpoint the writer signed" (ports/ledger.py's
@@ -395,11 +420,18 @@ def _anchor_on_both(
     for url in chain.urls:
         env = _cli_env(signer_script, key=RELAYER_KEY, address=RELAYER_ADDRESS, write_url=url)
         anchor = _waxseal(
-            "anchor", str(trail),
-            "--evm-rpc", chain.urls[0], "--evm-rpc", chain.urls[1],
-            "--evm-liveness", str(chain.contracts.liveness),
-            "--evm-write-rpc", url,
-            "--evm-trail-id", trail_id,
+            "anchor",
+            str(trail),
+            "--evm-rpc",
+            chain.urls[0],
+            "--evm-rpc",
+            chain.urls[1],
+            "--evm-liveness",
+            str(chain.contracts.liveness),
+            "--evm-write-rpc",
+            url,
+            "--evm-trail-id",
+            trail_id,
             env=env,
         )
         assert anchor.returncode == 0, anchor.stderr
@@ -429,9 +461,18 @@ class TestRegistryPublishAndCrossCheckViaCli:
         for url in chain.urls:
             env = _cli_env(signer_script, key=RELAYER_KEY, address=RELAYER_ADDRESS, write_url=url)
             proc = _waxseal(
-                "registry", "publish",
-                "--descriptor-of", fp, "--registry", str(chain.contracts.registry),
-                "--rpc", chain.urls[0], "--rpc", chain.urls[1], "--write-rpc", url,
+                "registry",
+                "publish",
+                "--descriptor-of",
+                fp,
+                "--registry",
+                str(chain.contracts.registry),
+                "--rpc",
+                chain.urls[0],
+                "--rpc",
+                chain.urls[1],
+                "--write-rpc",
+                url,
                 env=env,
             )
             assert proc.returncode == 0, proc.stderr
@@ -443,11 +484,18 @@ class TestRegistryPublishAndCrossCheckViaCli:
         _anchor_on_both(chain, trail, self.TRAIL, signer_script)
 
         status = _waxseal(
-            "ledger-status", str(trail),
-            "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-            "--liveness", str(chain.contracts.liveness),
-            "--registry", str(chain.contracts.registry),
-            "--trail-id", self.TRAIL,
+            "ledger-status",
+            str(trail),
+            "--rpc",
+            chain.urls[0],
+            "--rpc",
+            chain.urls[1],
+            "--liveness",
+            str(chain.contracts.liveness),
+            "--registry",
+            str(chain.contracts.registry),
+            "--trail-id",
+            self.TRAIL,
             env=_base_env(),
         )
         assert status.returncode == 0, status.stdout + status.stderr
@@ -503,11 +551,18 @@ class TestRegistryPublishAndCrossCheckViaCli:
         # agreeing; the divergent one, disagreeing) is exercised via a
         # direct second reader call rather than duplicated argparse plumbing.
         status = _waxseal(
-            "ledger-status", str(trail),
-            "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-            "--liveness", str(chain.contracts.liveness),
-            "--registry", str(chain.contracts.registry),
-            "--trail-id", trail_id,
+            "ledger-status",
+            str(trail),
+            "--rpc",
+            chain.urls[0],
+            "--rpc",
+            chain.urls[1],
+            "--liveness",
+            str(chain.contracts.liveness),
+            "--registry",
+            str(chain.contracts.registry),
+            "--trail-id",
+            trail_id,
             env=_base_env(),
         )
         # This trail's OWN fingerprint still agrees (published to both nodes
@@ -548,10 +603,16 @@ class TestLivenessDelinquentViaCli:
         _anchor_on_both(chain, trail, self.TRAIL, signer_script)
 
         live = _waxseal(
-            "ledger-status", str(trail),
-            "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-            "--liveness", str(chain.contracts.liveness),
-            "--trail-id", self.TRAIL,
+            "ledger-status",
+            str(trail),
+            "--rpc",
+            chain.urls[0],
+            "--rpc",
+            chain.urls[1],
+            "--liveness",
+            str(chain.contracts.liveness),
+            "--trail-id",
+            self.TRAIL,
             env=_base_env(),
         )
         assert live.returncode == 0, live.stdout + live.stderr
@@ -563,10 +624,16 @@ class TestLivenessDelinquentViaCli:
             _mine(url, 2)  # `finalized` must catch up too (module docstring)
 
         delinquent = _waxseal(
-            "ledger-status", str(trail),
-            "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-            "--liveness", str(chain.contracts.liveness),
-            "--trail-id", self.TRAIL,
+            "ledger-status",
+            str(trail),
+            "--rpc",
+            chain.urls[0],
+            "--rpc",
+            chain.urls[1],
+            "--liveness",
+            str(chain.contracts.liveness),
+            "--trail-id",
+            self.TRAIL,
             env=_base_env(),
         )
         # A POSITIVELY DETECTED finding: exit 1, the `reconcile-tickets`
@@ -597,10 +664,16 @@ class TestUnreachableViaCli:
         victim.process.wait(timeout=10)
 
         status = _waxseal(
-            "ledger-status", str(tmp_path / "no-such-trail.jsonl"),
-            "--rpc", chain.urls[0], "--rpc", victim.url,
-            "--liveness", str(chain.contracts.liveness),
-            "--trail-id", self.TRAIL,
+            "ledger-status",
+            str(tmp_path / "no-such-trail.jsonl"),
+            "--rpc",
+            chain.urls[0],
+            "--rpc",
+            victim.url,
+            "--liveness",
+            str(chain.contracts.liveness),
+            "--trail-id",
+            self.TRAIL,
             env=_base_env(),
         )
         assert status.returncode == 3
@@ -632,11 +705,18 @@ class TestUnreachableViaCli:
             signer_script, key=RELAYER_KEY, address=RELAYER_ADDRESS, write_url=chain.urls[0]
         )
         anchor = _waxseal(
-            "anchor", str(trail),
-            "--evm-rpc", chain.urls[0], "--evm-rpc", chain.urls[1],
-            "--evm-liveness", str(chain.contracts.liveness),
-            "--evm-write-rpc", chain.urls[0],
-            "--evm-trail-id", trail_id,
+            "anchor",
+            str(trail),
+            "--evm-rpc",
+            chain.urls[0],
+            "--evm-rpc",
+            chain.urls[1],
+            "--evm-liveness",
+            str(chain.contracts.liveness),
+            "--evm-write-rpc",
+            chain.urls[0],
+            "--evm-trail-id",
+            trail_id,
             env=env,
         )
         assert anchor.returncode == 0, anchor.stderr
@@ -646,10 +726,16 @@ class TestUnreachableViaCli:
         victim.process.wait(timeout=10)
 
         status = _waxseal(
-            "ledger-status", str(trail),
-            "--rpc", chain.urls[0], "--rpc", victim.url,
-            "--liveness", str(chain.contracts.liveness),
-            "--trail-id", trail_id,
+            "ledger-status",
+            str(trail),
+            "--rpc",
+            chain.urls[0],
+            "--rpc",
+            victim.url,
+            "--liveness",
+            str(chain.contracts.liveness),
+            "--trail-id",
+            trail_id,
             env=_base_env(),
         )
         assert status.returncode == 2, status.stdout + status.stderr
@@ -672,11 +758,18 @@ class TestBondViaCli:
             signer_script, key=WRITER1_KEY, address=WRITER1_ADDRESS, write_url=chain.urls[0]
         )
         deposit = _waxseal(
-            "bond", "deposit",
-            "--bond", str(chain.contracts.bond),
-            "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-            "--write-rpc", chain.urls[0],
-            "--amount-wei", "1000000000000000000",
+            "bond",
+            "deposit",
+            "--bond",
+            str(chain.contracts.bond),
+            "--rpc",
+            chain.urls[0],
+            "--rpc",
+            chain.urls[1],
+            "--write-rpc",
+            chain.urls[0],
+            "--amount-wei",
+            "1000000000000000000",
             env=env,
         )
         assert deposit.returncode == 0, deposit.stderr
@@ -692,11 +785,20 @@ class TestBondViaCli:
         _anchor_on_both(chain, trail, trail_id, signer_script)
 
         status = _waxseal(
-            "ledger-status", str(trail),
-            "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-            "--liveness", str(chain.contracts.liveness),
-            "--bond", str(chain.contracts.bond), "--writer", WRITER1_ADDRESS,
-            "--trail-id", trail_id,
+            "ledger-status",
+            str(trail),
+            "--rpc",
+            chain.urls[0],
+            "--rpc",
+            chain.urls[1],
+            "--liveness",
+            str(chain.contracts.liveness),
+            "--bond",
+            str(chain.contracts.bond),
+            "--writer",
+            WRITER1_ADDRESS,
+            "--trail-id",
+            trail_id,
             env=_base_env(),
         )
         # A measured CONFLICT, never rendered as "0 findings" (CLAUDE.md
@@ -720,11 +822,18 @@ class TestBondViaCli:
         )
         for url in chain.urls:
             deposit = _waxseal(
-                "bond", "deposit",
-                "--bond", str(chain.contracts.bond),
-                "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-                "--write-rpc", url,
-                "--amount-wei", str(amount_wei),
+                "bond",
+                "deposit",
+                "--bond",
+                str(chain.contracts.bond),
+                "--rpc",
+                chain.urls[0],
+                "--rpc",
+                chain.urls[1],
+                "--write-rpc",
+                url,
+                "--amount-wei",
+                str(amount_wei),
                 env={**deposit_env, "WAXSEAL_E2E_SIGNER_RPC_URL": url},
             )
             assert deposit.returncode == 0, deposit.stderr
@@ -737,24 +846,36 @@ class TestBondViaCli:
         digest_a = checkpoint_signing_digest(trail_id, checkpoint_a)
         digest_b = checkpoint_signing_digest(trail_id, checkpoint_b)
         signature_a = _run(
-            f"{FOUNDRY_BIN}/cast", "wallet", "sign", "--no-hash",
-            "--private-key", WRITER2_KEY, "0x" + digest_a.hex(),
+            f"{FOUNDRY_BIN}/cast",
+            "wallet",
+            "sign",
+            "--no-hash",
+            "--private-key",
+            WRITER2_KEY,
+            "0x" + digest_a.hex(),
         )
         signature_b = _run(
-            f"{FOUNDRY_BIN}/cast", "wallet", "sign", "--no-hash",
-            "--private-key", WRITER2_KEY, "0x" + digest_b.hex(),
+            f"{FOUNDRY_BIN}/cast",
+            "wallet",
+            "sign",
+            "--no-hash",
+            "--private-key",
+            WRITER2_KEY,
+            "0x" + digest_b.hex(),
         )
 
         proof = {
             "kind": "equivocation",
             "chain_id": trail_id,
             "checkpoint_a": {
-                "seq": checkpoint_a.seq, "entry_hash": checkpoint_a.entry_hash,
+                "seq": checkpoint_a.seq,
+                "entry_hash": checkpoint_a.entry_hash,
                 "root": checkpoint_a.root,
             },
             "signature_a": signature_a,
             "checkpoint_b": {
-                "seq": checkpoint_b.seq, "entry_hash": checkpoint_b.entry_hash,
+                "seq": checkpoint_b.seq,
+                "entry_hash": checkpoint_b.entry_hash,
                 "root": checkpoint_b.root,
             },
             "signature_b": signature_b,
@@ -763,8 +884,12 @@ class TestBondViaCli:
         # Verify the pair is bonded and unslashed BEFORE the proof, so the
         # transition the assertion below relies on is measured, not assumed.
         before = _run(
-            f"{FOUNDRY_BIN}/cast", "call", "--rpc-url", chain.urls[0],
-            str(chain.contracts.bond), "bondOf(address)(uint256,uint64,bool,bool)",
+            f"{FOUNDRY_BIN}/cast",
+            "call",
+            "--rpc-url",
+            chain.urls[0],
+            str(chain.contracts.bond),
+            "bondOf(address)(uint256,uint64,bool,bool)",
             WRITER2_ADDRESS,
         ).splitlines()
         assert before[0].split()[0] == str(amount_wei)
@@ -781,21 +906,32 @@ class TestBondViaCli:
 
         with tempfile.TemporaryDirectory() as tmp:
             proof_path = Path(tmp) / "equivocation.json"
-            proof_path.write_text(json.dumps(proof))
+            proof_path.write_text(json.dumps(proof), encoding="utf-8")
             for url in chain.urls:
                 prove = _waxseal(
-                    "bond", "prove", str(proof_path),
-                    "--bond", str(chain.contracts.bond),
-                    "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-                    "--write-rpc", url,
+                    "bond",
+                    "prove",
+                    str(proof_path),
+                    "--bond",
+                    str(chain.contracts.bond),
+                    "--rpc",
+                    chain.urls[0],
+                    "--rpc",
+                    chain.urls[1],
+                    "--write-rpc",
+                    url,
                     env={**prove_env, "WAXSEAL_E2E_SIGNER_RPC_URL": url},
                 )
                 assert prove.returncode == 0, prove.stderr
                 assert "tx=0x" in prove.stdout, prove.stdout
 
         after = _run(
-            f"{FOUNDRY_BIN}/cast", "call", "--rpc-url", chain.urls[0],
-            str(chain.contracts.bond), "bondOf(address)(uint256,uint64,bool,bool)",
+            f"{FOUNDRY_BIN}/cast",
+            "call",
+            "--rpc-url",
+            chain.urls[0],
+            str(chain.contracts.bond),
+            "bondOf(address)(uint256,uint64,bool,bool)",
             WRITER2_ADDRESS,
         ).splitlines()
         assert after[3].strip() == "true"  # slashed
@@ -815,17 +951,25 @@ class TestBondViaCli:
         _anchor_on_both(chain, trail, trail_check_id, signer_script)
 
         status = _waxseal(
-            "ledger-status", str(trail),
-            "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-            "--liveness", str(chain.contracts.liveness),
-            "--bond", str(chain.contracts.bond), "--writer", WRITER2_ADDRESS,
-            "--trail-id", trail_check_id,
+            "ledger-status",
+            str(trail),
+            "--rpc",
+            chain.urls[0],
+            "--rpc",
+            chain.urls[1],
+            "--liveness",
+            str(chain.contracts.liveness),
+            "--bond",
+            str(chain.contracts.bond),
+            "--writer",
+            WRITER2_ADDRESS,
+            "--trail-id",
+            trail_check_id,
             env=_base_env(),
         )
         assert status.returncode == 1, status.stdout + status.stderr
         assert "bond: slashed" in status.stdout
         assert "bond_slashed" in status.stdout
-
 
     def test_deposit_then_prove_non_extension_slashes_the_bond(
         self, chain: Deployment, signer_script: Path
@@ -857,11 +1001,18 @@ class TestBondViaCli:
         )
         for url in chain.urls:
             deposit = _waxseal(
-                "bond", "deposit",
-                "--bond", str(chain.contracts.bond),
-                "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-                "--write-rpc", url,
-                "--amount-wei", str(amount_wei),
+                "bond",
+                "deposit",
+                "--bond",
+                str(chain.contracts.bond),
+                "--rpc",
+                chain.urls[0],
+                "--rpc",
+                chain.urls[1],
+                "--write-rpc",
+                url,
+                "--amount-wei",
+                str(amount_wei),
                 env={**deposit_env, "WAXSEAL_E2E_SIGNER_RPC_URL": url},
             )
             assert deposit.returncode == 0, deposit.stderr
@@ -876,8 +1027,12 @@ class TestBondViaCli:
 
         signatures = [
             _run(
-                f"{FOUNDRY_BIN}/cast", "wallet", "sign", "--no-hash",
-                "--private-key", WRITER3_KEY,
+                f"{FOUNDRY_BIN}/cast",
+                "wallet",
+                "sign",
+                "--no-hash",
+                "--private-key",
+                WRITER3_KEY,
                 "0x" + checkpoint_signing_digest(trail_id, checkpoint).hex(),
             )
             for checkpoint in (older, newer)
@@ -903,8 +1058,12 @@ class TestBondViaCli:
         }
 
         before = _run(
-            f"{FOUNDRY_BIN}/cast", "call", "--rpc-url", chain.urls[0],
-            str(chain.contracts.bond), "bondOf(address)(uint256,uint64,bool,bool)",
+            f"{FOUNDRY_BIN}/cast",
+            "call",
+            "--rpc-url",
+            chain.urls[0],
+            str(chain.contracts.bond),
+            "bondOf(address)(uint256,uint64,bool,bool)",
             WRITER3_ADDRESS,
         ).splitlines()
         assert before[0].split()[0] == str(amount_wei)
@@ -918,12 +1077,19 @@ class TestBondViaCli:
 
         with tempfile.TemporaryDirectory() as tmp:
             proof_path = Path(tmp) / "non-extension.json"
-            proof_path.write_text(json.dumps(proof))
+            proof_path.write_text(json.dumps(proof), encoding="utf-8")
             prove = _waxseal(
-                "bond", "prove", str(proof_path),
-                "--bond", str(chain.contracts.bond),
-                "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-                "--write-rpc", chain.urls[0],
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                str(chain.contracts.bond),
+                "--rpc",
+                chain.urls[0],
+                "--rpc",
+                chain.urls[1],
+                "--write-rpc",
+                chain.urls[0],
                 env={**prove_env, "WAXSEAL_E2E_SIGNER_RPC_URL": chain.urls[0]},
             )
             assert prove.returncode == 0, prove.stderr
@@ -931,8 +1097,12 @@ class TestBondViaCli:
             assert "proveNonExtension" in prove.stdout
 
         after = _run(
-            f"{FOUNDRY_BIN}/cast", "call", "--rpc-url", chain.urls[0],
-            str(chain.contracts.bond), "bondOf(address)(uint256,uint64,bool,bool)",
+            f"{FOUNDRY_BIN}/cast",
+            "call",
+            "--rpc-url",
+            chain.urls[0],
+            str(chain.contracts.bond),
+            "bondOf(address)(uint256,uint64,bool,bool)",
             WRITER3_ADDRESS,
         ).splitlines()
         assert after[3].strip() == "true"  # slashed
@@ -961,8 +1131,12 @@ class TestBondViaCli:
         }
         signatures = [
             _run(
-                f"{FOUNDRY_BIN}/cast", "wallet", "sign", "--no-hash",
-                "--private-key", WRITER3_KEY,
+                f"{FOUNDRY_BIN}/cast",
+                "wallet",
+                "sign",
+                "--no-hash",
+                "--private-key",
+                WRITER3_KEY,
                 "0x" + checkpoint_signing_digest(trail_id, checkpoint).hex(),
             )
             for checkpoint in (older, newer)
@@ -985,12 +1159,19 @@ class TestBondViaCli:
 
         with tempfile.TemporaryDirectory() as tmp:
             proof_path = Path(tmp) / "agree.json"
-            proof_path.write_text(json.dumps(proof))
+            proof_path.write_text(json.dumps(proof), encoding="utf-8")
             prove = _waxseal(
-                "bond", "prove", str(proof_path),
-                "--bond", str(chain.contracts.bond),
-                "--rpc", chain.urls[0], "--rpc", chain.urls[1],
-                "--write-rpc", chain.urls[0],
+                "bond",
+                "prove",
+                str(proof_path),
+                "--bond",
+                str(chain.contracts.bond),
+                "--rpc",
+                chain.urls[0],
+                "--rpc",
+                chain.urls[1],
+                "--write-rpc",
+                chain.urls[0],
                 env={**prove_env, "WAXSEAL_E2E_SIGNER_RPC_URL": chain.urls[0]},
             )
         assert prove.returncode == 1, prove.stdout
@@ -1020,10 +1201,17 @@ class TestConsistencyProofCrossCheck:
 
         proof_arg = "[" + ",".join("0x" + p for p in proof) + "]"
         out = _run(
-            f"{FOUNDRY_BIN}/cast", "call", "--rpc-url", chain.urls[0],
+            f"{FOUNDRY_BIN}/cast",
+            "call",
+            "--rpc-url",
+            chain.urls[0],
             str(chain.contracts.bond),
             "checkConsistency(bytes32,uint256,bytes32,uint256,bytes32[])(bool,uint8)",
-            "0x" + old_root, str(old_size), "0x" + new_root, str(new_size), proof_arg,
+            "0x" + old_root,
+            str(old_size),
+            "0x" + new_root,
+            str(new_size),
+            proof_arg,
         ).splitlines()
         assert out[0].strip() == "true"
         assert out[1].strip() == "0"  # Rfc9162.Fail.None == 0: verified, no reason to report
@@ -1038,10 +1226,17 @@ class TestConsistencyProofCrossCheck:
 
         corrupted_arg = "[" + ",".join("0x" + p for p in corrupted) + "]"
         out_bad = _run(
-            f"{FOUNDRY_BIN}/cast", "call", "--rpc-url", chain.urls[0],
+            f"{FOUNDRY_BIN}/cast",
+            "call",
+            "--rpc-url",
+            chain.urls[0],
             str(chain.contracts.bond),
             "checkConsistency(bytes32,uint256,bytes32,uint256,bytes32[])(bool,uint8)",
-            "0x" + old_root, str(old_size), "0x" + new_root, str(new_size), corrupted_arg,
+            "0x" + old_root,
+            str(old_size),
+            "0x" + new_root,
+            str(new_size),
+            corrupted_arg,
         ).splitlines()
         assert out_bad[0].strip() == "false"
         assert out_bad[1].strip() != "0"

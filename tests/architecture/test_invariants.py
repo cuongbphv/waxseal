@@ -13,6 +13,19 @@ REPO = Path(__file__).parent.parent.parent
 SRC = REPO / "src" / "waxseal"
 
 
+def cli_python_files() -> list[Path]:
+    """Every module of the cli/ package (0.1.6 split a 4 402-line cli.py).
+    A stray cli.py is still picked up so a half-reverted split cannot hide."""
+    files: list[Path] = []
+    if (SRC / "cli.py").is_file():
+        files.append(SRC / "cli.py")
+    pkg = SRC / "cli"
+    if pkg.is_dir():
+        files.extend(sorted(pkg.rglob("*.py")))
+    assert files, "neither src/waxseal/cli.py nor src/waxseal/cli/ exists"
+    return files
+
+
 def source_files() -> list[Path]:
     return sorted(SRC.rglob("*.py"))
 
@@ -20,7 +33,7 @@ def source_files() -> list[Path]:
 class TestZeroDependencies:
     def test_pyproject_declares_no_runtime_dependencies(self) -> None:
         # CLAUDE.md rule 1: dependencies stays [].
-        data = tomllib.loads((REPO / "pyproject.toml").read_text())
+        data = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
         assert data["project"]["dependencies"] == []
 
     # Sole carve-out from the stdlib-only import scan: integration modules
@@ -32,9 +45,9 @@ class TestZeroDependencies:
     # the host is present by definition.
     HOST_IMPORTS_ALLOWED_IN_INTEGRATIONS = {
         "langchain_core",  # waxseal/integrations/langchain.py
-        "crewai",          # waxseal/integrations/crewai.py
-        "agents",          # waxseal/integrations/openai_agents.py
-        "hermes_cli",      # waxseal/integrations/hermes.py (lazy, in-function)
+        "crewai",  # waxseal/integrations/crewai.py
+        "agents",  # waxseal/integrations/openai_agents.py
+        "hermes_cli",  # waxseal/integrations/hermes.py (lazy, in-function)
     }
 
     def test_src_imports_stdlib_and_waxseal_only(self) -> None:
@@ -43,7 +56,9 @@ class TestZeroDependencies:
         for path in source_files():
             in_integrations = (SRC / "integrations") in path.parents
             for match in re.finditer(
-                r"^(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)", path.read_text(), re.M
+                r"^(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)",
+                path.read_text(encoding="utf-8"),
+                re.M,
             ):
                 root = match.group(1)
                 if root in stdlib or root == "waxseal":
@@ -59,9 +74,11 @@ class TestDomainPurity:
         # CLAUDE.md: domain/ is pure logic — no filesystem, no db, no locks.
         forbidden = {"os", "io", "sqlite3", "pathlib", "fcntl", "msvcrt", "socket"}
         offenders = []
-        for path in sorted((SRC / "domain").glob("*.py")):
+        for path in sorted((SRC / "domain").rglob("*.py")):
             for match in re.finditer(
-                r"^(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)", path.read_text(), re.M
+                r"^(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)",
+                path.read_text(encoding="utf-8"),
+                re.M,
             ):
                 if match.group(1) in forbidden:
                     offenders.append(f"{path.name}: {match.group(1)}")
@@ -69,8 +86,8 @@ class TestDomainPurity:
 
     def test_domain_does_not_import_ports_or_adapters(self) -> None:
         offenders = []
-        for path in sorted((SRC / "domain").glob("*.py")):
-            text = path.read_text()
+        for path in sorted((SRC / "domain").rglob("*.py")):
+            text = path.read_text(encoding="utf-8")
             if "waxseal.ports" in text or "waxseal.adapters" in text:
                 offenders.append(path.name)
         assert offenders == []
@@ -81,7 +98,7 @@ class TestSingleOwner:
         offenders = [
             str(path.relative_to(REPO))
             for path in source_files()
-            if "os.replace" in path.read_text() and path.name != "atomic.py"
+            if "os.replace" in path.read_text(encoding="utf-8") and path.name != "atomic.py"
         ]
         assert offenders == []
 
@@ -94,8 +111,8 @@ class TestVerdictComposition:
     # break. This is a preventative regression guard: no existing bug to
     # fix, just a shape the source must never regain.
     def test_max_does_not_appear_in_cli(self) -> None:
-        text = (SRC / "cli.py").read_text()
-        assert "max(" not in text
+        for path in cli_python_files():
+            assert "max(" not in path.read_text(encoding="utf-8"), path
 
 
 class TestPublicApiFrozen:
@@ -161,6 +178,28 @@ class TestPublicApiFrozen:
             # actually needs them here.
             "DecisionRecord",
             "HumanOversight",
+            # 0.1.6. Two evidence-record schemas join DecisionRecord under
+            # the rule this set already follows: a domain schema type an
+            # integrating system writes against is public; the source helper
+            # that appends it is not. So `IncidentRecord` and
+            # `InterventionRecord` are here while `record_incident`,
+            # `record_intervention` and both `iter_*` are not, matching
+            # `record_decision`.
+            #
+            # They exist because a serious-incident record and a
+            # human-intervention record are asked for by name: Decree
+            # 142/2026/ND-CP requires an operator to retain operation logs
+            # AND intervention decisions for inspection, and its own form
+            # asks what measure keeps the log intact. The chain answers that
+            # last question; these two types are what it answers it about.
+            #
+            # Deliberately NOT here: scan_incidents, window_status,
+            # render_incidents, scan_interventions and both PAYLOAD_TYPE
+            # constants. They are readers and renderers for the CLI, on the
+            # same footing as `scan_tickets` and `build_report`, and a frozen
+            # surface is easy to widen later and breaking to narrow.
+            "IncidentRecord",
+            "InterventionRecord",
             "ModelRef",
             "BundleResult",
             "ProofBundle",
@@ -205,9 +244,10 @@ class TestNoInternalNames:
         # The repo is public OSS; origins are referred to only as "a prior
         # production system". Banned tokens are assembled from codepoints so
         # this file itself stays grep-clean.
-        banned = ["".join(map(chr, cs)) for cs in ([118, 101, 108, 111, 120],
-                                                   [102, 112, 116],
-                                                   [102, 105, 115])]
+        banned = [
+            "".join(map(chr, cs))
+            for cs in ([118, 101, 108, 111, 120], [102, 112, 116], [102, 105, 115])
+        ]
         checked = [
             *REPO.glob("*.md"),
             *REPO.glob("*.toml"),
@@ -229,7 +269,9 @@ class TestVersionIsStatedOnce:
         # Three hand-edited copies of one number. A release that ships
         # __version__ = "0.1.2" inside a 0.1.3 wheel makes every bug report
         # name the wrong build.
-        declared = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["version"]
+        declared = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+            "version"
+        ]
         import waxseal
 
         assert waxseal.__version__ == declared
@@ -256,7 +298,7 @@ class TestCoverageFloorIsStatedOnce:
     )
 
     def test_every_documented_floor_matches_pyproject(self) -> None:
-        config = tomllib.loads((REPO / "pyproject.toml").read_text())
+        config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
         floor = str(config["tool"]["coverage"]["report"]["fail_under"])
         quoted = re.compile(r"(?i)coverage[^\n]*?(\d{2,3})\s*%")
         stale = []
@@ -375,10 +417,16 @@ class TestDocumentationLinks:
     # the other trees supply, which is exactly how `docs/` went unchecked.
     DOC_GLOBS = (
         "*.md",
+        # deploy/ and tools/ joined 08/09/2026, mirroring
+        # test_epistemic_tags.DOC_GLOBS: a pre-release review found the two
+        # trees outside this glob, so a link from a deploy guide to a moved
+        # file was a 404 nobody could grep for.
+        "deploy/**/*.md",
         "docs/**/*.md",
         "integrations/*/README*.md",
         "examples/**/*.md",
         "server/**/*.md",
+        "tools/**/*.md",
     )
 
     # Path segments whose subtree is not hand-written prose: gitignored
@@ -470,6 +518,7 @@ class TestDocumentationLinks:
             [git, "check-ignore", "--no-index", *targets],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=REPO,
         )
         if proc.returncode not in (0, 1):  # pragma: no cover - not a git checkout
@@ -487,17 +536,48 @@ class TestDocumentationLinks:
 # path. The numbers are PARSED, never hardcoded: a test that pins "nine" is the
 # fourth copy of the number and the next thing to go stale.
 _CARDINALS = {
-    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
-    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
-    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
-    "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
 }
 _ORDINALS = {
-    "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
-    "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11,
-    "twelfth": 12, "thirteenth": 13, "fourteenth": 14, "fifteenth": 15,
-    "sixteenth": 16, "seventeenth": 17, "eighteenth": 18, "nineteenth": 19,
-    "twentieth": 20, "twenty-first": 21,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+    "tenth": 10,
+    "eleventh": 11,
+    "twelfth": 12,
+    "thirteenth": 13,
+    "fourteenth": 14,
+    "fifteenth": 15,
+    "sixteenth": 16,
+    "seventeenth": 17,
+    "eighteenth": 18,
+    "nineteenth": 19,
+    "twentieth": 20,
+    "twenty-first": 21,
 }
 
 
@@ -636,12 +716,10 @@ class TestSelectorsAreFrozenInOnePlace:
         # recompute here. An ALIAS of an already-frozen constant is not a
         # second source of truth, and `adapters/evm.py` keeps one
         # (`SELECTOR_SUBMIT_HEAD`) to say which `submit` it means.
-        frozen = re.compile(
-            r"^SELECTOR_\w+\s*:\s*Final\s*=\s*bytes\.fromhex", re.MULTILINE
-        )
+        frozen = re.compile(r"^SELECTOR_\w+\s*:\s*Final\s*=\s*bytes\.fromhex", re.MULTILINE)
         offenders = sorted(
             str(path.relative_to(REPO))
             for path in source_files()
-            if path != SRC / "domain" / "abi.py" and frozen.search(path.read_text())
+            if path != SRC / "domain" / "abi.py" and frozen.search(path.read_text(encoding="utf-8"))
         )
         assert offenders == []

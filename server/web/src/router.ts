@@ -96,13 +96,13 @@ const routes: RouteRecordRaw[] = [
     path: '/users',
     name: 'users',
     meta: { crumbKey: 'navUsers' },
-    component: () => import('@/views/UsersView.vue'),
+    component: () => import('@/views/users/UsersView.vue'),
   },
   {
     path: '/keys',
     name: 'keys',
     meta: { crumbKey: 'navKeys' },
-    component: () => import('@/views/KeysView.vue'),
+    component: () => import('@/views/keys/KeysView.vue'),
   },
   {
     path: '/benchmark',

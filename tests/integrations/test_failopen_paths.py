@@ -112,14 +112,15 @@ class TestOpenFailureStillLeavesADropRecord:
         sys.modules.pop("waxseal.integrations.hermes", None)
         hermes = importlib.import_module("waxseal.integrations.hermes")
         monkeypatch.setattr(
-            AuditLog, "open",
+            AuditLog,
+            "open",
             staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
         )
         hermes.on_post_tool_call(tool_name="terminal", args={})
         assert "dropped" in capsys.readouterr().out
         drops = tmp_path / "audit" / "trail.jsonl.drops"
         assert drops.exists()
-        assert len(drops.read_text().splitlines()) == 1
+        assert len(drops.read_text(encoding="utf-8").splitlines()) == 1
         sys.modules.pop("waxseal.integrations.hermes", None)
 
     def test_hermes_gateway(
@@ -133,14 +134,15 @@ class TestOpenFailureStillLeavesADropRecord:
         sys.modules.pop("waxseal.integrations.hermes_gateway", None)
         gw = importlib.import_module("waxseal.integrations.hermes_gateway")
         monkeypatch.setattr(
-            AuditLog, "open",
+            AuditLog,
+            "open",
             staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
         )
         gw.handle("agent:step", {"iteration": 1})
         assert "dropped" in capsys.readouterr().out
         drops = tmp_path / "audit" / "trail.jsonl.drops"
         assert drops.exists()
-        assert len(drops.read_text().splitlines()) == 1
+        assert len(drops.read_text(encoding="utf-8").splitlines()) == 1
         sys.modules.pop("waxseal.integrations.hermes_gateway", None)
 
 

@@ -120,7 +120,7 @@ class TicketScan:
 def scan_tickets(entries: Iterable[Entry], *, issuer: str) -> TicketScan:
     """Which ticket numbers for ``issuer`` are actually present on the
     trail. Pure over already-read ``Entry`` values, so no I/O happens here;
-    the caller (``cli.py``) is the one reading the trail."""
+    the caller (``cli/tickets.py``) is the one reading the trail."""
     present: set[int] = set()
     unreadable: list[int] = []
     for entry in entries:
@@ -219,15 +219,9 @@ def reconcile_tickets(
     window_lo = (max_issued // lease_size) * lease_size
     window_hi = window_lo + lease_size - 1
 
-    missing = tuple(
-        sorted(t for t in issued_set if t < window_lo and t not in present_set)
-    )
+    missing = tuple(sorted(t for t in issued_set if t < window_lo and t not in present_set))
     blind_spot_missing = tuple(
-        sorted(
-            t
-            for t in issued_set
-            if window_lo <= t <= window_hi and t not in present_set
-        )
+        sorted(t for t in issued_set if window_lo <= t <= window_hi and t not in present_set)
     )
     return TicketReconciliation(
         measured=True,

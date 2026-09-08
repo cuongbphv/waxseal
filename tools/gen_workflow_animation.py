@@ -73,10 +73,23 @@ def rect(x, y, w, h, *, rx=0, fill="none", stroke=None, sw=2, opacity=None, dash
     return s + _op(opacity) + "/>"
 
 
-def text(x, y, s, *, size=24, fill=TEXT, anchor="start", family=MONO, weight=None,
-         opacity=None, spacing=None) -> str:
-    out = (f'<text x="{x}" y="{y}" font-family="{family}" font-size="{size}" '
-           f'fill="{fill}" text-anchor="{anchor}"')
+def text(
+    x,
+    y,
+    s,
+    *,
+    size=24,
+    fill=TEXT,
+    anchor="start",
+    family=MONO,
+    weight=None,
+    opacity=None,
+    spacing=None,
+) -> str:
+    out = (
+        f'<text x="{x}" y="{y}" font-family="{family}" font-size="{size}" '
+        f'fill="{fill}" text-anchor="{anchor}"'
+    )
     if weight:
         out += f' font-weight="{weight}"'
     if spacing:
@@ -99,8 +112,12 @@ def arrow(x1, y1, x2, y2, *, stroke=MUTED, sw=2.5, dash=None, opacity=None) -> s
     bx, by = x2 - ux * head, y2 - uy * head
     px, py = -uy * head * 0.55, ux * head * 0.55
     pts = f"{x2},{y2} {bx + px},{by + py} {bx - px},{by - py}"
-    return (line(x1, y1, bx, by, stroke=stroke, sw=sw, dash=dash, opacity=opacity)
-            + f'<polygon points="{pts}" fill="{stroke}"' + _op(opacity) + "/>")
+    return (
+        line(x1, y1, bx, by, stroke=stroke, sw=sw, dash=dash, opacity=opacity)
+        + f'<polygon points="{pts}" fill="{stroke}"'
+        + _op(opacity)
+        + "/>"
+    )
 
 
 def panel(x, y, w, h, *, fill=PANEL, stroke=BORDER, sw=2, opacity=None) -> str:
@@ -110,9 +127,13 @@ def panel(x, y, w, h, *, fill=PANEL, stroke=BORDER, sw=2, opacity=None) -> str:
 def chip(x, y, label, *, color=MUTED, fill=PANEL2, size=20, pad=16, family=MONO):
     w = text_width(label, size) + pad * 2
     h = size * 1.9
-    return (rect(x, y, w, h, rx=h / 2, fill=fill, stroke=color, sw=1.6)
-            + text(x + w / 2, y + h * 0.69, label, size=size, fill=color, anchor="middle",
-                   family=family), w)
+    return (
+        rect(x, y, w, h, rx=h / 2, fill=fill, stroke=color, sw=1.6)
+        + text(
+            x + w / 2, y + h * 0.69, label, size=size, fill=color, anchor="middle", family=family
+        ),
+        w,
+    )
 
 
 def chip_row(x, y, items, *, gap=12, size=20, family=MONO) -> str:
@@ -129,8 +150,10 @@ def chip_row_width(items, *, gap=12, size=20, pad=16) -> float:
 
 
 def lines(x, y, items, *, size=17, leading=26, family=MONO) -> str:
-    return "".join(text(x, y + i * leading, s, size=size, fill=c, family=family)
-                   for i, (s, c) in enumerate(items))
+    return "".join(
+        text(x, y + i * leading, s, size=size, fill=c, family=family)
+        for i, (s, c) in enumerate(items)
+    )
 
 
 BLOCK_W, BLOCK_H = 96, 74
@@ -154,8 +177,15 @@ def block(x, y, seq, *, state="idle", tag=None, tag_color=None) -> str:
     out = rect(x, y, BLOCK_W, BLOCK_H, rx=10, fill=fill, stroke=stroke, sw=2.5, dash=dash)
     out += text(x + BLOCK_W / 2, y + 33, f"#{seq}", size=25, fill=fg, anchor="middle")
     if tag:
-        out += text(x + BLOCK_W / 2, y + 58, tag, size=15, fill=tag_color or fg,
-                    anchor="middle", family=SANS)
+        out += text(
+            x + BLOCK_W / 2,
+            y + 58,
+            tag,
+            size=15,
+            fill=tag_color or fg,
+            anchor="middle",
+            family=SANS,
+        )
     return out
 
 
@@ -164,11 +194,18 @@ def chain(x, y, states, *, start=0, gap=26, tags=None, link_color=BORDER) -> str
     for i, st in enumerate(states):
         bx = x + i * (BLOCK_W + gap)
         if i:
-            out += line(bx - gap + 2, y + BLOCK_H / 2, bx - 2, y + BLOCK_H / 2,
-                        stroke=link_color, sw=2.5)
+            out += line(
+                bx - gap + 2, y + BLOCK_H / 2, bx - 2, y + BLOCK_H / 2, stroke=link_color, sw=2.5
+            )
         tag = (tags or {}).get(i)
-        out += block(bx, y, start + i, state=st, tag=tag[0] if tag else None,
-                     tag_color=tag[1] if tag else None)
+        out += block(
+            bx,
+            y,
+            start + i,
+            state=st,
+            tag=tag[0] if tag else None,
+            tag_color=tag[1] if tag else None,
+        )
     return out
 
 
@@ -230,20 +267,38 @@ EN = {
     ],
     "s3_desc": "descriptor",
     "s3_banner": "binary rolled back: this build knows A only",
-    "s3_p1": ("ordinal version",
-              ["trail    v2", "binary   v1", "", "FATAL", "schema version mismatch", "",
-               "0 / 7 verified"], "beads v1.2.2"),
+    "s3_p1": (
+        "ordinal version",
+        [
+            "trail    v2",
+            "binary   v1",
+            "",
+            "FATAL",
+            "schema version mismatch",
+            "",
+            "0 / 7 verified",
+        ],
+        "beads v1.2.2",
+    ),
     "s3_p2": ("recompute under A", "3 broken", "migration 060"),
-    "s3_p3": ("waxseal", ["4 ok · 3 unverifiable", "0 broken · exit 2"],
-              "unverifiable is a verdict"),
-    "s3_card": ["one trail, three designs", TEST_PATH,
-                "ordinal refuses · recompute: 3 false alarms · waxseal: 3 unverifiable, 0 broken"],
+    "s3_p3": (
+        "waxseal",
+        ["4 ok · 3 unverifiable", "0 broken · exit 2"],
+        "unverifiable is a verdict",
+    ),
+    "s3_card": [
+        "one trail, three designs",
+        TEST_PATH,
+        "ordinal refuses · recompute: 3 false alarms · waxseal: 3 unverifiable, 0 broken",
+    ],
     "s4_caps": [
         ("The chain verifies clean.", "exit 0"),
         ("A write dropped before storage leaves no gap.", ""),
         ("So completeness is measured separately.", ""),
-        ("Tickets from an outside issuer turn a silent drop into a detection.",
-         "$ waxseal reconcile-tickets"),
+        (
+            "Tickets from an outside issuer turn a silent drop into a detection.",
+            "$ waxseal reconcile-tickets",
+        ),
     ],
     "s4_ghost": "never arrived",
     "s4_left": "completeness",
@@ -254,30 +309,39 @@ EN = {
     "s4_blind": "still blind: 3 in the open lease",
     "s5_caps": [
         ("A checkpoint commits the whole trail to one root.", ""),
-        ("One run publishes it to independent authorities.",
-         "$ waxseal anchor --tsa-url ... --ots-calendar ..."),
+        (
+            "One run publishes it to independent authorities.",
+            "$ waxseal anchor --tsa-url ... --ots-calendar ...",
+        ),
         ("Each independent authority raises τ by one.", ""),
-        ("The verifier's own policy is what makes a missing anchor visible.",
-         "all of these are exit 2"),
+        (
+            "The verifier's own policy is what makes a missing anchor visible.",
+            "all of these are exit 2",
+        ),
     ],
     "s5_cp": "checkpoint",
     "s5_cp_sub": "Merkle root over heads",
-    "s5_sinks": [("RFC 3161 authority", "attested time"),
-                 ("OpenTimestamps", "long-horizon proof"),
-                 ("witness", "consistent / inconsistent / unreachable")],
+    "s5_sinks": [
+        ("RFC 3161 authority", "attested time"),
+        ("OpenTimestamps", "long-horizon proof"),
+        ("witness", "consistent / inconsistent / unreachable"),
+    ],
     "s5_tau": "τ · separation degree",
     "s5_tau_note": "same crypto, different τ, not the same security",
-    "s5_not": ("anchoring does not claim",
-               ["the CMS signature is not verified in-library", "it does not close coverage"]),
+    "s5_not": (
+        "anchoring does not claim",
+        ["the CMS signature is not verified in-library", "it does not close coverage"],
+    ),
     "s5_pin": "pin policy, held by the verifier:",
     "s6_caps": [
         ("Three agents. Three separate trails.", ""),
         ("B records where A's history stood at handoff.", "record_handoff()"),
         ("C does the same with B.", ""),
-        ("Anyone can re-check a hop, read-only.",
-         "$ waxseal verify-handoff trail-b.jsonl --origin trail-a.jsonl"),
-        ("Rewrite A from seq 12. A still verifies clean.",
-         "a re-chained trail is self-consistent"),
+        (
+            "Anyone can re-check a hop, read-only.",
+            "$ waxseal verify-handoff trail-b.jsonl --origin trail-a.jsonl",
+        ),
+        ("Rewrite A from seq 12. A still verifies clean.", "a re-chained trail is self-consistent"),
         ("But B pinned A's hash at seq 12, and it is gone.", ""),
     ],
     "s6_agents": ["agent A · planner", "agent B · coder", "agent C · reviewer"],
@@ -296,11 +360,15 @@ EN = {
         ("", ""),
     ],
     "s7_exits": ["intact", "broken", "unverifiable", "no trail"],
-    "s7_neq": ["unverifiable  is not  tampered", "None  is not  0",
-               "unmeasured  is not  absent"],
-    "s7_sites": ["verdict: ok / broken / unverifiable", "dropped_writes: int | None",
-                 "human_oversight: 'unrecorded'", "ModelRef.digest: None = unpinned",
-                 "witness: ... / unreachable", "RFC 3161 nonce absent: skipped"],
+    "s7_neq": ["unverifiable  is not  tampered", "None  is not  0", "unmeasured  is not  absent"],
+    "s7_sites": [
+        "verdict: ok / broken / unverifiable",
+        "dropped_writes: int | None",
+        "human_oversight: 'unrecorded'",
+        "ModelRef.digest: None = unpinned",
+        "witness: ... / unreachable",
+        "RFC 3161 nonce absent: skipped",
+    ],
     "s7_chips": ["0 dependencies", "1907 tests · 100% coverage", "MIT"],
 }
 
@@ -309,8 +377,7 @@ VI = {
     "tagline": "audit chain chống giả mạo cho AI agent",
     "hook": "không kiểm được   ≠   bị giả mạo",
     "chips": ["0 dependency", "Python 3.11+", "MIT"],
-    "s1_titles": ["1 · sự kiện", "2 · redact", "3 · payload_hash", "4 · header",
-                  "5 · entry_hash"],
+    "s1_titles": ["1 · sự kiện", "2 · redact", "3 · payload_hash", "4 · header", "5 · entry_hash"],
     "s1_caps": [
         ("Agent ghi một quyết định. Trong đó có secret.", "sources/decisions.py"),
         ("Redact chạy trước khi hash.", "chain cam kết trên bytes đã redact"),
@@ -340,21 +407,38 @@ VI = {
     ],
     "s3_desc": "descriptor",
     "s3_banner": "binary đã rollback: bản này chỉ biết A",
-    "s3_p1": ("version theo số",
-              ["trail    v2", "binary   v1", "", "LỖI NẶNG", "schema version mismatch", "",
-               "0 / 7 dòng verify"], "beads v1.2.2"),
+    "s3_p1": (
+        "version theo số",
+        [
+            "trail    v2",
+            "binary   v1",
+            "",
+            "LỖI NẶNG",
+            "schema version mismatch",
+            "",
+            "0 / 7 dòng verify",
+        ],
+        "beads v1.2.2",
+    ),
     "s3_p2": ("tính lại theo A", "3 broken", "migration 060"),
-    "s3_p3": ("waxseal", ["4 ok · 3 không kiểm được", "0 broken · exit 2"],
-              "không kiểm được là một verdict"),
-    "s3_card": ["cùng một trail, ba thiết kế", TEST_PATH,
-                "ordinal: từ chối · tính lại: 3 báo động giả · waxseal: 3 không kiểm được, "
-                "0 broken"],
+    "s3_p3": (
+        "waxseal",
+        ["4 ok · 3 không kiểm được", "0 broken · exit 2"],
+        "không kiểm được là một verdict",
+    ),
+    "s3_card": [
+        "cùng một trail, ba thiết kế",
+        TEST_PATH,
+        "ordinal: từ chối · tính lại: 3 báo động giả · waxseal: 3 không kiểm được, 0 broken",
+    ],
     "s4_caps": [
         ("Chain verify sạch.", "exit 0"),
         ("Một write rơi trước khi tới storage không để lại khoảng trống.", ""),
         ("Nên độ bao phủ phải đo riêng.", ""),
-        ("Ticket từ bên phát hành ngoài biến drop im lặng thành phát hiện.",
-         "$ waxseal reconcile-tickets"),
+        (
+            "Ticket từ bên phát hành ngoài biến drop im lặng thành phát hiện.",
+            "$ waxseal reconcile-tickets",
+        ),
     ],
     "s4_ghost": "không tới nơi",
     "s4_left": "độ bao phủ",
@@ -365,31 +449,39 @@ VI = {
     "s4_blind": "vẫn mù: 3 trong cửa sổ lease đang mở",
     "s5_caps": [
         ("Checkpoint cam kết cả trail vào một root.", ""),
-        ("Một lần chạy publish nó tới các authority độc lập.",
-         "$ waxseal anchor --tsa-url ... --ots-calendar ..."),
+        (
+            "Một lần chạy publish nó tới các authority độc lập.",
+            "$ waxseal anchor --tsa-url ... --ots-calendar ...",
+        ),
         ("Mỗi authority độc lập làm τ tăng một.", ""),
-        ("Chính policy của verifier mới làm một anchor thiếu trở nên thấy được.",
-         "tất cả đều là exit 2"),
+        (
+            "Chính policy của verifier mới làm một anchor thiếu trở nên thấy được.",
+            "tất cả đều là exit 2",
+        ),
     ],
     "s5_cp": "checkpoint",
     "s5_cp_sub": "Merkle root trên các head",
-    "s5_sinks": [("RFC 3161 authority", "thời gian được chứng thực"),
-                 ("OpenTimestamps", "bằng chứng dài hạn"),
-                 ("witness", "khớp / lệch / không liên lạc được")],
+    "s5_sinks": [
+        ("RFC 3161 authority", "thời gian được chứng thực"),
+        ("OpenTimestamps", "bằng chứng dài hạn"),
+        ("witness", "khớp / lệch / không liên lạc được"),
+    ],
     "s5_tau": "τ · mức độ tách biệt",
     "s5_tau_note": "cùng crypto, khác τ, không cùng mức bảo mật",
-    "s5_not": ("anchoring không tuyên bố",
-               ["chữ ký CMS không được verify trong thư viện",
-                "nó không đóng được độ bao phủ"]),
+    "s5_not": (
+        "anchoring không tuyên bố",
+        ["chữ ký CMS không được verify trong thư viện", "nó không đóng được độ bao phủ"],
+    ),
     "s5_pin": "pin policy do verifier tự giữ:",
     "s6_caps": [
         ("Ba agent. Ba trail riêng biệt.", ""),
         ("B ghi lại lịch sử của A đang ở đâu lúc bàn giao.", "record_handoff()"),
         ("C làm y hệt với B.", ""),
-        ("Ai cũng kiểm lại được một chặng, chỉ đọc.",
-         "$ waxseal verify-handoff trail-b.jsonl --origin trail-a.jsonl"),
-        ("Viết lại A từ seq 12. A vẫn tự verify sạch.",
-         "trail được nối lại vẫn tự nhất quán"),
+        (
+            "Ai cũng kiểm lại được một chặng, chỉ đọc.",
+            "$ waxseal verify-handoff trail-b.jsonl --origin trail-a.jsonl",
+        ),
+        ("Viết lại A từ seq 12. A vẫn tự verify sạch.", "trail được nối lại vẫn tự nhất quán"),
         ("Nhưng B đã ghim hash của A tại seq 12, và nó không còn.", ""),
     ],
     "s6_agents": ["agent A · lập kế hoạch", "agent B · viết code", "agent C · review"],
@@ -409,9 +501,14 @@ VI = {
     ],
     "s7_exits": ["nguyên vẹn", "bị gãy", "không kiểm được", "không có trail"],
     "s7_neq": ["không kiểm được  ≠  bị giả mạo", "None  ≠  0", "chưa đo  ≠  không có"],
-    "s7_sites": ["verdict: ok / broken / unverifiable", "dropped_writes: int | None",
-                 "human_oversight: 'unrecorded'", "ModelRef.digest: None = chưa ghim",
-                 "witness: ... / unreachable", "nonce RFC 3161 vắng: bỏ qua"],
+    "s7_sites": [
+        "verdict: ok / broken / unverifiable",
+        "dropped_writes: int | None",
+        "human_oversight: 'unrecorded'",
+        "ModelRef.digest: None = chưa ghim",
+        "witness: ... / unreachable",
+        "nonce RFC 3161 vắng: bỏ qua",
+    ],
     "s7_chips": ["0 dependency", "1907 test · 100% coverage", "MIT"],
 }
 
@@ -450,14 +547,26 @@ ZH = {
     ],
     "s3_desc": "descriptor",
     "s3_banner": "程序已回滚 —— 这个构建只认识 A",
-    "s3_p1": ("序号版本",
-              ["trail    v2", "binary   v1", "", "致命错误", "schema version mismatch", "",
-               "0 / 7 行通过"], "beads v1.2.2"),
+    "s3_p1": (
+        "序号版本",
+        [
+            "trail    v2",
+            "binary   v1",
+            "",
+            "致命错误",
+            "schema version mismatch",
+            "",
+            "0 / 7 行通过",
+        ],
+        "beads v1.2.2",
+    ),
     "s3_p2": ("按 A 重算", "3 条判为篡改", "migration 060"),
-    "s3_p3": ("waxseal", ["4 条通过 · 3 条无法验证", "0 条篡改 · exit 2"],
-              "无法验证也是一种结论"),
-    "s3_card": ["同一条轨迹，三种设计", TEST_PATH,
-                "序号版本：拒绝运行 · 重算：3 次误报 · waxseal：3 条无法验证，0 条篡改"],
+    "s3_p3": ("waxseal", ["4 条通过 · 3 条无法验证", "0 条篡改 · exit 2"], "无法验证也是一种结论"),
+    "s3_card": [
+        "同一条轨迹，三种设计",
+        TEST_PATH,
+        "序号版本：拒绝运行 · 重算：3 次误报 · waxseal：3 条无法验证，0 条篡改",
+    ],
     "s4_caps": [
         ("链验证通过。", "exit 0"),
         ("在写入存储之前丢掉的记录不会留下空缺。", ""),
@@ -473,16 +582,20 @@ ZH = {
     "s4_blind": "仍有盲区：租约窗口内的 3 条",
     "s5_caps": [
         ("检查点把整条轨迹承诺到一个根。", ""),
-        ("一次运行把它发布到互相独立的权威方。",
-         "$ waxseal anchor --tsa-url ... --ots-calendar ..."),
+        (
+            "一次运行把它发布到互相独立的权威方。",
+            "$ waxseal anchor --tsa-url ... --ots-calendar ...",
+        ),
         ("每多一个独立权威方，τ 就加一。", ""),
         ("是验证方自己的策略，让缺失的锚定变得可见。", "这些都是 exit 2"),
     ],
     "s5_cp": "checkpoint",
     "s5_cp_sub": "对各链头的 Merkle 根",
-    "s5_sinks": [("RFC 3161 权威时间戳", "可证时间"),
-                 ("OpenTimestamps", "长周期证据"),
-                 ("witness 见证方", "一致 / 不一致 / 联系不上")],
+    "s5_sinks": [
+        ("RFC 3161 权威时间戳", "可证时间"),
+        ("OpenTimestamps", "长周期证据"),
+        ("witness 见证方", "一致 / 不一致 / 联系不上"),
+    ],
     "s5_tau": "τ · 分离度",
     "s5_tau_note": "密码学相同、τ 不同 —— 安全性并不相同",
     "s5_not": ("锚定并不声称", ["库内不验证 CMS 签名", "它不解决完整性问题"]),
@@ -491,8 +604,10 @@ ZH = {
         ("三个 Agent，三条独立轨迹。", ""),
         ("B 记录下交接那一刻 A 的历史停在哪里。", "record_handoff()"),
         ("C 对 B 做同样的事。", ""),
-        ("任何人都能只读地复核一跳。",
-         "$ waxseal verify-handoff trail-b.jsonl --origin trail-a.jsonl"),
+        (
+            "任何人都能只读地复核一跳。",
+            "$ waxseal verify-handoff trail-b.jsonl --origin trail-a.jsonl",
+        ),
         ("从 seq 12 起改写 A。A 自己仍然验证通过。", "重新链接过的轨迹是自洽的"),
         ("但 B 钉住了 A 在 seq 12 的哈希，那个哈希已经没了。", ""),
     ],
@@ -513,9 +628,14 @@ ZH = {
     ],
     "s7_exits": ["完好", "断裂", "无法验证", "没有轨迹"],
     "s7_neq": ["无法验证  ≠  被篡改", "None  ≠  0", "未度量  ≠  不存在"],
-    "s7_sites": ["verdict: ok / broken / unverifiable", "dropped_writes: int | None",
-                 "human_oversight: 'unrecorded'", "ModelRef.digest: None = 未固定",
-                 "witness: ... / unreachable", "RFC 3161 nonce 缺失：跳过"],
+    "s7_sites": [
+        "verdict: ok / broken / unverifiable",
+        "dropped_writes: int | None",
+        "human_oversight: 'unrecorded'",
+        "ModelRef.digest: None = 未固定",
+        "witness: ... / unreachable",
+        "RFC 3161 nonce 缺失：跳过",
+    ],
     "s7_chips": ["零依赖", "1907 项测试 · 100% 覆盖", "MIT"],
 }
 
@@ -531,9 +651,11 @@ def chrome(L, scene: int, cap: str = "", sub: str = "") -> str:
     for i in range(len(L["scenes"]) - 1, -1, -1):
         on = i == scene
         px -= 14 if on else 12
-        out += (f'<circle cx="{px}" cy="42" r="{6 if on else 4.5}" '
-                f'fill="{GREEN if on else "none"}" stroke="{GREEN if on else DIM}" '
-                f'stroke-width="1.8"/>')
+        out += (
+            f'<circle cx="{px}" cy="42" r="{6 if on else 4.5}" '
+            f'fill="{GREEN if on else "none"}" stroke="{GREEN if on else DIM}" '
+            f'stroke-width="1.8"/>'
+        )
         px -= 10
     out += text(W - 56, 78, L["scenes"][scene], size=19, fill=MUTED, anchor="end", family=SANS)
     out += line(0, H - 82, W, H - 82, stroke=BORDER, sw=2)
@@ -545,9 +667,11 @@ def chrome(L, scene: int, cap: str = "", sub: str = "") -> str:
 
 
 def document(body: str) -> str:
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{SQ}" height="{SQ}" '
-            f'viewBox="0 0 {SQ} {SQ}"><rect width="{SQ}" height="{SQ}" fill="{BG}"/>'
-            f'<g transform="translate(0,{BAND_Y})">{body}</g></svg>')
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{SQ}" height="{SQ}" '
+        f'viewBox="0 0 {SQ} {SQ}"><rect width="{SQ}" height="{SQ}" fill="{BG}"/>'
+        f'<g transform="translate(0,{BAND_Y})">{body}</g></svg>'
+    )
 
 
 class Timeline:
@@ -564,17 +688,24 @@ class Timeline:
 def scene_title(tl: Timeline, L) -> None:
     def build(step: int) -> str:
         out = rect(0, 0, W, H, fill=BG)
-        out += text(W / 2, 356, "waxseal", size=124, fill=TEXT, anchor="middle",
-                    family=SANS, weight="800", spacing=-2)
+        out += text(
+            W / 2,
+            356,
+            "waxseal",
+            size=124,
+            fill=TEXT,
+            anchor="middle",
+            family=SANS,
+            weight="800",
+            spacing=-2,
+        )
         if step >= 1:
-            out += text(W / 2, 424, L["tagline"], size=33, fill=MUTED, anchor="middle",
-                        family=SANS)
+            out += text(W / 2, 424, L["tagline"], size=33, fill=MUTED, anchor="middle", family=SANS)
         if step >= 2:
             items = [(t, c) for t, c in zip(L["chips"], (GREEN, BLUE, MUTED), strict=True)]
             out += chip_row((W - chip_row_width(items)) / 2, 500, items)
         if step >= 3:
-            out += text(W / 2, 656, L["hook"], size=34, fill=AMBER, anchor="middle",
-                        family=SANS)
+            out += text(W / 2, 656, L["hook"], size=34, fill=AMBER, anchor="middle", family=SANS)
         return out
 
     for s in range(4):
@@ -593,25 +724,61 @@ def scene_append(tl: Timeline, L) -> None:
 
     def body(i: int, x: float) -> str:
         if i == 0:
-            return lines(x + 18, S1_Y + 88, [
-                ('{"action": "transfer",', TEXT), ('  "amount": 25000,', TEXT),
-                ('  "api_key": "sk-live"', RED), ("}", TEXT)], size=15, leading=26)
+            return lines(
+                x + 18,
+                S1_Y + 88,
+                [
+                    ('{"action": "transfer",', TEXT),
+                    ('  "amount": 25000,', TEXT),
+                    ('  "api_key": "sk-live"', RED),
+                    ("}", TEXT),
+                ],
+                size=15,
+                leading=26,
+            )
         if i == 1:
-            return lines(x + 18, S1_Y + 88, [
-                ('{"action": "transfer",', TEXT), ('  "amount": 25000,', TEXT),
-                ('  "api_key": "[REDACTED]"', GREEN), ("}", TEXT)], size=15, leading=26) \
-                + text(x + 18, S1_Y + 210, L["s1_secret"], size=15, fill=GREEN, family=SANS)
+            return lines(
+                x + 18,
+                S1_Y + 88,
+                [
+                    ('{"action": "transfer",', TEXT),
+                    ('  "amount": 25000,', TEXT),
+                    ('  "api_key": "[REDACTED]"', GREEN),
+                    ("}", TEXT),
+                ],
+                size=15,
+                leading=26,
+            ) + text(x + 18, S1_Y + 210, L["s1_secret"], size=15, fill=GREEN, family=SANS)
         if i == 2:
-            return lines(x + 18, S1_Y + 110, [("sha256(payload)", MUTED), ("", TEXT),
-                                              ("9c1f7d2e...", CYAN)], size=17, leading=32)
+            return lines(
+                x + 18,
+                S1_Y + 110,
+                [("sha256(payload)", MUTED), ("", TEXT), ("9c1f7d2e...", CYAN)],
+                size=17,
+                leading=32,
+            )
         if i == 3:
-            return lines(x + 16, S1_Y + 82, [
-                ("seq           3", TEXT), ("ts            ...", TEXT),
-                ("hash_version  a3f1c8", AMBER), ("payload_type  ...", TEXT),
-                ("payload_hash  9c1f7d", CYAN), ("prev_hash     e04b91", TEXT)],
-                size=14, leading=24)
-        return lines(x + 18, S1_Y + 110, [("sha256(header)", MUTED), ("", TEXT),
-                                          ("7f3a55c0...", GREEN)], size=17, leading=32)
+            return lines(
+                x + 16,
+                S1_Y + 82,
+                [
+                    ("seq           3", TEXT),
+                    ("ts            ...", TEXT),
+                    ("hash_version  a3f1c8", AMBER),
+                    ("payload_type  ...", TEXT),
+                    ("payload_hash  9c1f7d", CYAN),
+                    ("prev_hash     e04b91", TEXT),
+                ],
+                size=14,
+                leading=24,
+            )
+        return lines(
+            x + 18,
+            S1_Y + 110,
+            [("sha256(header)", MUTED), ("", TEXT), ("7f3a55c0...", GREEN)],
+            size=17,
+            leading=32,
+        )
 
     def build(upto: int, tail: int = 0) -> str:
         cap, sub = L["s1_caps"][min(upto, 4)]
@@ -619,10 +786,18 @@ def scene_append(tl: Timeline, L) -> None:
         for i, title in enumerate(L["s1_titles"]):
             live = i <= upto
             x = _sx(i)
-            out += panel(x, S1_Y, S1_W, S1_H, stroke=colors[i] if live else BORDER,
-                         sw=3 if live else 2, fill=PANEL if live else BG)
-            out += text(x + 18, S1_Y + 34, title, size=17,
-                        fill=colors[i] if live else DIM, family=SANS)
+            out += panel(
+                x,
+                S1_Y,
+                S1_W,
+                S1_H,
+                stroke=colors[i] if live else BORDER,
+                sw=3 if live else 2,
+                fill=PANEL if live else BG,
+            )
+            out += text(
+                x + 18, S1_Y + 34, title, size=17, fill=colors[i] if live else DIM, family=SANS
+            )
             out += line(x + 18, S1_Y + 48, x + S1_W - 18, S1_Y + 48, stroke=BORDER, sw=1.5)
             if live:
                 out += body(i, x)
@@ -636,8 +811,9 @@ def scene_append(tl: Timeline, L) -> None:
             out += text(cx0, 678, L["s1_note"], size=20, fill=MUTED, family=SANS)
             if tail > 1:
                 out += arrow(tip, S1_Y + S1_H + 12, tip, 548, stroke=GREEN)
-                out += text(tip - 14, 505, L["s1_appended"], size=17, fill=GREEN,
-                            anchor="end", family=SANS)
+                out += text(
+                    tip - 14, 505, L["s1_appended"], size=17, fill=GREEN, anchor="end", family=SANS
+                )
         return out
 
     for i in range(5):
@@ -653,22 +829,39 @@ def scene_tamper(tl: Timeline, L) -> None:
     def build(scanned: int, *, edited: bool, verdict: bool) -> str:
         idx = 3 if verdict else (2 if scanned else (1 if edited else 0))
         out = chrome(L, 1, *L["s2_caps"][idx])
-        states = [("broken" if edited and i == 3 else "ok") if scanned and i < scanned
-                  else "idle" for i in range(n)]
+        states = [
+            ("broken" if edited and i == 3 else "ok") if scanned and i < scanned else "idle"
+            for i in range(n)
+        ]
         out += chain(cx, cy, states, tags={i: (None, None) for i in ()})
         if edited:
             bx = cx + 3 * (BLOCK_W + 26)
-            out += text(bx + BLOCK_W / 2, cy - 32, L["s2_edited"], size=19, fill=RED,
-                        anchor="middle", family=SANS)
+            out += text(
+                bx + BLOCK_W / 2,
+                cy - 32,
+                L["s2_edited"],
+                size=19,
+                fill=RED,
+                anchor="middle",
+                family=SANS,
+            )
             out += arrow(bx + BLOCK_W / 2, cy - 24, bx + BLOCK_W / 2, cy - 6, stroke=RED)
         if scanned and not verdict:
             sx = cx + scanned * (BLOCK_W + 26) - 13
             out += line(sx, cy - 14, sx, cy + BLOCK_H + 14, stroke=BLUE, sw=3)
         if verdict:
             out += panel(cx, 470, chain_width(n), 170, stroke=RED, sw=2.5)
-            out += lines(cx + 32, 522, [("broken_seq   3", RED),
-                                        ("reason       payload_hash_mismatch", RED),
-                                        ("exit         1", RED)], size=23, leading=40)
+            out += lines(
+                cx + 32,
+                522,
+                [
+                    ("broken_seq   3", RED),
+                    ("reason       payload_hash_mismatch", RED),
+                    ("exit         1", RED),
+                ],
+                size=23,
+                leading=40,
+            )
         return out
 
     tl.add(build(0, edited=False, verdict=False), 8)
@@ -700,8 +893,9 @@ def scene_schema(tl: Timeline, L) -> None:
             out += chain((W - chain_width(7)) / 2, 300, ["idle"] * 7, tags=tags)
         if step >= 3:
             out += rect(56, 408, W - 112, 46, rx=10, fill="#2b1a05", stroke=AMBER, sw=2)
-            out += text(W / 2, 439, L["s3_banner"], size=23, fill=AMBER, anchor="middle",
-                        family=SANS)
+            out += text(
+                W / 2, 439, L["s3_banner"], size=23, fill=AMBER, anchor="middle", family=SANS
+            )
         pw, pgap = 480, 30
         px0 = (W - (3 * pw + 2 * pgap)) / 2
         for i, need in enumerate((4, 5, 6)):
@@ -710,15 +904,27 @@ def scene_schema(tl: Timeline, L) -> None:
                 out += panel(px, 478, pw, 296, fill=BG, stroke=BORDER)
                 continue
             color = GREEN if need == 6 else RED
-            title, foot = (L["s3_p1"][0], L["s3_p1"][2]) if need == 4 else (
-                (L["s3_p2"][0], L["s3_p2"][2]) if need == 5 else (L["s3_p3"][0], L["s3_p3"][2]))
+            title, foot = (
+                (L["s3_p1"][0], L["s3_p1"][2])
+                if need == 4
+                else (
+                    (L["s3_p2"][0], L["s3_p2"][2]) if need == 5 else (L["s3_p3"][0], L["s3_p3"][2])
+                )
+            )
             out += panel(px, 478, pw, 296, stroke=color, sw=3)
             out += text(px + 24, 516, title, size=22, fill=color, family=SANS)
             out += line(px + 24, 530, px + pw - 24, 530, stroke=BORDER, sw=1.5)
             if need == 4:
-                out += lines(px + 24, 568, [(s, RED if s.isupper() or "致命" in s or
-                                             "LỖI" in s else MUTED)
-                                            for s in L["s3_p1"][1]], size=19, leading=28)
+                out += lines(
+                    px + 24,
+                    568,
+                    [
+                        (s, RED if s.isupper() or "致命" in s or "LỖI" in s else MUTED)
+                        for s in L["s3_p1"][1]
+                    ],
+                    size=19,
+                    leading=28,
+                )
             elif need == 5:
                 out += mini_chain(px + 24, 580, ["ok"] * 4 + ["broken"] * 3)
                 out += text(px + 24, 670, L["s3_p2"][1], size=24, fill=RED, family=SANS)
@@ -729,11 +935,13 @@ def scene_schema(tl: Timeline, L) -> None:
             out += text(px + 24, 752, foot, size=16, fill=DIM, family=SANS)
         if step >= 7:
             out += rect(px0, 478, 3 * pw + 2 * pgap, 296, rx=14, fill=PANEL, stroke=GREEN, sw=3)
-            out += text(W / 2, 570, L["s3_card"][0], size=27, fill=MUTED, anchor="middle",
-                        family=SANS)
+            out += text(
+                W / 2, 570, L["s3_card"][0], size=27, fill=MUTED, anchor="middle", family=SANS
+            )
             out += text(W / 2, 630, L["s3_card"][1], size=27, fill=GREEN, anchor="middle")
-            out += text(W / 2, 690, L["s3_card"][2], size=20, fill=TEXT, anchor="middle",
-                        family=SANS)
+            out += text(
+                W / 2, 690, L["s3_card"][2], size=20, fill=TEXT, anchor="middle", family=SANS
+            )
         return out
 
     for s, hold in enumerate([8, 12, 8, 10, 12, 12, 14, 18]):
@@ -749,8 +957,15 @@ def scene_completeness(tl: Timeline, L) -> None:
         if step >= 1:
             gx = cx + chain_width(6) + 40
             out += block(gx, 150, 6, state="ghost")
-            out += text(gx + BLOCK_W / 2, 140, L["s4_ghost"], size=16, fill=DIM,
-                        anchor="middle", family=SANS)
+            out += text(
+                gx + BLOCK_W / 2,
+                140,
+                L["s4_ghost"],
+                size=16,
+                fill=DIM,
+                anchor="middle",
+                family=SANS,
+            )
         if step >= 2:
             out += panel(56, 320, 700, 288, stroke=BORDER)
             out += text(80, 364, L["s4_left"], size=21, fill=MUTED, family=SANS)
@@ -766,11 +981,20 @@ def scene_completeness(tl: Timeline, L) -> None:
             tx = 824
             for i in range(1, 7):
                 miss = i == 4
-                out += rect(tx, 404, 96, 54, rx=9, fill="#3d1518" if miss else PANEL2,
-                            stroke=RED if miss else GREEN, sw=2,
-                            dash="5 4" if miss else None)
-                out += text(tx + 48, 438, f"T{i}", size=21, fill=RED if miss else GREEN,
-                            anchor="middle")
+                out += rect(
+                    tx,
+                    404,
+                    96,
+                    54,
+                    rx=9,
+                    fill="#3d1518" if miss else PANEL2,
+                    stroke=RED if miss else GREEN,
+                    sw=2,
+                    dash="5 4" if miss else None,
+                )
+                out += text(
+                    tx + 48, 438, f"T{i}", size=21, fill=RED if miss else GREEN, anchor="middle"
+                )
                 tx += 112
             out += text(824, 512, L["s4_detected"], size=24, fill=RED, family=SANS)
             out += text(824, 552, "exit 1", size=20, fill=MUTED)
@@ -795,10 +1019,16 @@ def scene_anchoring(tl: Timeline, L) -> None:
         for i, (name, what) in enumerate(L["s5_sinks"]):
             y = 130 + i * 104
             live = step >= 1
-            out += panel(940, y, 604, 88, stroke=colors[i] if live else BORDER,
-                         sw=2.5 if live else 2, fill=PANEL if live else BG)
-            out += text(964, y + 36, name, size=21, fill=colors[i] if live else DIM,
-                        family=SANS)
+            out += panel(
+                940,
+                y,
+                604,
+                88,
+                stroke=colors[i] if live else BORDER,
+                sw=2.5 if live else 2,
+                fill=PANEL if live else BG,
+            )
+            out += text(964, y + 36, name, size=21, fill=colors[i] if live else DIM, family=SANS)
             out += text(964, y + 62, what, size=16, fill=MUTED if live else DIM, family=SANS)
             if live:
                 out += arrow(824, 208, 928, y + 44, stroke=colors[i], sw=2)
@@ -807,8 +1037,7 @@ def scene_anchoring(tl: Timeline, L) -> None:
             out += panel(940, 470, 604, 150, stroke=BORDER)
             out += text(964, 508, title, size=19, fill=MUTED, family=SANS)
             out += line(964, 522, 1520, 522, stroke=BORDER, sw=1.5)
-            out += lines(964, 558, [(n, MUTED) for n in notes], size=17, leading=30,
-                         family=SANS)
+            out += lines(964, 558, [(n, MUTED) for n in notes], size=17, leading=30, family=SANS)
         if step >= 2:
             out += panel(56, 470, 820, 150, stroke=AMBER, sw=2.5)
             out += text(80, 510, L["s5_tau"], size=21, fill=AMBER, family=SANS)
@@ -818,10 +1047,17 @@ def scene_anchoring(tl: Timeline, L) -> None:
             out += text(300, 602, L["s5_tau_note"], size=17, fill=DIM, family=SANS)
         if step >= 3:
             out += text(56, 670, L["s5_pin"], size=18, fill=MUTED, family=SANS)
-            out += chip_row(56, 692, [("anchor_stale", AMBER),
-                                      ("anchor_policy_downgrade", AMBER),
-                                      ("separation_shortfall", AMBER),
-                                      ("exit 2", GREEN)], size=18)
+            out += chip_row(
+                56,
+                692,
+                [
+                    ("anchor_stale", AMBER),
+                    ("anchor_policy_downgrade", AMBER),
+                    ("separation_shortfall", AMBER),
+                    ("exit 2", GREEN),
+                ],
+                size=18,
+            )
         return out
 
     for s, hold in enumerate([10, 14, 14, 18]):
@@ -850,18 +1086,21 @@ def scene_cross_agent(tl: Timeline, L) -> None:
                 tags = {i: (L["s6_rewritten"], RED) for i in (2, 3, 4)}
             out += chain(lane_x, y, states, start=start, tags=tags)
             if attacked and li == 0:
-                out += text(lane_x + chain_width(count) + 24, y + 44, L["s6_a_ok"],
-                            size=18, fill=MUTED)
+                out += text(
+                    lane_x + chain_width(count) + 24, y + 44, L["s6_a_ok"], size=18, fill=MUTED
+                )
             if li and step >= li:
                 px = lane_x + BLOCK_W / 2
                 ox = lane_x + 2 * (BLOCK_W + 26) + BLOCK_W / 2
                 bad = attacked and li == 1
                 ac = RED if bad else (PURPLE if li == 1 else BLUE)
-                out += arrow(px, y - 6, ox, geom[li - 1][1] + BLOCK_H + 6, stroke=ac, sw=2.5,
-                             dash="7 5")
+                out += arrow(
+                    px, y - 6, ox, geom[li - 1][1] + BLOCK_H + 6, stroke=ac, sw=2.5, dash="7 5"
+                )
                 label = L["s6_pin"] if li == 1 else L["s6_pin"].replace("A#12", "B#42")
-                out += text(ox + 18, geom[li - 1][1] + BLOCK_H + 36, label, size=16, fill=ac,
-                            family=SANS)
+                out += text(
+                    ox + 18, geom[li - 1][1] + BLOCK_H + 36, label, size=16, fill=ac, family=SANS
+                )
         if step >= 3 and not attacked:
             out += panel(56, 646, 1488, 116, stroke=GREEN, sw=2.5)
             out += text(80, 694, L["s6_holds"], size=25, fill=GREEN, family=SANS)
@@ -889,25 +1128,47 @@ def scene_verdict(tl: Timeline, L) -> None:
             bx = bx0 + i * (bw + bgap)
             out += panel(bx, 150, bw, 150, stroke=colors[i], sw=3)
             out += text(bx + bw / 2, 216, f"exit {i}", size=38, fill=colors[i], anchor="middle")
-            out += text(bx + bw / 2, 260, label, size=24, fill=TEXT, anchor="middle",
-                        family=SANS)
+            out += text(bx + bw / 2, 260, label, size=24, fill=TEXT, anchor="middle", family=SANS)
         if step >= 1:
             for i, s in enumerate(L["s7_neq"]):
-                out += text(W / 2, 380 + i * 46, s, size=28 if i == 0 else 24,
-                            fill=AMBER if i == 0 else MUTED, anchor="middle", family=SANS)
+                out += text(
+                    W / 2,
+                    380 + i * 46,
+                    s,
+                    size=28 if i == 0 else 24,
+                    fill=AMBER if i == 0 else MUTED,
+                    anchor="middle",
+                    family=SANS,
+                )
         if step >= 2:
             for i, s in enumerate(L["s7_sites"]):
                 col, row = i % 2, i // 2
                 out += text(150 + col * 720, 546 + row * 40, "·  " + s, size=19, fill=TEXT)
         if step >= 3:
             out += rect(0, 92, W, H - 174, fill=BG)
-            out += text(W / 2, 330, "waxseal", size=104, fill=TEXT, anchor="middle",
-                        family=SANS, weight="800", spacing=-2)
+            out += text(
+                W / 2,
+                330,
+                "waxseal",
+                size=104,
+                fill=TEXT,
+                anchor="middle",
+                family=SANS,
+                weight="800",
+                spacing=-2,
+            )
             out += text(W / 2, 400, "pip install waxseal", size=33, fill=GREEN, anchor="middle")
             items = [(t, c) for t, c in zip(L["s7_chips"], (GREEN, BLUE, MUTED), strict=True)]
             out += chip_row((W - chip_row_width(items)) / 2, 456, items)
-            out += text(W / 2, 590, "github.com/cuongbphv/waxseal", size=26, fill=MUTED,
-                        anchor="middle", family=SANS)
+            out += text(
+                W / 2,
+                590,
+                "github.com/cuongbphv/waxseal",
+                size=26,
+                fill=MUTED,
+                anchor="middle",
+                family=SANS,
+            )
         return out
 
     for s, hold in enumerate([12, 14, 16, 26]):
@@ -916,8 +1177,16 @@ def scene_verdict(tl: Timeline, L) -> None:
 
 def build_timeline(L) -> Timeline:
     tl = Timeline()
-    for scene in (scene_title, scene_append, scene_tamper, scene_schema,
-                  scene_completeness, scene_anchoring, scene_cross_agent, scene_verdict):
+    for scene in (
+        scene_title,
+        scene_append,
+        scene_tamper,
+        scene_schema,
+        scene_completeness,
+        scene_anchoring,
+        scene_cross_agent,
+        scene_verdict,
+    ):
         scene(tl, L)
     return tl
 
@@ -940,23 +1209,49 @@ def render_gif(svg_dir: Path, png_dir: Path, gif: Path, *, fps, width, colors) -
         shutil.rmtree(png_dir)
     png_dir.mkdir(parents=True)
     svgs = sorted(str(p) for p in svg_dir.glob("f*.svg"))
-    subprocess.run(["qlmanage", "-t", "-s", str(SQ), "-o", str(png_dir), *svgs],  # noqa: S603
-                   check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(
+        ["qlmanage", "-t", "-s", str(SQ), "-o", str(png_dir), *svgs],  # noqa: S603
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     made = len(list(png_dir.glob("*.png")))
     if made != len(svgs):
         raise SystemExit(f"qlmanage rendered {made}/{len(svgs)} frames")
-    vf = (f"crop={W}:{H}:0:{BAND_Y},scale={width}:-1:flags=lanczos,split[a][b];"
-          f"[a]palettegen=max_colors={colors}:stats_mode=diff[p];"
-          f"[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle")
+    vf = (
+        f"crop={W}:{H}:0:{BAND_Y},scale={width}:-1:flags=lanczos,split[a][b];"
+        f"[a]palettegen=max_colors={colors}:stats_mode=diff[p];"
+        f"[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
+    )
     gif.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",  # noqa: S603
-                    "-framerate", str(fps), "-pattern_type", "glob",
-                    "-i", str(png_dir / "*.png"), "-vf", vf, "-loop", "0", str(gif)],
-                   check=True)
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",  # noqa: S603
+            "-framerate",
+            str(fps),
+            "-pattern_type",
+            "glob",
+            "-i",
+            str(png_dir / "*.png"),
+            "-vf",
+            vf,
+            "-loop",
+            "0",
+            str(gif),
+        ],
+        check=True,
+    )
 
 
-GIF_NAME = {"en": "waxseal-workflow.gif", "vi": "waxseal-workflow.vi.gif",
-            "zh": "waxseal-workflow.zh.gif"}
+GIF_NAME = {
+    "en": "waxseal-workflow.gif",
+    "vi": "waxseal-workflow.vi.gif",
+    "zh": "waxseal-workflow.zh.gif",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -970,14 +1265,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--render", action="store_true")
     args = ap.parse_args(argv)
 
-    for lang in (LANGS if args.lang == "all" else [args.lang]):
+    for lang in LANGS if args.lang == "all" else [args.lang]:
         svg_dir = args.build / lang / "svg"
         n = write_frames(svg_dir, LANGS[lang])
         print(f"{lang}: {n} frames ({n / args.fps:.1f}s)", end="")
         if args.render:
             gif = args.assets / GIF_NAME[lang]
-            render_gif(svg_dir, args.build / lang / "png", gif, fps=args.fps,
-                       width=args.width, colors=args.colors)
+            render_gif(
+                svg_dir,
+                args.build / lang / "png",
+                gif,
+                fps=args.fps,
+                width=args.width,
+                colors=args.colors,
+            )
             print(f" -> {gif} {gif.stat().st_size / 1_048_576:.2f} MiB", end="")
         print()
     return 0

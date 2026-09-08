@@ -47,9 +47,7 @@ class TestHead:
         last = envelopes[-1]
         assert store.head("default") == (last["header"]["seq"], last["entry_hash"])
 
-    def test_head_survives_a_restart(
-        self, tmp_path: Path, envelopes: list[dict[str, Any]]
-    ) -> None:
+    def test_head_survives_a_restart(self, tmp_path: Path, envelopes: list[dict[str, Any]]) -> None:
         root = tmp_path / "chains"
         ChainStore(root).append("default", envelopes[0])
         assert ChainStore(root).head("default") == (0, envelopes[0]["entry_hash"])
@@ -292,9 +290,7 @@ class TestReceiptChain:
         restarted = ChainStore(root)
         assert restarted.append("default", envelopes[1]).receipt_seq == 1
 
-    def test_receipt_chains_are_per_chain_id(
-        self, tmp_path: Path, store: ChainStore
-    ) -> None:
+    def test_receipt_chains_are_per_chain_id(self, tmp_path: Path, store: ChainStore) -> None:
         store.append("alpha", build_envelopes(tmp_path / "l", 1)[0])
         assert store.receipt_head("beta") is None
 
@@ -307,7 +303,7 @@ class TestReceiptChain:
         store.append("default", envelopes[1])
         lines = [
             json.loads(line)
-            for line in store.receipt_log_path("default").read_text().splitlines()
+            for line in store.receipt_log_path("default").read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
         assert [r["receipt_seq"] for r in lines] == [0, 1]
@@ -381,18 +377,17 @@ class TestVerifyReceiptLog:
     def _records(self, store: ChainStore, chain_id: str) -> list[dict[str, Any]]:
         return [
             json.loads(line)
-            for line in store.receipt_log_path(chain_id).read_text().splitlines()
+            for line in store.receipt_log_path(chain_id).read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
 
     def _rewrite(self, store: ChainStore, chain_id: str, records: list[dict[str, Any]]) -> None:
         store.receipt_log_path(chain_id).write_text(
-            "".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in records)
+            "".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in records),
+            encoding="utf-8",
         )
 
-    def test_an_absent_log_is_not_recorded_never_zero_checked(
-        self, store: ChainStore
-    ) -> None:
+    def test_an_absent_log_is_not_recorded_never_zero_checked(self, store: ChainStore) -> None:
         # CLAUDE.md rule 5: "no log" is not "a log with nothing wrong in it".
         report = store.verify_receipt_log("default")
         assert report.verdict is Verdict.OK
@@ -467,7 +462,9 @@ class TestVerifyReceiptLog:
         # SPEC.md section 17's asymmetry: broken bytes inside this project's
         # OWN format are a break, not an unknown.
         store.append("default", envelopes[0])
-        store.receipt_log_path("default").write_text('{"v": 1, "receipt_seq": "not-an-int"}\n')
+        store.receipt_log_path("default").write_text(
+            '{"v": 1, "receipt_seq": "not-an-int"}\n', encoding="utf-8"
+        )
 
         report = store.verify_receipt_log("default")
         assert report.verdict is Verdict.BROKEN
@@ -477,7 +474,7 @@ class TestVerifyReceiptLog:
         self, store: ChainStore, envelopes: list[dict[str, Any]]
     ) -> None:
         store.append("default", envelopes[0])
-        store.receipt_log_path("default").write_text("{not json\n")
+        store.receipt_log_path("default").write_text("{not json\n", encoding="utf-8")
         assert store.verify_receipt_log("default").reason == "malformed_receipt_record"
 
     def test_the_verdict_maps_to_the_documented_exit_codes(
@@ -490,7 +487,7 @@ class TestVerifyReceiptLog:
 class TestBlankLinesAreNotEntries:
     """A trailing newline is not a record.
 
-    `_read_last_line` already trims blank tails; the readers here have to agree
+    `read_last_line` already trims blank tails; the readers here have to agree
     with it, or a file the writer considers finished reads as one entry longer.
     """
 
@@ -498,7 +495,7 @@ class TestBlankLinesAreNotEntries:
         self, store: ChainStore, envelopes: list[dict[str, Any]]
     ) -> None:
         store.append("default", envelopes[0])
-        with open(store.trail_path("default"), "a") as f:
+        with open(store.trail_path("default"), "a", encoding="utf-8") as f:
             f.write("\n")
         page, cursor = store.page("default", cursor=None, limit=10)
         assert len(page) == 1
@@ -508,7 +505,7 @@ class TestBlankLinesAreNotEntries:
         self, store: ChainStore, envelopes: list[dict[str, Any]]
     ) -> None:
         store.append("default", envelopes[0])
-        with open(store.receipt_log_path("default"), "a") as f:
+        with open(store.receipt_log_path("default"), "a", encoding="utf-8") as f:
             f.write("\n")
         assert store.verify_receipt_log("default").checked == 1
 
@@ -545,12 +542,12 @@ class TestCrossCheckReceipts:
         for env in envelopes[:3]:
             store.append("default", env)
         trail = store.trail_path("default")
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         record = json.loads(lines[1])
         record["header"]["ts"] = "2000-01-01T00:00:00+00:00"
         record["entry_hash"] = compute_entry_hash(header_from_obj(record["header"]))
         lines[1] = json.dumps(record, sort_keys=True, separators=(",", ":"))
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         report = store.cross_check_receipts("default")
         assert report.verdict is Verdict.BROKEN
@@ -563,8 +560,8 @@ class TestCrossCheckReceipts:
         for env in envelopes[:3]:
             store.append("default", env)
         trail = store.trail_path("default")
-        lines = trail.read_text().splitlines()
-        trail.write_text("\n".join(lines[:2]) + "\n")
+        lines = trail.read_text(encoding="utf-8").splitlines()
+        trail.write_text("\n".join(lines[:2]) + "\n", encoding="utf-8")
 
         report = store.cross_check_receipts("default")
         assert report.verdict is Verdict.BROKEN
@@ -582,9 +579,11 @@ class TestCrossCheckReceipts:
     ) -> None:
         store.append("default", envelopes[0])
         log = store.receipt_log_path("default")
-        record = json.loads(log.read_text().splitlines()[0])
+        record = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
         record["v"] = 99
-        log.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+        log.write_text(
+            json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+        )
 
         report = store.cross_check_receipts("default")
         assert report.verdict is Verdict.UNVERIFIABLE
@@ -594,14 +593,16 @@ class TestCrossCheckReceipts:
         self, store: ChainStore, envelopes: list[dict[str, Any]]
     ) -> None:
         store.append("default", envelopes[0])
-        store.receipt_log_path("default").write_text('{"v": 1, "seq": "not-an-int"}\n')
+        store.receipt_log_path("default").write_text(
+            '{"v": 1, "seq": "not-an-int"}\n', encoding="utf-8"
+        )
         assert store.cross_check_receipts("default").reason == "malformed_receipt_record"
 
     def test_a_blank_line_is_skipped(
         self, store: ChainStore, envelopes: list[dict[str, Any]]
     ) -> None:
         store.append("default", envelopes[0])
-        with open(store.receipt_log_path("default"), "a") as f:
+        with open(store.receipt_log_path("default"), "a", encoding="utf-8") as f:
             f.write("\n")
         assert store.cross_check_receipts("default").checked == 1
 
@@ -618,7 +619,7 @@ class TestCrossCheckSurvivesADamagedLog:
         self, store: ChainStore, envelopes: list[dict[str, Any]]
     ) -> None:
         store.append("default", envelopes[0])
-        store.receipt_log_path("default").write_text("{not json at all\n")
+        store.receipt_log_path("default").write_text("{not json at all\n", encoding="utf-8")
         report = store.cross_check_receipts("default")
         assert report.verdict is Verdict.BROKEN
         assert report.reason == "malformed_receipt_record"
@@ -627,14 +628,14 @@ class TestCrossCheckSurvivesADamagedLog:
         self, store: ChainStore, envelopes: list[dict[str, Any]]
     ) -> None:
         store.append("default", envelopes[0])
-        store.receipt_log_path("default").write_text('{"seq": 0}\n')
+        store.receipt_log_path("default").write_text('{"seq": 0}\n', encoding="utf-8")
         assert store.cross_check_receipts("default").reason == "malformed_receipt_record"
 
     def test_a_line_that_is_not_an_object_is_a_break(
         self, store: ChainStore, envelopes: list[dict[str, Any]]
     ) -> None:
         store.append("default", envelopes[0])
-        store.receipt_log_path("default").write_text("[1, 2, 3]\n")
+        store.receipt_log_path("default").write_text("[1, 2, 3]\n", encoding="utf-8")
         assert store.cross_check_receipts("default").reason == "malformed_receipt_record"
 
     def test_receipts_without_a_trail_are_a_rollback_not_a_crash(
@@ -655,7 +656,7 @@ class TestCrossCheckSurvivesADamagedLog:
         # answer: "there is nothing to read" and "I could not read it" send an
         # operator to different places.
         store.append("default", envelopes[0])
-        store.receipt_log_path("default").write_text("{not json\n")
+        store.receipt_log_path("default").write_text("{not json\n", encoding="utf-8")
         with pytest.raises(DamagedReceiptLog):
             store.receipt_records("default")
 
@@ -700,7 +701,7 @@ class TestSummary:
         # A dashboard row must still render the chain it can read. A broken
         # sidecar is a finding about the sidecar, not a reason to blank the row.
         store.append("default", envelopes[0])
-        store.receipt_log_path("default").write_text("{not json\n")
+        store.receipt_log_path("default").write_text("{not json\n", encoding="utf-8")
         summary = store.summary("default")
         assert summary.entries == 1
         assert summary.receipt is None
@@ -709,7 +710,7 @@ class TestSummary:
         self, store: ChainStore, envelopes: list[dict[str, Any]]
     ) -> None:
         store.append("default", envelopes[0])
-        with open(store.trail_path("default"), "a") as f:
+        with open(store.trail_path("default"), "a", encoding="utf-8") as f:
             f.write("\n")
         assert store.summary("default").entries == 1
 

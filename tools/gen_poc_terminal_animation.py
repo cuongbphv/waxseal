@@ -90,16 +90,20 @@ def mono(x, y, s, fill, *, cells: int | None = None) -> str:
     `spacingAndGlyphs` keeps box-drawing runs contiguous, which plain
     `spacing` would tear apart.
     """
-    out = (f'<text x="{x:.1f}" y="{y:.1f}" xml:space="preserve" font-family="{MONO}" '
-           f'font-size="{FS}" fill="{fill}"')
+    out = (
+        f'<text x="{x:.1f}" y="{y:.1f}" xml:space="preserve" font-family="{MONO}" '
+        f'font-size="{FS}" fill="{fill}"'
+    )
     if cells:
         out += f' textLength="{cells * CW:.1f}" lengthAdjust="spacingAndGlyphs"'
     return out + f">{esc(s)}</text>"
 
 
 def sans(x, y, s, *, size=24, fill=TEXT, anchor="start", weight=None) -> str:
-    out = (f'<text x="{x}" y="{y}" font-family="{SANS}" font-size="{size}" fill="{fill}" '
-           f'text-anchor="{anchor}"')
+    out = (
+        f'<text x="{x}" y="{y}" font-family="{SANS}" font-size="{size}" fill="{fill}" '
+        f'text-anchor="{anchor}"'
+    )
     if weight:
         out += f' font-weight="{weight}"'
     return out + f">{esc(s)}</text>"
@@ -150,8 +154,10 @@ def render(rows: list[Row], title: str) -> str:
     for i, colour in enumerate((RED, AMBER, GREEN)):
         out += f'<circle cx="{TX + 30 + i * 26}" cy="{TY + 23}" r="7" fill="{colour}"/>'
     out += sans(TX + TW / 2, TY + 30, title, size=18, fill=MUTED, anchor="middle")
-    out += (f'<line x1="{TX}" y1="{TY + TITLEBAR}" x2="{TX + TW}" y2="{TY + TITLEBAR}" '
-            f'stroke="{BORDER}" stroke-width="2"/>')
+    out += (
+        f'<line x1="{TX}" y1="{TY + TITLEBAR}" x2="{TX + TW}" y2="{TY + TITLEBAR}" '
+        f'stroke="{BORDER}" stroke-width="2"/>'
+    )
     for i, runs in enumerate(rows[-ROWS:]):
         y = BODY_TOP + i * LEAD
         col = 0
@@ -172,9 +178,11 @@ def frame(rows: list[Row], title: str, cap: str, sub: str) -> str:
 
 
 def document(body: str) -> str:
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{SQ}" height="{SQ}" '
-            f'viewBox="0 0 {SQ} {SQ}"><rect width="{SQ}" height="{SQ}" fill="{BG}"/>'
-            f'<g transform="translate(0,{BAND_Y})">{body}</g></svg>')
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{SQ}" height="{SQ}" '
+        f'viewBox="0 0 {SQ} {SQ}"><rect width="{SQ}" height="{SQ}" fill="{BG}"/>'
+        f'<g transform="translate(0,{BAND_Y})">{body}</g></svg>'
+    )
 
 
 class Timeline:
@@ -237,23 +245,30 @@ class Capture:
         """The section verbatim, so a report that changes shape changes the frame."""
         lines = self.report.splitlines()
         start = lines.index(heading)
-        end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
-                   len(lines))
+        end = next(
+            (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines)
+        )
         return [ln.rstrip() for ln in lines[start:end]]
 
     def report_line(self, needle: str) -> str:
         for line in self.report.splitlines():
             if needle in line:
                 return line.strip()
-        raise SystemExit(f"the demo no longer prints {needle!r}; the frames are the thing "
-                         f"that is wrong, not the code")
+        raise SystemExit(
+            f"the demo no longer prints {needle!r}; the frames are the thing "
+            f"that is wrong, not the code"
+        )
 
 
 def _run_script(script: Path, args: list[str]) -> str:
     proc = subprocess.run(  # noqa: S603
-        [sys.executable, str(script), *args], cwd=REPO, check=True,
-        capture_output=True, text=True, env={"PATH": "/usr/bin:/bin", "WAXSEAL_DEMO_PLAIN": "1",
-                                             "PYTHONPATH": str(REPO / "src")},
+        [sys.executable, str(script), *args],
+        cwd=REPO,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "WAXSEAL_DEMO_PLAIN": "1", "PYTHONPATH": str(REPO / "src")},
+        encoding="utf-8",
     )
     return proc.stdout
 
@@ -283,46 +298,63 @@ def _head_hash(trail: Path) -> str:
 EN = {
     "title": "risk PoC — a verifiable AI decision log",
     "caps": [
-        ("A risk-scanning agent screens six payments. Every decision lands on the chain.",
-         "examples/risk-poc/simulate.py"),
-        ("Redaction runs before the hash — the credential never reaches disk.",
-         "stage 2 of 7, and it cannot be moved later"),
-        ("Six decisions, one chain, one report an auditor can read.",
-         "oversight not recorded is counted apart from automated"),
-        ("The chain verifies. Every check it did not run says so.",
-         "$ waxseal verify --anchors  ·  exit 0"),
-        ("Flip one approval. The row is named, and nothing is repaired.",
-         "$ waxseal verify  ·  exit 1"),
+        (
+            "A risk-scanning agent screens six payments. Every decision lands on the chain.",
+            "examples/risk-poc/simulate.py",
+        ),
+        (
+            "Redaction runs before the hash — the credential never reaches disk.",
+            "stage 2 of 7, and it cannot be moved later",
+        ),
+        (
+            "Six decisions, one chain, one report an auditor can read.",
+            "oversight not recorded is counted apart from automated",
+        ),
+        (
+            "The chain verifies. Every check it did not run says so.",
+            "$ waxseal verify --anchors  ·  exit 0",
+        ),
+        (
+            "Flip one approval. The row is named, and nothing is repaired.",
+            "$ waxseal verify  ·  exit 1",
+        ),
     ],
 }
 
 VI = {
     "title": "risk PoC — nhật ký quyết định AI kiểm chứng được",
     "caps": [
-        ("Agent quét rủi ro sàng lọc sáu giao dịch. Mỗi quyết định đều lên chain.",
-         "examples/risk-poc/simulate.py"),
-        ("Redact chạy trước khi hash — credential không bao giờ chạm đĩa.",
-         "bước 2 trên 7, và không thể dời xuống sau"),
-        ("Sáu quyết định, một chain, một report kiểm toán viên đọc được.",
-         "không ghi giám sát được đếm tách khỏi automated"),
-        ("Chain verify sạch. Mọi kiểm tra chưa chạy đều tự nói ra.",
-         "$ waxseal verify --anchors  ·  exit 0"),
-        ("Sửa một phê duyệt. Đúng dòng đó bị gọi tên, và không gì được sửa lại.",
-         "$ waxseal verify  ·  exit 1"),
+        (
+            "Agent quét rủi ro sàng lọc sáu giao dịch. Mỗi quyết định đều lên chain.",
+            "examples/risk-poc/simulate.py",
+        ),
+        (
+            "Redact chạy trước khi hash — credential không bao giờ chạm đĩa.",
+            "bước 2 trên 7, và không thể dời xuống sau",
+        ),
+        (
+            "Sáu quyết định, một chain, một report kiểm toán viên đọc được.",
+            "không ghi giám sát được đếm tách khỏi automated",
+        ),
+        (
+            "Chain verify sạch. Mọi kiểm tra chưa chạy đều tự nói ra.",
+            "$ waxseal verify --anchors  ·  exit 0",
+        ),
+        (
+            "Sửa một phê duyệt. Đúng dòng đó bị gọi tên, và không gì được sửa lại.",
+            "$ waxseal verify  ·  exit 1",
+        ),
     ],
 }
 
 ZH = {
     "title": "risk PoC — 可验证的 AI 决策日志",
     "caps": [
-        ("风险扫描 Agent 筛查六笔支付，每次决策都进入链中。",
-         "examples/risk-poc/simulate.py"),
+        ("风险扫描 Agent 筛查六笔支付，每次决策都进入链中。", "examples/risk-poc/simulate.py"),
         ("脱敏在哈希之前执行 —— 凭据永远不落盘。", "七步中的第二步，而且不能挪到后面"),
         ("六次决策，一条链，一份审计人员读得懂的报告。", "未记录人工监督与自动处理分开计数"),
-        ("链验证通过，而没有跑过的检查都会自己说出来。",
-         "$ waxseal verify --anchors  ·  exit 0"),
-        ("改掉一次批准。那一行会被指名，而且什么都不会被修复。",
-         "$ waxseal verify  ·  exit 1"),
+        ("链验证通过，而没有跑过的检查都会自己说出来。", "$ waxseal verify --anchors  ·  exit 0"),
+        ("改掉一次批准。那一行会被指名，而且什么都不会被修复。", "$ waxseal verify  ·  exit 1"),
     ],
 }
 
@@ -390,15 +422,18 @@ def scene_simulate(tl: Timeline, term: Term, cap: Capture, L) -> None:
         scene = 1 if active >= redact_step else 0
         spins = 3 if active in (redact_step, 2) else 2
         for tick in range(spins):
-            tl.add(frame(base + flow_block(cap, active, tick), L["title"], *L["caps"][scene]),
-                   4 if active == redact_step else 2)
+            tl.add(
+                frame(base + flow_block(cap, active, tick), L["title"], *L["caps"][scene]),
+                4 if active == redact_step else 2,
+            )
     tl.add(frame(base + flow_block(cap, len(cap.stages), 0), L["title"], *L["caps"][1]), 10)
 
     term.rows = base
-    term.add(("  chain  ", MUTED),
-             (f"{g_link(cap, 5)}{cap.glyphs.tip}", GREEN))
-    term.add(("         0   1   2   3   4   5   ", DIM),
-             (f"head = {cap.head[:12]}{cap.glyphs.ellipsis}", MUTED))
+    term.add(("  chain  ", MUTED), (f"{g_link(cap, 5)}{cap.glyphs.tip}", GREEN))
+    term.add(
+        ("         0   1   2   3   4   5   ", DIM),
+        (f"head = {cap.head[:12]}{cap.glyphs.ellipsis}", MUTED),
+    )
     term.blank()
     tl.add(frame(term.snapshot(), L["title"], *L["caps"][2]), 10)
 
@@ -425,8 +460,9 @@ def scene_report(tl: Timeline, term: Term, cap: Capture, L) -> None:
     tl.add(frame(term.snapshot(), L["title"], *L["caps"][2]), 14)
 
 
-def scene_verify(tl: Timeline, term: Term, cap: Capture, L, *, scene: int,
-                 cmd: str, output: str, code: int) -> None:
+def scene_verify(
+    tl: Timeline, term: Term, cap: Capture, L, *, scene: int, cmd: str, output: str, code: int
+) -> None:
     type_command(tl, term, cmd, L, scene)
     colour = GREEN if code == 0 else RED
     for line in output.splitlines():
@@ -443,13 +479,27 @@ def build_timeline(cap: Capture, L) -> Timeline:
     tl, term = Timeline(), Term()
     scene_simulate(tl, term, cap, L)
     scene_report(tl, term, cap, L)
-    scene_verify(tl, term, cap, L, scene=3,
-                 cmd="waxseal verify --anchors poc-out/decisions.jsonl",
-                 output=cap.ok_out, code=cap.ok_code)
+    scene_verify(
+        tl,
+        term,
+        cap,
+        L,
+        scene=3,
+        cmd="waxseal verify --anchors poc-out/decisions.jsonl",
+        output=cap.ok_out,
+        code=cap.ok_code,
+    )
     term.blank()
-    scene_verify(tl, term, cap, L, scene=4,
-                 cmd="waxseal verify poc-out/tamper-cases/01-edit/decisions.jsonl",
-                 output=cap.broken_out, code=cap.broken_code)
+    scene_verify(
+        tl,
+        term,
+        cap,
+        L,
+        scene=4,
+        cmd="waxseal verify poc-out/tamper-cases/01-edit/decisions.jsonl",
+        output=cap.broken_out,
+        code=cap.broken_code,
+    )
     return tl
 
 
@@ -471,19 +521,42 @@ def render_gif(svg_dir: Path, png_dir: Path, gif: Path, *, fps, width, colors) -
         shutil.rmtree(png_dir)
     png_dir.mkdir(parents=True)
     svgs = sorted(str(p) for p in svg_dir.glob("f*.svg"))
-    subprocess.run(["qlmanage", "-t", "-s", str(SQ), "-o", str(png_dir), *svgs],  # noqa: S603
-                   check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(
+        ["qlmanage", "-t", "-s", str(SQ), "-o", str(png_dir), *svgs],  # noqa: S603
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     made = len(list(png_dir.glob("*.png")))
     if made != len(svgs):
         raise SystemExit(f"qlmanage rendered {made}/{len(svgs)} frames")
-    vf = (f"crop={W}:{H}:0:{BAND_Y},scale={width}:-1:flags=lanczos,split[a][b];"
-          f"[a]palettegen=max_colors={colors}:stats_mode=diff[p];"
-          f"[b][p]paletteuse=dither=none:diff_mode=rectangle")
+    vf = (
+        f"crop={W}:{H}:0:{BAND_Y},scale={width}:-1:flags=lanczos,split[a][b];"
+        f"[a]palettegen=max_colors={colors}:stats_mode=diff[p];"
+        f"[b][p]paletteuse=dither=none:diff_mode=rectangle"
+    )
     gif.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",  # noqa: S603
-                    "-framerate", str(fps), "-pattern_type", "glob",
-                    "-i", str(png_dir / "*.png"), "-vf", vf, "-loop", "0", str(gif)],
-                   check=True)
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",  # noqa: S603
+            "-framerate",
+            str(fps),
+            "-pattern_type",
+            "glob",
+            "-i",
+            str(png_dir / "*.png"),
+            "-vf",
+            vf,
+            "-loop",
+            "0",
+            str(gif),
+        ],
+        check=True,
+    )
 
 
 GIF_NAME = {"en": "risk-poc.gif", "vi": "risk-poc.vi.gif", "zh": "risk-poc.zh.gif"}
@@ -502,14 +575,20 @@ def main(argv: list[str] | None = None) -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         cap = Capture(Path(tmp))
-        for lang in (LANGS if args.lang == "all" else [args.lang]):
+        for lang in LANGS if args.lang == "all" else [args.lang]:
             svg_dir = args.build / lang / "svg"
             n = write_frames(svg_dir, cap, LANGS[lang])
             print(f"{lang}: {n} frames ({n / args.fps:.1f}s)", end="")
             if args.render:
                 gif = args.assets / GIF_NAME[lang]
-                render_gif(svg_dir, args.build / lang / "png", gif, fps=args.fps,
-                           width=args.width, colors=args.colors)
+                render_gif(
+                    svg_dir,
+                    args.build / lang / "png",
+                    gif,
+                    fps=args.fps,
+                    width=args.width,
+                    colors=args.colors,
+                )
                 print(f" -> {gif} {gif.stat().st_size / 1_048_576:.2f} MiB", end="")
             print()
     return 0

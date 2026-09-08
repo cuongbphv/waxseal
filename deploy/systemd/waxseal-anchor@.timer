@@ -1,0 +1,26 @@
+# Hourly checkpoint publication for one trail.
+#
+#   systemctl enable --now \
+#     "waxseal-anchor@$(systemd-escape /var/lib/waxseal/chains/default/trail.jsonl).timer"
+#
+# HOURLY IS A PLACEHOLDER, not a recommendation. The cost-optimal interval
+# depends on your own measurements — arrival rate, anchor cost, exposure window
+# — and `waxseal cadence` computes it from them and returns a BAND, never a
+# bare point. It opens no trail and needs no deployment; run it before you
+# settle on a schedule here.
+
+[Unit]
+Description=Hourly waxseal anchor for %I
+Documentation=https://github.com/cuongbphv/waxseal
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5min
+# Publish a missed checkpoint after a reboot. A gap in the anchor record is a
+# window in which a rewrite is unbounded, and it does not close by itself.
+Persistent=yes
+AccuracySec=1min
+Unit=waxseal-anchor@%i.service
+
+[Install]
+WantedBy=timers.target

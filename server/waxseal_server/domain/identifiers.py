@@ -46,9 +46,7 @@ def require_chain_id(chain_id: str) -> str:
 
 def require_witness_id(witness_id: str) -> str:
     if not isinstance(witness_id, str) or not SAFE_NAME_RE.match(witness_id):
-        raise InvalidIdentifier(
-            f"witness id must be a safe path segment, got {witness_id!r}"
-        )
+        raise InvalidIdentifier(f"witness id must be a safe path segment, got {witness_id!r}")
     return witness_id
 
 
@@ -76,9 +74,7 @@ def require_hex64(value: object, field: str) -> str:
 def require_root(value: str, field: str = "root") -> str:
     """A Merkle root off the wire, as an identifier rather than an envelope field."""
     if not is_hex64(value):
-        raise InvalidIdentifier(
-            f"{field} must be 64 lowercase hex characters, got {value!r}"
-        )
+        raise InvalidIdentifier(f"{field} must be 64 lowercase hex characters, got {value!r}")
     return value
 
 
@@ -111,7 +107,5 @@ def require_measurement(value: str, field: str) -> str:
 def require_issued_spec(value: str) -> str:
     """`reconcile-tickets --issued`: inclusive ranges, and nothing else."""
     if not ISSUED_SPEC_RE.match(value):
-        raise InvalidIdentifier(
-            f"issued must be ranges like '1-10' or '1-10,21-30', got {value!r}"
-        )
+        raise InvalidIdentifier(f"issued must be ranges like '1-10' or '1-10,21-30', got {value!r}")
     return value

@@ -130,9 +130,7 @@ class TestRequest:
 class TestReceipt:
     def test_a_good_token_becomes_an_rfc3161_receipt(self) -> None:
         _, transport = honest_tsa(9)
-        result = Rfc3161AnchorSink(
-            "http://tsa", transport=transport, nonce_fn=lambda: 9
-        ).anchor(CP)
+        result = Rfc3161AnchorSink("http://tsa", transport=transport, nonce_fn=lambda: 9).anchor(CP)
         assert isinstance(result, SinkReceipt)
         assert result.receipt.startswith("rfc3161:")
         assert decode_receipt(result.receipt) == granted_response(FRAME, nonce=9)
@@ -144,17 +142,13 @@ class TestReceipt:
         # SPEC.md section 17 documented). The sink now hands it back for
         # recording.
         _, transport = honest_tsa(9)
-        result = Rfc3161AnchorSink(
-            "http://tsa", transport=transport, nonce_fn=lambda: 9
-        ).anchor(CP)
+        result = Rfc3161AnchorSink("http://tsa", transport=transport, nonce_fn=lambda: 9).anchor(CP)
         assert isinstance(result, SinkReceipt)
         assert result.nonce == 9
 
     def test_the_receipt_round_trips_through_base64(self) -> None:
         _, transport = honest_tsa(9)
-        result = Rfc3161AnchorSink(
-            "http://tsa", transport=transport, nonce_fn=lambda: 9
-        ).anchor(CP)
+        result = Rfc3161AnchorSink("http://tsa", transport=transport, nonce_fn=lambda: 9).anchor(CP)
         assert isinstance(result, SinkReceipt)
         assert base64.b64decode(result.receipt.removeprefix("rfc3161:"), validate=True)
 
@@ -236,7 +230,7 @@ class TestRecordingAnchorSink:
         RecordingAnchorSink(trail, Quiet()).anchor(CP)
         sidecar = Path(str(trail) + ".anchors")
         assert sidecar.exists()
-        assert json.loads(sidecar.read_text())["sink"] == "quiet"
+        assert json.loads(sidecar.read_text(encoding="utf-8"))["sink"] == "quiet"
 
     def test_a_sink_without_a_name_still_files_its_receipt(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
@@ -303,9 +297,7 @@ class TestMultiAnchorSink:
         assert seen == [CP, CP]
         assert multi.failures == []
 
-    def test_one_sink_failing_does_not_stop_the_other_from_recording(
-        self, tmp_path: Path
-    ) -> None:
+    def test_one_sink_failing_does_not_stop_the_other_from_recording(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
 
         class Failing:
@@ -314,9 +306,7 @@ class TestMultiAnchorSink:
             def anchor(self, checkpoint: Checkpoint) -> str | None:
                 raise RuntimeError("network down")
 
-        multi = MultiAnchorSink(
-            [Failing(), RecordingAnchorSink(trail, _Quiet())]
-        )
+        multi = MultiAnchorSink([Failing(), RecordingAnchorSink(trail, _Quiet())])
         multi.anchor(CP)
 
         records = read_anchor_records(trail).records
@@ -364,9 +354,7 @@ class TestNoncePersistence:
     time rather than only at anchor time — the gap SPEC.md section 17 used to
     state as unfixable with a record format that did not carry it."""
 
-    def filed_record(
-        self, tmp_path: Path, nonce: int | None
-    ) -> tuple[Path, AnchorRecord]:
+    def filed_record(self, tmp_path: Path, nonce: int | None) -> tuple[Path, AnchorRecord]:
         trail = tmp_path / "trail.jsonl"
 
         def transport(request: RemoteRequest) -> RemoteResponse:
@@ -385,12 +373,10 @@ class TestNoncePersistence:
         # A 64-bit nonce as a bare JSON number is lossy in readers that parse
         # numbers as doubles; the sidecar stores it as a decimal string.
         trail, _ = self.filed_record(tmp_path, 2**63 + 1)
-        obj = json.loads(Path(str(trail) + ".anchors").read_text())
+        obj = json.loads(Path(str(trail) + ".anchors").read_text(encoding="utf-8"))
         assert obj["nonce"] == str(2**63 + 1)
 
-    def test_the_optional_field_does_not_bump_the_record_version(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_optional_field_does_not_bump_the_record_version(self, tmp_path: Path) -> None:
         # Additive and optional: a reader that predates the field must keep
         # reading these records, so they stay v1 (beads-v1.2.2 class).
         _, record = self.filed_record(tmp_path, 3)
@@ -401,11 +387,9 @@ class TestNoncePersistence:
         # never a value (CLAUDE.md rule 5).
         trail, record = self.filed_record(tmp_path, None)
         assert record.nonce is None
-        assert "nonce" not in json.loads(Path(str(trail) + ".anchors").read_text())
+        assert "nonce" not in json.loads(Path(str(trail) + ".anchors").read_text(encoding="utf-8"))
 
-    def test_a_legacy_record_without_the_field_reads_as_nonce_none(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_legacy_record_without_the_field_reads_as_nonce_none(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
         Path(str(trail) + ".anchors").write_text(
             json.dumps(
@@ -419,6 +403,7 @@ class TestNoncePersistence:
                     "v": 1,
                 }
             )
-            + "\n"
+            + "\n",
+            encoding="utf-8",
         )
         assert read_anchor_records(trail).records[0].nonce is None

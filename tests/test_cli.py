@@ -38,11 +38,11 @@ class TestVerify:
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 4)
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
         obj = json.loads(lines[1])
         obj["header"]["ts"] = "2027-01-01T00:00:00+00:00"
         lines[1] = json.dumps(obj)
-        path.write_text("\n".join(lines) + "\n")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         assert main(["verify", str(path)]) == 1
         out = capsys.readouterr().out
@@ -56,7 +56,7 @@ class TestVerify:
         # NOT be reported as tampering — exit 2, distinct from broken.
         path = tmp_path / "trail.jsonl"
         make_trail(path, 2)
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
         # Re-sign row 1 under a fingerprint this binary does not know.
         from waxseal.domain.hashing import compute_entry_hash
         from waxseal.domain.header import EntryHeader
@@ -66,7 +66,7 @@ class TestVerify:
         header = EntryHeader(**obj["header"])
         obj["entry_hash"] = compute_entry_hash(header)
         lines[1] = json.dumps(obj)
-        path.write_text("\n".join(lines) + "\n")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         assert main(["verify", str(path)]) == 2
         out = capsys.readouterr().out
@@ -157,11 +157,11 @@ class TestDropCountReporting:
             log.append(payload={"i": i}, payload_type=PT)
         log.try_append(payload=object(), payload_type=PT)  # type: ignore[arg-type]
 
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
         obj = json.loads(lines[1])
         obj["header"]["ts"] = "2027-01-01T00:00:00+00:00"
         lines[1] = json.dumps(obj)
-        path.write_text("\n".join(lines) + "\n")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         assert main(["verify", str(path)]) == 1  # integrity break still wins
         out = capsys.readouterr().out
@@ -238,7 +238,7 @@ class TestAnchorCommand:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
         assert main(["anchor", str(path)]) == 0
-        lines = (tmp_path / "trail.jsonl.anchors").read_text().splitlines()
+        lines = (tmp_path / "trail.jsonl.anchors").read_text(encoding="utf-8").splitlines()
         assert len(lines) == 1
         assert json.loads(lines[0])["seq"] == 2
         out = json.loads(capsys.readouterr().out.strip())
@@ -283,7 +283,7 @@ def _consistent_forge_at(path: Path, position: int) -> None:
     from waxseal.domain.registry import VersionRegistry
 
     registry = VersionRegistry()
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     objs = [json.loads(line) for line in lines]
     objs[position]["header"]["ts"] = "2099-01-01T00:00:00+00:00"
     prev = objs[position]["header"]["prev_hash"]
@@ -297,7 +297,7 @@ def _consistent_forge_at(path: Path, position: int) -> None:
         assert encoder is not None
         objs[i]["entry_hash"] = compute_entry_hash(header, frame=encoder)
         prev = objs[i]["entry_hash"]
-    path.write_text("\n".join(json.dumps(o) for o in objs) + "\n")
+    path.write_text("\n".join(json.dumps(o) for o in objs) + "\n", encoding="utf-8")
 
 
 class TestVerifyAnchors:
@@ -345,8 +345,8 @@ class TestVerifyAnchors:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 4)
         main(["anchor", str(path)])  # anchors seq=3
-        lines = path.read_text().splitlines()
-        path.write_text("\n".join(lines[:2]) + "\n")  # only seq 0, 1 remain
+        lines = path.read_text(encoding="utf-8").splitlines()
+        path.write_text("\n".join(lines[:2]) + "\n", encoding="utf-8")  # only seq 0, 1 remain
 
         assert main(["verify", str(path), "--anchors"]) == 1
         out = capsys.readouterr().out
@@ -358,7 +358,7 @@ class TestVerifyAnchors:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 3)
         main(["anchor", str(path)])
-        with open(tmp_path / "trail.jsonl.anchors", "a") as f:
+        with open(tmp_path / "trail.jsonl.anchors", "a", encoding="utf-8") as f:
             f.write("{this is not json\n")
 
         assert main(["verify", str(path), "--anchors"]) == 1
@@ -650,7 +650,7 @@ class TestExportProofAndVerifyProofThroughRealCli:
         assert main(["export-proof", str(path), "1"]) == 0
         bundle_json = capsys.readouterr().out
         bundle_path = tmp_path / "bundle.json"
-        bundle_path.write_text(bundle_json)
+        bundle_path.write_text(bundle_json, encoding="utf-8")
 
         assert main(["verify-proof", str(bundle_path)]) == 0
         out = capsys.readouterr().out

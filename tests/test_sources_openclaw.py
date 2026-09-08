@@ -107,9 +107,7 @@ class TestLastIngestedSequence:
         log.append(payload={"hello": "world"}, payload_type="application/vnd.test.other+json")
         assert last_ingested_sequence(log) is None
 
-    def test_highest_ingested_sequence_wins_regardless_of_chain_order(
-        self, tmp_path: Path
-    ) -> None:
+    def test_highest_ingested_sequence_wins_regardless_of_chain_order(self, tmp_path: Path) -> None:
         log = open_log(tmp_path)
         for seq in (7, 9, 8):
             log.append(payload=rec(seq), payload_type=OPENCLAW_AUDIT_PAYLOAD_TYPE)
@@ -131,9 +129,7 @@ class TestIngest:
         assert got[0]["eventId"] == "evt-1"
         assert log.verify().ok
 
-    def test_pages_backwards_but_appends_in_ascending_sequence_order(
-        self, tmp_path: Path
-    ) -> None:
+    def test_pages_backwards_but_appends_in_ascending_sequence_order(self, tmp_path: Path) -> None:
         log = open_log(tmp_path)
         ledger = FakeLedger([rec(s) for s in range(1, 11)])
 
@@ -159,9 +155,7 @@ class TestIngest:
         assert again.last_sequence == 5
         assert len(payloads(log, OPENCLAW_AUDIT_PAYLOAD_TYPE)) == 5
 
-    def test_resume_only_takes_records_newer_than_the_last_ingested(
-        self, tmp_path: Path
-    ) -> None:
+    def test_resume_only_takes_records_newer_than_the_last_ingested(self, tmp_path: Path) -> None:
         log = open_log(tmp_path)
         ledger = FakeLedger([rec(s) for s in range(1, 4)])
         ingest(log, run_fn=ledger)
@@ -173,12 +167,15 @@ class TestIngest:
 
         assert result.ingested == 3
         assert [p["sequence"] for p in payloads(log, OPENCLAW_AUDIT_PAYLOAD_TYPE)] == [
-            1, 2, 3, 4, 5, 6,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
         ]
 
-    def test_stops_paging_once_it_reaches_already_ingested_records(
-        self, tmp_path: Path
-    ) -> None:
+    def test_stops_paging_once_it_reaches_already_ingested_records(self, tmp_path: Path) -> None:
         log = open_log(tmp_path)
         ledger = FakeLedger([rec(s) for s in range(1, 21)])
         ingest(log, run_fn=ledger)
@@ -206,9 +203,7 @@ class TestIngest:
 
 
 class TestGaps:
-    def test_prune_between_runs_is_recorded_as_a_gap_not_a_tamper(
-        self, tmp_path: Path
-    ) -> None:
+    def test_prune_between_runs_is_recorded_as_a_gap_not_a_tamper(self, tmp_path: Path) -> None:
         log = open_log(tmp_path)
         ingest(log, run_fn=FakeLedger([rec(1), rec(2)]))
 
@@ -267,9 +262,7 @@ class TestGaps:
         assert payloads(log, OPENCLAW_GAP_PAYLOAD_TYPE) == []
         assert result.ingested == 2
 
-    def test_page_cap_gap_is_labelled_as_the_cap_not_as_prune(
-        self, tmp_path: Path
-    ) -> None:
+    def test_page_cap_gap_is_labelled_as_the_cap_not_as_prune(self, tmp_path: Path) -> None:
         log = open_log(tmp_path)
         ingest(log, run_fn=FakeLedger([rec(1)]))
         ledger = FakeLedger([rec(s) for s in range(1, 12)])
@@ -281,7 +274,11 @@ class TestGaps:
         # It fetched 11,10,9,8 — everything from 2..7 was left behind by OUR
         # cap, not by OpenClaw's pruning, and the entry says so.
         assert [p["sequence"] for p in payloads(log, OPENCLAW_AUDIT_PAYLOAD_TYPE)] == [
-            1, 8, 9, 10, 11,
+            1,
+            8,
+            9,
+            10,
+            11,
         ]
         assert result.gaps is not None
         assert [g.cause for g in result.gaps] == ["page_cap"]
@@ -364,9 +361,7 @@ class TestFailOpen:
             '{"events": [{"eventId": "no-sequence"}]}',
         ],
     )
-    def test_unusable_export_output_is_reported_not_raised(
-        self, tmp_path: Path, body: str
-    ) -> None:
+    def test_unusable_export_output_is_reported_not_raised(self, tmp_path: Path, body: str) -> None:
         log = open_log(tmp_path)
 
         result = ingest(log, run_fn=lambda args: body)
@@ -375,9 +370,7 @@ class TestFailOpen:
         assert result.notice is not None
         assert log.verify().ok
 
-    def test_partial_page_damage_does_not_discard_the_good_records(
-        self, tmp_path: Path
-    ) -> None:
+    def test_partial_page_damage_does_not_discard_the_good_records(self, tmp_path: Path) -> None:
         # One unusable record must not cost the whole page: the loss is
         # counted (rule 6), the rest still lands.
         body = json.dumps({"events": [rec(3), {"eventId": "broken"}, rec(1)]})
@@ -503,9 +496,7 @@ class TestIngestCriticalSection:
 
 
 class TestTamperEvidence:
-    def test_editing_an_ingested_row_is_caught_with_its_sequence(
-        self, tmp_path: Path
-    ) -> None:
+    def test_editing_an_ingested_row_is_caught_with_its_sequence(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
         log = open_log(tmp_path)
         ingest(log, run_fn=FakeLedger([rec(1), rec(2), rec(3)]))

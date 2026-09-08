@@ -18,16 +18,16 @@ from waxseal_server.app import Settings, create_app
 def _built(tmp_path: Path) -> Path:
     static = tmp_path / "static"
     (static / "assets").mkdir(parents=True)
-    (static / "index.html").write_text("<!doctype html><title>Waxseal Portal</title>")
-    (static / "assets" / "app.js").write_text("console.log('portal')")
+    (static / "index.html").write_text(
+        "<!doctype html><title>Waxseal Portal</title>", encoding="utf-8"
+    )
+    (static / "assets" / "app.js").write_text("console.log('portal')", encoding="utf-8")
     return static
 
 
 @pytest.fixture
 def built(tmp_path: Path) -> TestClient:
-    return TestClient(
-        create_app(Settings(data_dir=tmp_path / "data", static_dir=_built(tmp_path)))
-    )
+    return TestClient(create_app(Settings(data_dir=tmp_path / "data", static_dir=_built(tmp_path))))
 
 
 @pytest.fixture
@@ -76,7 +76,7 @@ class TestBuilt:
     def test_an_unknown_asset_path_does_not_escape_the_static_root(
         self, built: TestClient, tmp_path: Path
     ) -> None:
-        (tmp_path / "secret.txt").write_text("do not serve me")
+        (tmp_path / "secret.txt").write_text("do not serve me", encoding="utf-8")
         resp = built.get("/assets/../../secret.txt")
         assert "do not serve me" not in resp.text
 

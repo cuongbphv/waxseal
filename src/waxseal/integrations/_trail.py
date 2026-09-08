@@ -137,6 +137,28 @@ def home_base() -> Path:
     return Path(home) if home else Path.home()
 
 
+def hermes_home() -> Path:
+    """Where hermes keeps its state: HERMES_HOME, else hermes_cli, else ~/.hermes.
+
+    Re-exported as `_hermes_home` on both hermes host modules so the existing
+    fail-open tests keep importing that name. The two copies used to drift.
+    """
+    env = os.environ.get("HERMES_HOME")
+    if env:
+        return Path(env)
+    try:
+        # Inside a hermes process this is the authoritative resolver.
+        from hermes_cli.config import get_hermes_home
+
+        return Path(get_hermes_home())
+    except Exception:
+        # home_base(), not Path.home(): the last rung has to honour HOME
+        # first or a host that sets it writes into a different Windows
+        # profile than `waxseal verify` reads (waxseal-fg4.3; the rule and
+        # the ntpath split are documented on home_base itself).
+        return home_base() / ".hermes"
+
+
 def home_default(documented: str) -> Path:
     """A library integration's documented ``~/...`` default, under `home_base()`.
 

@@ -18,13 +18,13 @@
                 │
                 ▼
         bead-pm-loop ─────────► 先过门禁，再做一轮
-           │      │              （bead-loop → bead-take，或 bead-fleet）
+           │      │              （bead-loop -> bead-take，或 bead-fleet）
            │      └───────────► bead-report    现在到哪了
            │                    bead-forecast  什么时候能交
            ▼
         bead-audit ───────────► 「做完了」是真的做完了吗
                 │
-                └─────────────► 发现新活儿 → 回到 bead-split
+                └─────────────► 发现新活儿 -> 回到 bead-split
 ```
 
 图里每个技能在各个环境里的名字都一样。在 Claude Code 和 Cursor 里输入 `/bead-report`，在 Codex 里
@@ -224,7 +224,7 @@ NOT DONE 或 PARTIAL，并附上具体证据——文件和行号、跑过的命
 
 | 技能 | 用来做什么 | 会写看板吗 |
 |---|---|---|
-| `bead-split` | markdown 规格 → epic + 已估工作量且已分类的子任务 | 只在 `--apply` 时 |
+| `bead-split` | markdown 规格 -> epic + 已估工作量且已分类的子任务 | 只在 `--apply` 时 |
 | `bead-estimate` | 用可度量的历史给任务估工作量 | 单个 id 会写；`--backfill` 和 `--epic` 只在 `--apply` 时 |
 | `bead-take` | 一个任务、一个 worktree、带证据关闭 | 会 |
 | `bead-loop` | 每轮一个就绪任务 | 会 |

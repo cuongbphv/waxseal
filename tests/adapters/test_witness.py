@@ -91,8 +91,11 @@ class TestFetch:
             200,
             checkpoints_body(
                 {
-                    "seq": 0, "entry_hash": "1" * 64, "root": "2" * 64,
-                    "witnessed_at": "2026-08-23", "signature": "...",
+                    "seq": 0,
+                    "entry_hash": "1" * 64,
+                    "root": "2" * 64,
+                    "witnessed_at": "2026-08-23",
+                    "signature": "...",
                 }
             ),
         )
@@ -103,8 +106,11 @@ class TestFetch:
             200,
             checkpoints_body(
                 {
-                    "seq": 0, "entry_hash": "1" * 64, "root": "2" * 64,
-                    "agg_commit": "3" * 64, "agg_epoch": 1,
+                    "seq": 0,
+                    "entry_hash": "1" * 64,
+                    "root": "2" * 64,
+                    "agg_commit": "3" * 64,
+                    "agg_epoch": 1,
                 }
             ),
         )

@@ -108,7 +108,7 @@ class TestTheThreeOkStates:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         trail = plain_trail(tmp_path)
-        receipts_path(trail).write_text("")
+        receipts_path(trail).write_text("", encoding="utf-8")
         code, markdown = report_markdown(trail, capsys)
         line = receipts_line(markdown)
         assert code == 0
@@ -135,7 +135,7 @@ class TestTheThreeOkStates:
         _, absent_md = report_markdown(absent, capsys)
 
         empty = plain_trail(tmp_path / "b")
-        receipts_path(empty).write_text("\n\n")
+        receipts_path(empty).write_text("\n\n", encoding="utf-8")
         _, empty_md = report_markdown(empty, capsys)
 
         checked = acknowledged_trail(tmp_path / "c")
@@ -166,7 +166,7 @@ class TestTheJsonStateIsNamed:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         trail = plain_trail(tmp_path)
-        receipts_path(trail).write_text("")
+        receipts_path(trail).write_text("", encoding="utf-8")
         receipts = report_json(trail, capsys)["receipts"]
         assert isinstance(receipts, dict)
         # Same ok and same checked as the absent case: `state` is the only

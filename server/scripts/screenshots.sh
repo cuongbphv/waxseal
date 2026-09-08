@@ -22,6 +22,7 @@
 # through, so the published frames read as a deployment rather than as somebody's
 # laptop.
 
+# shellcheck source=_lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 OUT="$SERVER_DIR/docs/screenshots"
@@ -55,7 +56,11 @@ DEMO_ROOT=/tmp/waxseal-demo
 WORK="$DEMO_ROOT/data"
 RUNTIME="$DEMO_ROOT/runtime"
 cleanup() {
-  [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true
+  # An if, not `A && B || C`: shellcheck 0.9.0 (the Ubuntu runner's) reads
+  # the idiom as SC2015 even with `|| true`; 0.11.0 no longer does.
+  if [[ -n "${SERVER_PID:-}" ]]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+  fi
   rm -rf "$DEMO_ROOT"
 }
 trap cleanup EXIT

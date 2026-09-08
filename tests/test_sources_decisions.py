@@ -81,9 +81,7 @@ class TestCommitInput:
         # it cannot be used to confirm a guess at the real secret. Without
         # this ordering the trail would leak a verifier for the cleartext.
         secret = {"api_key": "sk-abcdefghijklmnopqrstuvwx"}
-        assert commit_input(secret, redactor=RegexRedactor()) == commit_input(
-            {"api_key": REDACTED}
-        )
+        assert commit_input(secret, redactor=RegexRedactor()) == commit_input({"api_key": REDACTED})
 
     def test_two_different_secrets_share_one_commitment_once_redacted(self) -> None:
         r = RegexRedactor()
@@ -143,9 +141,7 @@ class TestRecordDecision:
         # pasted token ends up. Cleartext must never reach disk.
         trail = tmp_path / "trail.jsonl"
         log = open_log(trail, redactor=RegexRedactor())
-        record_decision(
-            log, a_record(rationale="checked with Bearer abcdefghijklmnop")
-        )
+        record_decision(log, a_record(rationale="checked with Bearer abcdefghijklmnop"))
         stored = disk_payloads(trail)[0]
         assert b"abcdefghijklmnop" not in stored
         assert b"abcdefghijklmnop" not in trail.read_bytes()
@@ -204,7 +200,7 @@ class TestIterDecisions:
         log = open_log(trail)
         record_decision(log, a_record())
         record_decision(log, a_record(decision_id="d-2"))
-        tamper_payload(trail, 1, b'"d-2"', b'12345')
+        tamper_payload(trail, 1, b'"d-2"', b"12345")
 
         found = list(iter_decisions(trail_log := open_log(trail)))
         assert len(found) == 2
@@ -252,3 +248,24 @@ class TestIterDecisions:
         _, read_back = next(iter(iter_decisions(log)))
         assert read_back is not None
         assert read_back.human_oversight == oversight
+
+    @pytest.mark.parametrize("name", ["trail.jsonl", "trail.db"])
+    def test_declared_risk_tier_survives_the_round_trip(self, tmp_path: Path, name: str) -> None:
+        # The tier is the provider's own declaration (Law on AI 134/2025
+        # Art. 10(1)); a backend that dropped or normalized it would change
+        # what the provider is on record as having declared.
+        log = open_log(tmp_path / name)
+        record_decision(log, a_record(risk_tier="cao", classification_ref="HSPL-2026-014/v3"))
+        _, read_back = next(iter(iter_decisions(log)))
+        assert read_back is not None
+        assert read_back.risk_tier == "cao"
+        assert read_back.classification_ref == "HSPL-2026-014/v3"
+
+    def test_a_decision_with_no_declared_tier_reads_back_as_none(self, tmp_path: Path) -> None:
+        # rule 5: nothing declared is its own state, never the lowest tier.
+        log = open_log(tmp_path / "trail.jsonl")
+        record_decision(log, a_record())
+        _, read_back = next(iter(iter_decisions(log)))
+        assert read_back is not None
+        assert read_back.risk_tier is None
+        assert read_back.classification_ref is None

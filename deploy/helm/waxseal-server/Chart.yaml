@@ -1,0 +1,27 @@
+apiVersion: v2
+name: waxseal-server
+description: |
+  The waxseal chain server — the CHAIN trust domain of
+  docs/architecture/deployment.md section 1, and nothing else. It deliberately
+  installs no verifier and no witness: those are different administrative
+  authorities, and a Helm release is an authority boundary (one namespace, one
+  RBAC subject, one set of people who can `helm upgrade`). Put the verifier in
+  deploy/helm/waxseal-verifier, in another namespace or another cluster.
+type: application
+# The chart version. Bumped when the templates change.
+version: 0.1.0
+# The waxseal release this chart's default image tag was written against.
+appVersion: "0.1.6"
+keywords:
+  - audit
+  - hash-chain
+  - tamper-evident
+home: https://github.com/cuongbphv/waxseal
+sources:
+  - https://github.com/cuongbphv/waxseal
+maintainers:
+  - name: waxseal maintainers
+    url: https://github.com/cuongbphv/waxseal
+annotations:
+  # Not a subchart. PostgreSQL is external on purpose: see values.yaml.
+  waxseal.io/bundled-database: "none"

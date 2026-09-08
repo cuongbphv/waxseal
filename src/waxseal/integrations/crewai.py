@@ -50,17 +50,13 @@ from crewai.events import (
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
+from waxseal.integrations import _sanitize as _sanitize_impl
 from waxseal.integrations._trail import home_default, resolve_trail
 
-# _sanitize redacts BEFORE clipping: a clip can split a secret across the
-# boundary (a PEM losing its END marker stops matching) and land it on disk.
-_REDACTOR = RegexRedactor()
+MAX_FIELD_CHARS = _sanitize_impl.MAX_FIELD_CHARS
+_sanitize = _sanitize_impl.sanitize
 
 PAYLOAD_TYPE = "application/vnd.crewai.event+json"
-
-# Tool outputs can be megabytes (scraped pages, file reads). Clip stored
-# fields, visibly, because silent truncation would read as "the full output".
-MAX_FIELD_CHARS = 4096
 
 #: Where this integration writes when the caller names no path and
 #: `WAXSEAL_TRAIL` is unset.
@@ -70,29 +66,21 @@ DEFAULT_TRAIL = "~/.waxseal/crewai-trail.jsonl"
 # events also carry live agent/task/crew objects, which are neither
 # serializable nor audit data.
 _EVENT_ATTRS = (
-    "tool_name", "tool_args", "agent_role", "agent_id", "agent_key",
-    "task_id", "task_name", "crew_name", "inputs", "output", "from_cache",
-    "error", "total_tokens", "event_id",
+    "tool_name",
+    "tool_args",
+    "agent_role",
+    "agent_id",
+    "agent_key",
+    "task_id",
+    "task_name",
+    "crew_name",
+    "inputs",
+    "output",
+    "from_cache",
+    "error",
+    "total_tokens",
+    "event_id",
 )
-
-
-def _clip(text: str) -> str:
-    if len(text) <= MAX_FIELD_CHARS:
-        return text
-    return text[:MAX_FIELD_CHARS] + f"…[truncated {len(text) - MAX_FIELD_CHARS} chars]"
-
-
-def _sanitize(value: Any) -> Any:
-    """Keep the payload JSON-serializable and bounded whatever the event holds."""
-    if value is None or isinstance(value, (int, float, bool)):
-        return value
-    if isinstance(value, str):
-        return _clip(_REDACTOR.redact_text(value))
-    if isinstance(value, dict):
-        return {str(k): _sanitize(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_sanitize(v) for v in value]
-    return _clip(_REDACTOR.redact_text(repr(value)))
 
 
 class WaxsealEventListener(BaseEventListener):
@@ -121,18 +109,14 @@ class WaxsealEventListener(BaseEventListener):
                 payload[name] = _sanitize(getattr(event, name))
         try:
             if self._log is None:
-                self._log = AuditLog.open(
-                    self._trail, redactor=RegexRedactor(), record_drops=True
-                )
+                self._log = AuditLog.open(self._trail, redactor=RegexRedactor(), record_drops=True)
         except Exception as e:  # broken environment: never block the crew
             print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
             # No AuditLog to route this through, so record it directly,
             # best-effort (FileDropRecorder.record() never raises).
             from waxseal.adapters.drops import FileDropRecorder
 
-            FileDropRecorder(self._trail).record(
-                reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-            )
+            FileDropRecorder(self._trail).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
             return
         if not self._log.try_append(payload=payload, payload_type=PAYLOAD_TYPE):
             # Labelled fail-open: the bus swallows raises silently, so the
@@ -145,11 +129,18 @@ class WaxsealEventListener(BaseEventListener):
 
     def setup_listeners(self, crewai_event_bus: Any) -> None:
         audited = (
-            ToolUsageStartedEvent, ToolUsageFinishedEvent, ToolUsageErrorEvent,
-            TaskStartedEvent, TaskCompletedEvent, TaskFailedEvent,
-            CrewKickoffStartedEvent, CrewKickoffCompletedEvent, CrewKickoffFailedEvent,
+            ToolUsageStartedEvent,
+            ToolUsageFinishedEvent,
+            ToolUsageErrorEvent,
+            TaskStartedEvent,
+            TaskCompletedEvent,
+            TaskFailedEvent,
+            CrewKickoffStartedEvent,
+            CrewKickoffCompletedEvent,
+            CrewKickoffFailedEvent,
         )
         for event_class in audited:
+
             @crewai_event_bus.on(event_class)
             def _handler(source: Any, event: Any) -> None:
                 self._record(event)

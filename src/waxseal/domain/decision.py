@@ -23,6 +23,15 @@ identifiers are non-empty and ``input_commitment`` is a real digest. A record
 that commits to nothing is worse than no record: it looks like proof and is
 not.
 
+Two later fields, ``risk_tier`` and ``classification_ref``, were appended as
+optional keys without moving ``DECISION_PAYLOAD_TYPE`` off ``.v1``. That
+leaves one subtlety worth stating: a row written before the fields existed has
+the key *absent*, while a writer that had the field and declared nothing
+writes the key *present and null*, and both parse to ``None`` here. For the
+question an auditor asks — was a tier declared for this decision? — the two
+have the same answer, so both count as undeclared and there is no third
+counter.
+
 ``input_commitment`` is a hash of the (already redacted) model input, not the
 input itself, so the trail carries no customer data. Note the standard limit
 of any hash commitment: over a low-entropy input (an account number, a small
@@ -121,6 +130,23 @@ class DecisionRecord:
     # reviewer_ref note above.
     subject_ref: str | None = None
     trace_id: str | None = None
+    # The provider's OWN risk classification, which Law on AI No. 134/2025/QH15
+    # Điều 10(1) assigns to the provider, not to a verifier. Recorded verbatim
+    # and never adjudicated here: a free string for the same reason
+    # HumanOversight.mode is one — institutions name their own tiers ("cao",
+    # "high", "tier-2", "trung bình") and a closed enum forces a lossy mapping.
+    # Normalizing "cao" to "high" would be waxseal deciding a classification
+    # the law does not give it. None means no tier was declared on this record,
+    # which is a different claim from any tier and must never render as the
+    # lowest one (rule 5).
+    risk_tier: str | None = None
+    # Opaque, pseudonymous pointer to the risk-classification dossier that
+    # Decree 142/2026/NĐ-CP Điều 12 requires providers of high- and
+    # medium-risk systems to keep for the system's whole operating life: a
+    # dossier id and version, never a filesystem path with a person's name in
+    # it (the subject_ref note above applies here too). None means no dossier
+    # reference was recorded.
+    classification_ref: str | None = None
 
     def __post_init__(self) -> None:
         _require_nonempty(self.decision_id, "decision_id")
@@ -134,16 +160,24 @@ class DecisionRecord:
             self.human_oversight, HumanOversight
         ):
             raise ValueError("human_oversight must be a HumanOversight or None")
-        for field in ("rationale", "policy_version", "subject_ref", "trace_id"):
+        for field in (
+            "rationale",
+            "policy_version",
+            "subject_ref",
+            "trace_id",
+            # No special empty-string rule: the analogue is rationale and
+            # policy_version, which accept "". _require_nonempty is for a
+            # field that is mandatory once its object exists.
+            "risk_tier",
+            "classification_ref",
+        ):
             _optional_str(getattr(self, field), field)
         if self.confidence is not None:
             # NaN/inf are rejected rather than stored: json.dumps writes them
             # as bare NaN/Infinity, which is not JSON, so the payload would
             # hash perfectly well and be unreadable to any conforming auditor
             # tool, which is a silently useless record.
-            if isinstance(self.confidence, bool) or not isinstance(
-                self.confidence, (int, float)
-            ):
+            if isinstance(self.confidence, bool) or not isinstance(self.confidence, (int, float)):
                 raise ValueError("confidence must be a number between 0 and 1, or null")
             if not math.isfinite(self.confidence) or not 0.0 <= self.confidence <= 1.0:
                 raise ValueError("confidence must be a number between 0 and 1, or null")
@@ -182,6 +216,17 @@ def to_payload(record: DecisionRecord) -> dict[str, Any]:
         ),
         "subject_ref": record.subject_ref,
         "trace_id": record.trace_id,
+        # Appended without moving DECISION_PAYLOAD_TYPE off .v1. The media
+        # type's version is for a change an old reader cannot tolerate — a new
+        # required field, a changed meaning, a removal — and an optional key
+        # defaulting to None is none of those: the chain hashes only the
+        # header, an old payload read by this build yields None through
+        # .get(), and this build's extra keys are ignored by an older reader
+        # (test_unknown_extra_keys_are_ignored_not_rejected). Same call as
+        # AnchorRecord.nonce in adapters/anchors.py, added as None = "not
+        # recorded" with no format break, for the beads-v1.2.2 reason.
+        "risk_tier": record.risk_tier,
+        "classification_ref": record.classification_ref,
     }
 
 
@@ -237,4 +282,6 @@ def from_payload(payload: Any) -> DecisionRecord:
         ),
         subject_ref=payload.get("subject_ref"),
         trace_id=payload.get("trace_id"),
+        risk_tier=payload.get("risk_tier"),
+        classification_ref=payload.get("classification_ref"),
     )

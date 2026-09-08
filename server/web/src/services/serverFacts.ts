@@ -107,3 +107,17 @@ export function watchTokenForRefresh(): void {
     void loadServerFacts()
   })
 }
+
+/** Drop every shared fact so a component test can set one world without
+ * inheriting the last. Production code never calls this. */
+export function resetServerFactsForTests(): void {
+  meta.value = null
+  metaError.value = null
+  metaPending.value = false
+  capabilities.value = null
+  capabilitiesError.value = null
+  scope.value = null
+  scopeError.value = null
+  principal.value = null
+  principalError.value = null
+}

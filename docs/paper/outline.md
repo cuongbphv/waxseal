@@ -1,4 +1,4 @@
-# Paper outline — schema-evolution-safe tamper-evident decision logs for AI agents
+# Paper outline - schema-evolution-safe tamper-evident decision logs for AI agents
 
 *[Tiếng Việt](outline.vi.md)*
 
@@ -17,7 +17,7 @@ Financial Services*
 | Regulatory | *Verifiable Decision Records for Regulated AI Deployment* | FC / WTSC |
 
 The failure-class framing is the strongest. The core contribution is not a new
-cryptographic construction — it is the observation that a widely-repeated deployment bug
+cryptographic construction - it is the observation that a widely-repeated deployment bug
 class (ordinal version identity + unknown version treated as an error) is **eliminable by
 construction**, plus a system that does so and a measurement of what it costs.
 
@@ -30,8 +30,8 @@ State these early and keep the paper honest to exactly these four:
 1. **A failure class, named and characterised.** Two independent production incidents
    (§1) share one root cause: version identity is *ordinal and manual*, and an unrecognised
    version is treated as an error rather than as an absence of information. We show this
-   collapses two distinct verdicts — *this record is wrong* and *I cannot check this
-   record* — into one, and that the collapse is what turns a benign rollback into either a
+   collapses two distinct verdicts - *this record is wrong* and *I cannot check this
+   record* - into one, and that the collapse is what turns a benign rollback into either a
    mass false alarm or a silently-disabled safety mechanism.
 2. **A construction that makes the class unrepresentable.** Version identity as a
    *content-derived fingerprint* of the canonical field descriptor, so widening the hashed
@@ -64,20 +64,20 @@ does.
 - **Incident B (an issue-tracker tool, v1.2.2, 2026-08).** An accidental release migrated a
   schema from v53 to v65. The reverted binary treated the unknown-but-higher version as a
   fatal error. The only escape hatch was an environment variable that disabled the schema
-  safety check entirely — turning a partial-information condition into a binary choice
+  safety check entirely - turning a partial-information condition into a binary choice
   between "refuse to run" and "run with no safety at all".
 
 Both are the same bug: **the verifier had no way to say "I cannot check this."** Incident A
 answered *tampered* when the honest answer was *unverifiable*; Incident B answered *fatal
 error* to the same condition. RFC 6962 §4.6 already tells us the right answer for
-unrecognised types — treat them as opaque, not as errors — but the principle is stated for
+unrecognised types - treat them as opaque, not as errors - but the principle is stated for
 wire formats and is not, in practice, carried into audit-log verifiers.
 
 Then motivate the AI-agent setting: agent decisions are now the object of record-keeping
 duties (EU AI Act Art. 12/19/26(6); DORA's RTS requires logs be protected against tampering
 and deletion), the decision schema of a fast-moving agent system changes far more often
 than a database schema, and the party operating the agent is usually also the party holding
-its log — which is exactly the configuration in which an unforgeable, externally-anchored
+its log - which is exactly the configuration in which an unforgeable, externally-anchored
 record has value.
 
 **Structure of the argument:** the schema churn rate of AI systems makes the failure class
@@ -93,7 +93,7 @@ Organise as four threads, and say plainly what each gives and what it leaves ope
 **Hash-chained and forward-secure logging.** Schneier & Kelsey's forward-secure audit logs;
 Bellare & Yee's forward-security definitions; Ma & Tsudik's FssAgg aggregate signatures.
 *Gives*: detection of truncation and post-compromise rewriting. *Leaves open*: nothing about
-schema identity — the field set being hashed is assumed fixed.
+schema identity - the field set being hashed is assumed fixed.
 
 **Transparency logs.** Crosby & Wallach's history trees; RFC 6962 (Certificate
 Transparency) membership and consistency proofs; RFC 9162 §2.1.4. *Gives*: the proof
@@ -108,7 +108,7 @@ append-only decision streams, and does not address the verifier-cannot-check cas
 **AI accountability and audit.** Model cards, datasheets, algorithmic auditing, and the
 regulatory instruments themselves. *Gives*: the requirement. *Leaves open*: these describe
 *what* should be recorded and almost never *how the record is made trustworthy against the
-party that holds it* — the gap this work fills.
+party that holds it* - the gap this work fills.
 
 **Position statement for the related-work section:** every primitive used here is
 standard. The contribution is the composition and, specifically, the identity and
@@ -148,7 +148,7 @@ fingerprints)*. The key soundness property is negative and should be stated as s
 
 Reporting a record intact on a hash it cannot reproduce is the one lie a tamper-evidence
 mechanism must never tell; reporting it *tampered* is Incident A. Both are avoided only by
-having a third outcome, and the outcome has to survive all the way to the exit code — an
+having a third outcome, and the outcome has to survive all the way to the exit code - an
 API distinction that collapses at the process boundary is not deployed.
 
 ### 3.4 Canonical encoding
@@ -160,18 +160,18 @@ count. Argue length-prefixing over delimiters (no in-band ambiguity), and the NU
 as an instance of the paper's recurring theme: *absent* and *empty* are different claims,
 and a canonical encoding that conflates them lets two different records hash identically.
 
-**Then turn the example on itself — this is the strongest passage available.** That
+**Then turn the example on itself - this is the strongest passage available.** That
 sentinel is `b"\x00NULL\x00"`, which is *itself valid UTF-8*: it decodes to a six-character
 string. So the one field value equal to that string encoded identically to *absent*. The
 encoding chosen to keep "absent" and "empty" apart conflated "absent" and one specific
-*present* value — the very failure the section argues against, in the illustration of the
+*present* value - the very failure the section argues against, in the illustration of the
 argument. It was latent (no shipped call site could reach it) and it was still wrong, for
 the reason the paper cares about: the encoding is offered as portable, and an independent
 implementation written from the prose would have reproduced the ambiguity faithfully.
 
 lp64 fixes it structurally: a type tag *inside* the length-prefixed region (`0x00` for
 absent, `0x01` before a string's UTF-8 bytes), so the two differ in their first byte for
-every possible input. Injectivity becomes unconditional — no side condition, no invariant
+every possible input. Injectivity becomes unconditional - no side condition, no invariant
 to maintain, no input to reject.
 
 The upgrade is the section's real payload, and it belongs here rather than in §3.3: because
@@ -179,7 +179,7 @@ the encoding name is a component of the version descriptor, switching the defaul
 the fingerprint automatically*. There was no migration to write and no released identity to
 redefine in place; a binary that predates the change reports the newer rows *unverifiable*,
 not *tampered*. Say plainly what it did cost: lp64v1 was removed rather than carried, so
-trails written under it are unverifiable by any current build — a price payable only
+trails written under it are unverifiable by any current build - a price payable only
 because none existed outside development, and recorded as a one-off rather than left to
 be mistaken for precedent. The schema-evolution mechanism the paper proposes turned
 out to be what let the artifact repair its own canonical encoding without a migration. A
@@ -189,7 +189,7 @@ the design is load-bearing rather than decorative.
 ### 3.5 Redact-before-hash
 
 Redaction runs before `payload_hash` is computed, so a secret never reaches disk. State the
-consequence honestly: a redaction miss is unrecoverable — the cleartext is what would have
+consequence honestly: a redaction miss is unrecoverable - the cleartext is what would have
 been committed. Ordering is the mitigation, not an optional pass.
 
 ### 3.6 Decision records and commitments
@@ -199,7 +199,7 @@ name/version/digest, outcome, rationale, policy version, confidence, human-overs
 Two design points worth a paragraph each:
 
 - The **input commitment is computed over the redacted input**. A commitment over cleartext
-  would let anyone holding the log confirm a guess at a secret by recomputing the hash —
+  would let anyone holding the log confirm a guess at a secret by recomputing the hash -
   the log would become a guess-confirmation oracle for the very secrets redaction removed.
 - **Unrecorded oversight is a distinct value from automated oversight.** Collapsing them
   reports an absence of evidence as evidence. This is the same three-valued discipline as
@@ -231,7 +231,7 @@ Two items deserve more than a mention because they are where the design meets re
   evidence of anything.
 - **Cross-implementation vectors.** Golden test vectors are write-once and are cross-checked
   by an independent script implementing the specification prose directly, rather than by
-  importing the library — otherwise the vectors test the implementation against itself.
+  importing the library - otherwise the vectors test the implementation against itself.
 
 ---
 
@@ -256,7 +256,7 @@ else.
 ### 5.2 Attack-to-mechanism map
 
 The evaluation case study (§6.3) walks eight concrete attacks. Each row states the attack,
-the mechanism that catches it, and — critically — the trust assumption that mechanism
+the mechanism that catches it, and - critically - the trust assumption that mechanism
 depends on. Whole-trail rewrite is caught by anchoring *only if the anchor domain is
 separately administered*; tail truncation is caught by forward-secure seals *only if the
 initial key is escrowed off the writing host*. These conditionals are the paper's most
@@ -266,7 +266,7 @@ useful contribution to a practitioner.
 
 A write that never happened leaves no sequence gap and no broken link, so a completeness
 failure is invisible to chain verification by construction. `dropped_writes` measures it
-separately and reports a **measured minimum**, with `None` meaning *not measured* — never
+separately and reports a **measured minimum**, with `None` meaning *not measured* - never
 zero. The drop sidecar itself can be lost, and a disk too broken to record a drop cannot
 witness its own failure. This is the third appearance of the paper's recurring theme
 (§3.3, §3.6), and the discussion should say so: the design discipline generalises to
@@ -279,7 +279,7 @@ witness its own failure. This is the third appearance of the paper's recurring t
 - A remote chain server is a *trusted writer*, not Byzantine-fault-tolerant: a dishonest
   server can serve a consistently-forged rewrite that chain verification alone does not
   detect. A pinned head and witness cross-check narrow this to a first-contact client,
-  colluding witnesses, or an eclipsed client — they do not remove the trust.
+  colluding witnesses, or an eclipsed client - they do not remove the trust.
 - Timestamps are caller-asserted, not attested; attested time requires an external
   authority.
 - Append-only storage is in tension with erasure rights; the mitigation (pseudonymous
@@ -294,7 +294,7 @@ witness its own failure. This is the third appearance of the paper's recurring t
 Append and verify throughput and latency across backends; the marginal cost of the
 forward-secure seal per entry and of a Merkle checkpoint per *N* entries; verification
 cost as a function of trail length, and the improvement from incremental verification via
-consistency proofs from the last anchored checkpoint. Report distributions, not means —
+consistency proofs from the last anchored checkpoint. Report distributions, not means -
 audit-path tail latency is what an operator actually feels.
 
 ### 6.2 Proof bundle size
@@ -308,7 +308,7 @@ the path against linear growth of the trail.
 
 The eight-scenario walkthrough from the reference deployment, run as an experiment rather
 than a demo: each scenario's expected verdict is asserted, and the harness fails if any
-scenario stops behaving as documented. Include the negative controls explicitly — the two
+scenario stops behaving as documented. Include the negative controls explicitly - the two
 scenarios where plain chain verification *correctly* reports intact, and the scenario where
 the correct answer is *unverifiable* rather than *tampered*. A table where every row says
 "detected" is a table nobody should believe.
@@ -332,14 +332,14 @@ engineering around it.
 
 ## 7. Discussion: regulatory context
 
-Short, and deliberately modest — this is a systems paper, not a legal one.
+Short, and deliberately modest - this is a systems paper, not a legal one.
 
 What an integrity layer can and cannot contribute to record-keeping obligations (EU AI Act
 Art. 12/19/26(6); the DORA RTS requirement that logs be protected against tampering and
 deletion and that logging-system failure be detectable; model-risk-management documentation
 expectations). The honest framing: these instruments demand that records be *kept*, and
 mostly do not specify that they be *unforgeable against the keeper*. Tamper-evidence is
-therefore a stronger posture than most texts require — which is an argument for adopting
+therefore a stronger posture than most texts require - which is an argument for adopting
 it, and an argument against claiming any text mandates it.
 
 Also worth one paragraph: the compliance-artefact trap. A verified log of an ungoverned
@@ -369,12 +369,12 @@ accountability, never a substitute for it.
 |---|---|---|
 | **ACSAC** | strong | applied-security systems with a deployment story; the case study fits its style |
 | **DIMVA** | strong | failure-class framing and detection are squarely in scope |
-| **FC — WTSC workshop** | good | financial-services framing; transparency-log lineage is familiar to that audience |
+| **FC - WTSC workshop** | good | financial-services framing; transparency-log lineage is familiar to that audience |
 | **IEEE S&P / CCS workshops** (SafeThings, AISec) | good | shortest path if the AI-accountability angle leads |
 | **USENIX Security** | stretch | would need a substantially stronger novelty claim than "composition plus identity design" |
 
 **Artefact evaluation.** The implementation is MIT-licensed, dependency-free, and ships
-golden vectors plus a runnable adversarial case study — aim for the artefact badge at
+golden vectors plus a runnable adversarial case study - aim for the artefact badge at
 whichever venue offers one, and cite the artefact rather than restating its output in the
 paper.
 

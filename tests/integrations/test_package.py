@@ -63,7 +63,11 @@ class TestPackageShape:
             "print('no-opener-at-import')\n"
         )
         proc = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            encoding="utf-8",
         )
         assert proc.returncode == 0, proc.stderr
         assert "no-opener-at-import" in proc.stdout
@@ -77,8 +81,10 @@ class TestPackageShape:
         from waxseal.integrations import hermes, hermes_gateway
 
         repo = Path(__file__).parent.parent.parent / "integrations" / "hermes"
-        assert (repo / "plugin" / "plugin.yaml").read_text() == hermes.PLUGIN_MANIFEST
-        assert (repo / "HOOK.yaml").read_text() == hermes_gateway.HOOK_MANIFEST
+        assert (repo / "plugin" / "plugin.yaml").read_text(
+            encoding="utf-8"
+        ) == hermes.PLUGIN_MANIFEST
+        assert (repo / "HOOK.yaml").read_text(encoding="utf-8") == hermes_gateway.HOOK_MANIFEST
 
     def test_hook_entry_points_exist(self) -> None:
         # The shims `waxseal install` writes call exactly these names.

@@ -6,8 +6,14 @@ from typing import Any
 
 import pytest
 
+from waxseal.adapters import jsonl as jsonl_module
 from waxseal.adapters._envelope import to_obj
-from waxseal.adapters.jsonl import _TAIL_SEEK_CHUNK, JSONLBackend, JSONLCorruptionError
+from waxseal.adapters.jsonl import (
+    _TAIL_SEEK_CHUNK,
+    JSONLBackend,
+    JSONLCorruptionError,
+    read_last_line,
+)
 from waxseal.domain.fingerprint import fingerprint
 from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash, header_frame
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
@@ -76,10 +82,36 @@ class TestAppend:
         obj = json.loads(line)
         assert set(obj) == {"header", "entry_hash", "payload_b64"}
         assert set(obj["header"]) == {
-            "seq", "ts", "hash_version", "payload_type", "payload_hash", "prev_hash",
+            "seq",
+            "ts",
+            "hash_version",
+            "payload_type",
+            "payload_hash",
+            "prev_hash",
         }
         import base64
+
         assert base64.b64decode(obj["payload_b64"]) == b'{"a":1}'
+
+
+class TestReadLastLinePublic:
+    def test_the_private_alias_is_gone(self) -> None:
+        # 0.1.6 promoted read_last_line and kept `_read_last_line` bound for
+        # one release; nothing in src/, server/ or tests/ imports it any more
+        # (tests/architecture/test_layers.py forbids the import), so a leftover
+        # binding would only be a second name for one function.
+        assert not hasattr(jsonl_module, "_read_last_line")
+
+    def test_missing_and_empty_files_yield_none(self, tmp_path: Path) -> None:
+        assert read_last_line(tmp_path / "absent.jsonl") is None
+        empty = tmp_path / "empty.jsonl"
+        empty.write_bytes(b"")
+        assert read_last_line(empty) is None
+
+    def test_it_returns_the_last_non_blank_line(self, tmp_path: Path) -> None:
+        path = tmp_path / "trail.jsonl"
+        path.write_bytes(b'{"a":1}\n{"b":2}\n\n')
+        assert read_last_line(path) == b'{"b":2}'
 
 
 class TestRoundTrip:
@@ -229,9 +261,7 @@ class TestCostReceipt:
         self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
     ) -> None:
         bytes_at_10 = self._bytes_read_by_last_append(tmp_path / "n10.jsonl", 10, monkeypatch)
-        bytes_at_1000 = self._bytes_read_by_last_append(
-            tmp_path / "n1000.jsonl", 1000, monkeypatch
-        )
+        bytes_at_1000 = self._bytes_read_by_last_append(tmp_path / "n1000.jsonl", 1000, monkeypatch)
         assert bytes_at_1000 <= bytes_at_10 * 2, (
             f"append at n=1000 read {bytes_at_1000} bytes vs n=10 read "
             f"{bytes_at_10} bytes (ratio {bytes_at_1000 / bytes_at_10:.1f}x) "
@@ -488,6 +518,7 @@ class TestScanNeverInvalidatesADurableAppend:
             backend._integrity_scan()
         assert exc_info.value.line_no == 5
         assert isinstance(exc_info.value.cause, json.JSONDecodeError)
+
 
 class TestTailReadEdgeCases:
     def _line_for(self, entry: Entry) -> str:

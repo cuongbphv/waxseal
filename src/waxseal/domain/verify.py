@@ -37,6 +37,9 @@ class VerifyResult:
 
 
 def verify_chain(entries: Iterable[Entry], registry: VersionRegistry) -> VerifyResult:
+    """Walk ``entries`` once. Reports the first break; never rewrites a row.
+    Unknown fingerprints collect as unverifiable, never as tampered.
+    """
     checked = 0
     unverifiable: list[int] = []
     expected_prev = GENESIS_PREV_HASH

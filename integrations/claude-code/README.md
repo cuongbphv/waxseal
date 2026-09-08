@@ -1,4 +1,4 @@
-# waxseal-audit — Claude Code integration
+# waxseal-audit - Claude Code integration
 
 Tamper-evident audit trail for [Claude Code](https://code.claude.com) via its hooks
 system. Verified against the official hooks reference
@@ -7,14 +7,14 @@ system. Verified against the official hooks reference
 Every tool dispatch (PreToolUse), tool result (PostToolUse), user prompt
 (UserPromptSubmit), and session lifecycle event is appended to a hash chain at
 `~/.claude/waxseal/trails/<slug>/trail.00000.jsonl` (override the location with
-`WAXSEAL_TRAIL`). Secrets — API keys, git tokens, JWTs, private keys — are
+`WAXSEAL_TRAIL`). Secrets - API keys, git tokens, JWTs, private keys - are
 redacted **before** hashing and storage.
 
 Trails are **routed per project** (SPEC.md section 20): the project key is the
 hook event's `cwd`, so two projects never braid their histories into one file.
 The active segment is rolled over into a new sealed segment once it passes
 16 MiB, and the segments are linked by a rotation binding at each new
-segment's `seq` 0 — never by `prev_hash` across a file boundary.
+segment's `seq` 0 - never by `prev_hash` across a file boundary.
 
 ```bash
 waxseal segments ~/.claude/waxseal/trails/<slug>          # every segment + its binding
@@ -25,7 +25,7 @@ waxseal verify   ~/.claude/waxseal/trails/<slug>/trail.00000.jsonl   # one segme
 nothing read. `WAXSEAL_TRAIL` still overrides the LOCATION, and is not a
 rotation off-switch: a trail named through it rotates too, and on its first
 rotation it is adopted as the base segment. A pre-0.1.5
-`~/.claude/waxseal/trail.jsonl` is neither migrated nor sealed — it stops receiving
+`~/.claude/waxseal/trail.jsonl` is neither migrated nor sealed - it stops receiving
 appends and keeps verifying with plain `waxseal verify`.
 
 ## Why this exists
@@ -38,7 +38,7 @@ about what this hook does and does not fix:
   That file is written by Claude Code itself; no hook can rewrite it.
 - **It gives you a parallel audit trail where the leak never lands in cleartext**:
   every action is recorded with secrets already redacted, and the chain proves the
-  record has not been edited after the fact — including by an agent trying to cover
+  record has not been edited after the fact - including by an agent trying to cover
   its tracks.
 
 ## Install
@@ -71,7 +71,7 @@ waxseal tail ~/.claude/waxseal/trails/<slug>/trail.00000.jsonl -n 20
 ## Design notes (why the hook behaves the way it does)
 
 - **Exit 0 on every path, including its own failures.** Exit 2 BLOCKS the tool call
-  (PreToolUse) or the prompt (UserPromptSubmit) — a broken audit disk must never veto
+  (PreToolUse) or the prompt (UserPromptSubmit) - a broken audit disk must never veto
   the user's work. Failures degrade to a labelled stderr notice and a counted dropped
   write (chain integrity ≠ trail completeness).
 - **Never writes to stdout.** On UserPromptSubmit, exit-0 stdout is injected into

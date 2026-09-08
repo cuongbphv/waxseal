@@ -1,0 +1,9 @@
+# The verifier with its CLI image pinned by DIGEST instead of tag. Placeholder
+# digest of the right shape; see server-digest.yaml.
+trailUrl: http://waxseal-server.waxseal-chain.svc.cluster.local:8000
+
+image:
+  repository: ghcr.io/cuongbphv/waxseal
+  tag: "0.1.6"
+  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000003"
+  pullPolicy: IfNotPresent

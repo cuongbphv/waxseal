@@ -13,7 +13,8 @@
  */
 
 import { computed, ref } from 'vue'
-import { api, type StoredSetting } from '@/lib/api'
+import { loadSettings, resetSetting, saveSetting } from '@/services/settings'
+import type { StoredSetting } from '@/lib/api'
 import { useI18n } from '@/lib/i18n'
 import { useAsyncData } from '@/composables/useAsyncData'
 import AppCard from '@/components/ui/AppCard.vue'
@@ -26,7 +27,7 @@ import TokenField from '@/components/app/TokenField.vue'
 
 const { t } = useI18n()
 
-const settings = useAsyncData(() => api.settings())
+const settings = useAsyncData(() => loadSettings())
 
 /* One draft per key, seeded from the value in effect. Empty means "leave it". */
 const drafts = ref<Record<string, string>>({})
@@ -41,7 +42,7 @@ async function save(row: StoredSetting): Promise<void> {
   busy.value = row.key
   delete failed.value[row.key]
   try {
-    await api.setSetting(row.key, draftFor(row))
+    await saveSetting(row.key, draftFor(row))
     delete drafts.value[row.key]
     await settings.run()
   } catch (caught) {
@@ -55,7 +56,7 @@ async function reset(row: StoredSetting): Promise<void> {
   busy.value = row.key
   delete failed.value[row.key]
   try {
-    await api.resetSetting(row.key)
+    await resetSetting(row.key)
     delete drafts.value[row.key]
     await settings.run()
   } catch (caught) {

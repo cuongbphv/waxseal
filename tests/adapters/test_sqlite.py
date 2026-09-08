@@ -140,6 +140,7 @@ class TestOpenUnderContention:
         blocker.execute("CREATE TABLE occupant (x)")
         blocker.execute("BEGIN IMMEDIATE")
         blocker.execute("INSERT INTO occupant VALUES (1)")
+
         def release_blocker() -> None:
             blocker.commit()
             blocker.close()

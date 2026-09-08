@@ -1,0 +1,144 @@
+# Publishes the two container images to GHCR, signed.
+#
+# Why this file exists at all, in one line: a tool whose whole claim is
+# verifiable integrity has to make its own provenance verifiable — an operator
+# who is asked to trust waxseal's verdicts should not have to take the image
+# carrying them on faith.
+#
+# So every image pushed here is signed keyless with cosign, and this is the
+# command an operator runs before deploying one (fill in the tag; the identity
+# and issuer below are already this repository's):
+#
+#   cosign verify \
+#     --certificate-identity-regexp '^https://github\.com/cuongbphv/waxseal/\.github/workflows/publish-images\.yml@refs/tags/v' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     ghcr.io/cuongbphv/waxseal:<version>
+#
+#   cosign verify \
+#     --certificate-identity-regexp '^https://github\.com/cuongbphv/waxseal/\.github/workflows/publish-images\.yml@refs/tags/v' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     ghcr.io/cuongbphv/waxseal-server:<version>
+#
+# `--certificate-identity-regexp` rather than `--certificate-identity`: the
+# identity ends in the git ref, so an exact match would have to be re-typed for
+# every version. The anchored `refs/tags/v` is the load-bearing part — it says
+# the image was built by THIS workflow in THIS repository from a TAG, so a
+# signature produced by a `workflow_dispatch` run off a branch does not satisfy
+# it. Operators who also accept dispatch builds drop that suffix knowingly.
+#
+# Runs only when the repository OWNER publishes a release (or dispatches it by
+# hand). It pushes nothing on a pull request and nothing on a push to a branch,
+# by having no such trigger — not by an `if:` a later edit could drop.
+
+name: publish-images
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to build (e.g. v0.1.6). Defaults to the current ref."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  publish:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: waxseal (CLI)
+            image: ghcr.io/cuongbphv/waxseal
+            dockerfile: deploy/docker/Dockerfile
+          - name: waxseal-server
+            image: ghcr.io/cuongbphv/waxseal-server
+            dockerfile: server/Dockerfile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      # arm64 as well as amd64: an operator running this on Graviton or an
+      # Apple-silicon workstation should not be emulating the verifier.
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ matrix.image }}
+          # `latest` only for a real release. A prerelease that moved `latest`
+          # would hand `docker pull waxseal` to everyone who did not ask for a
+          # prerelease, which is the same class of surprise as an accidental
+          # schema migration (see CLAUDE.md's beads v1.2.2 incident).
+          flavor: |
+            latest=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.licenses=MIT
+
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          # The repository root for BOTH images. server/Dockerfile's own header
+          # requires it (it installs waxseal from this tree so the server and
+          # the library it verifies with are the same commit), and
+          # deploy/docker/Dockerfile builds its wheel from src/ the same way.
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.event.release.tag_name || inputs.tag || github.sha }}
+            REVISION=${{ github.sha }}
+          # An SBOM and max-mode provenance, so "what is in this image and
+          # where did it come from" is answerable from the registry rather than
+          # from a changelog. max mode records the build steps and their
+          # inputs, not just the final materials.
+          sbom: true
+          provenance: mode=max
+
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+
+      # Signed by DIGEST, never by tag. A tag is a mutable pointer: signing
+      # `image:1.2.3` would attest whatever that name resolves to at signing
+      # time, and a later push to the same tag would leave a valid signature
+      # sitting over bytes nobody signed. The digest is the content.
+      - name: cosign sign
+        run: cosign sign --yes "${{ matrix.image }}@${{ steps.build.outputs.digest }}"
+
+      # The verification command is printed by the run that produced the
+      # image, so an operator reading the release does not have to reconstruct
+      # it — and so a change to this workflow's path or name cannot leave the
+      # documented command silently wrong.
+      - name: how to verify what was just pushed
+        run: |
+          cat <<EOF
+          Pushed and signed: ${{ matrix.image }}@${{ steps.build.outputs.digest }}
+
+          Verify before deploying:
+
+            cosign verify \\
+              --certificate-identity-regexp '^https://github\\.com/${{ github.repository }}/\\.github/workflows/publish-images\\.yml@' \\
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+              ${{ matrix.image }}@${{ steps.build.outputs.digest }}
+          EOF

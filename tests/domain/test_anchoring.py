@@ -90,9 +90,7 @@ class TestRoundTrip:
     def test_reference_vectors_round_trip(self) -> None:
         for index in range(len(RFC_LEAVES)):
             proof = membership_proof(RFC_LEAVES, index)
-            assert verify_membership(
-                RFC_LEAVES[index], index, len(RFC_LEAVES), proof, RFC_ROOTS[8]
-            )
+            assert verify_membership(RFC_LEAVES[index], index, len(RFC_LEAVES), proof, RFC_ROOTS[8])
 
 
 class TestTamperRejection:
@@ -185,9 +183,7 @@ class TestConsistencyRoundTrip:
         for old_size in range(1, len(RFC_LEAVES) + 1):
             old_root = RFC_ROOTS[old_size]
             proof = consistency_proof(RFC_LEAVES, old_size)
-            assert verify_consistency(
-                old_root, old_size, RFC_ROOTS[8], len(RFC_LEAVES), proof
-            )
+            assert verify_consistency(old_root, old_size, RFC_ROOTS[8], len(RFC_LEAVES), proof)
 
 
 class TestConsistencyTamperRejection:
@@ -291,3 +287,37 @@ class TestConsistencyInvalidInputs:
     def test_consistency_proof_for_equal_sizes_is_empty(self) -> None:
         hashes = entry_hashes(8)
         assert consistency_proof(hashes, 8) == ()
+
+
+class TestIncrementalMerkle:
+    """P3: left-to-right RFC 6962 tree. Same root as batch_root at every
+    size; the saving is across successive prefixes, not a cheaper one-shot.
+    """
+
+    def test_pushing_one_by_one_matches_rfc6962_golden_vectors(self) -> None:
+        from waxseal.domain.anchoring import IncrementalMerkle
+
+        tree = IncrementalMerkle()
+        assert tree.root() == RFC_ROOTS[0]
+        for i, leaf in enumerate(RFC_LEAVES, start=1):
+            tree.push(leaf)
+            assert tree.size == i
+            assert tree.root() == RFC_ROOTS[i]
+            assert tree.root() == batch_root(RFC_LEAVES[:i])
+
+    @pytest.mark.parametrize("size", range(0, 66))
+    def test_from_hashes_matches_batch_root(self, size: int) -> None:
+        from waxseal.domain.anchoring import IncrementalMerkle
+
+        hashes = entry_hashes(size) if size else []
+        assert IncrementalMerkle.from_hashes(hashes).root() == batch_root(hashes)
+
+    def test_last_leaf_is_the_hash_just_pushed(self) -> None:
+        from waxseal.domain.anchoring import IncrementalMerkle
+
+        tree = IncrementalMerkle()
+        assert tree.last_leaf is None
+        tree.push(RFC_LEAVES[0])
+        assert tree.last_leaf == RFC_LEAVES[0]
+        tree.push(RFC_LEAVES[1])
+        assert tree.last_leaf == RFC_LEAVES[1]

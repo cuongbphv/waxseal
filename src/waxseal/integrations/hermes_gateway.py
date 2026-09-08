@@ -11,13 +11,13 @@ the pipeline, so every failure path degrades to a counted dropped write
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 from waxseal import AuditLog
 from waxseal.adapters.redactors import RegexRedactor
-from waxseal.integrations._trail import home_base, resolve_trail
+from waxseal.integrations._trail import hermes_home as _hermes_home
+from waxseal.integrations._trail import resolve_trail
 
 PAYLOAD_TYPE = "application/vnd.hermes.hook-event+json"
 
@@ -44,23 +44,6 @@ events:
 # One log per resolved trail path: hermes loads this module once per gateway
 # process, but tests (and multi-home setups) may vary HERMES_HOME.
 _logs: dict[Path, AuditLog] = {}
-
-
-def _hermes_home() -> Path:
-    env = os.environ.get("HERMES_HOME")
-    if env:
-        return Path(env)
-    try:
-        # Inside a hermes gateway this is the authoritative resolver.
-        from hermes_cli.config import get_hermes_home
-
-        return Path(get_hermes_home())
-    except Exception:
-        # home_base(), not Path.home(): the last rung has to honour HOME
-        # first or a host that sets it writes into a different Windows
-        # profile than `waxseal verify` reads (waxseal-fg4.3; the rule and
-        # the ntpath split are documented on home_base itself).
-        return home_base() / ".hermes"
 
 
 def _trail_path() -> Path:
@@ -105,9 +88,7 @@ def handle(event_type: str, context: dict[str, Any] | None) -> None:
         # best-effort (FileDropRecorder.record() never raises).
         from waxseal.adapters.drops import FileDropRecorder
 
-        FileDropRecorder(_trail_path()).record(
-            reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-        )
+        FileDropRecorder(_trail_path()).record(reason=type(e).__name__, payload_type=PAYLOAD_TYPE)
         return
     payload = {"event": event_type, **_sanitize(context or {})}
     if not log.try_append(payload=payload, payload_type=PAYLOAD_TYPE):

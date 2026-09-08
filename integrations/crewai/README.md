@@ -1,4 +1,4 @@
-# waxseal-audit — CrewAI integration
+# waxseal-audit - CrewAI integration
 
 Tamper-evident audit trail as a CrewAI event listener. Verified against
 crewai 1.15.17 (PyPI wheel source, 2026-08-21).
@@ -11,12 +11,12 @@ are redacted **before** hashing and storage.
 
 ```bash
 pip install waxseal crewai
-# no file to copy — the listener ships in the wheel:
+# no file to copy - the listener ships in the wheel:
 #   from waxseal.integrations.crewai import WaxsealEventListener
 ```
 
 Instantiate once at your entry point (crew.py / main.py / flow.py) and keep the
-reference alive — CrewAI's event bus is a global singleton and
+reference alive - CrewAI's event bus is a global singleton and
 `BaseEventListener.__init__` registers on it, so **construction is the
 registration**:
 
@@ -39,11 +39,11 @@ waxseal verify ~/.waxseal/crewai-trail.jsonl
 
 ## Design notes
 
-- CrewAI's bus wraps handlers in try/except and only prints failures — a raise
+- CrewAI's bus wraps handlers in try/except and only prints failures - a raise
   inside a listener is a **silently** dropped audit record. Every failure path
   here instead degrades to a labelled, counted dropped write on stderr
   (chain integrity ≠ trail completeness).
-- Events carry live agent/task/crew objects; those are deliberately not recorded —
+- Events carry live agent/task/crew objects; those are deliberately not recorded -
   the trail keeps the curated audit fields (tool_name, tool_args, agent_role,
   task_id, output, error, …), sanitized and clipped.
 - **Redact-before-hash**: cleartext keys in tool args never touch this trail.

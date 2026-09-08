@@ -1,0 +1,23 @@
+# Chart defaults, with both images pinned by DIGEST instead of tag. The digests
+# are placeholders of the right shape; a real one comes from
+# `cosign verify` or `docker buildx imagetools inspect` on the published image.
+# Renders `repository@sha256:...` with no tag in the reference. The anchor
+# CronJob is on so its image is exercised too, which needs one sink (the
+# chart refuses an anchor with nowhere to publish).
+image:
+  repository: ghcr.io/cuongbphv/waxseal-server
+  tag: "0.1.6"
+  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+  pullPolicy: IfNotPresent
+
+anchor:
+  enabled: true
+  image:
+    repository: ghcr.io/cuongbphv/waxseal
+    tag: "0.1.6"
+    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+    pullPolicy: IfNotPresent
+  trailPath: /var/lib/waxseal/chains/default/trail.jsonl
+  witnessUrls:
+    - https://witness.other-authority.example.invalid/v1/witness/waxseal
+  existingSecret: waxseal-anchor-credentials

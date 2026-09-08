@@ -47,8 +47,14 @@ class TestPositivelyDetectedDrop:
         path = trail_with_tickets(tmp_path, "iss", [0, 1, 3, 4])
         code = main(
             [
-                "reconcile-tickets", str(path),
-                "--issuer", "iss", "--lease-size", "4", "--issued", "0,1,2,3,4",
+                "reconcile-tickets",
+                str(path),
+                "--issuer",
+                "iss",
+                "--lease-size",
+                "4",
+                "--issued",
+                "0,1,2,3,4",
             ]
         )
         out = capsys.readouterr().out
@@ -62,8 +68,14 @@ class TestPositivelyDetectedDrop:
         path = trail_with_tickets(tmp_path, "iss", [0, 1, 3, 4])
         code = main(
             [
-                "reconcile-tickets", str(path),
-                "--issuer", "iss", "--lease-size", "4", "--issued", "0,1,2,3,4",
+                "reconcile-tickets",
+                str(path),
+                "--issuer",
+                "iss",
+                "--lease-size",
+                "4",
+                "--issued",
+                "0,1,2,3,4",
                 "--json",
             ]
         )
@@ -82,8 +94,14 @@ class TestBlindSpot:
         path = trail_with_tickets(tmp_path, "iss", [0])
         code = main(
             [
-                "reconcile-tickets", str(path),
-                "--issuer", "iss", "--lease-size", "4", "--issued", "0-3",
+                "reconcile-tickets",
+                str(path),
+                "--issuer",
+                "iss",
+                "--lease-size",
+                "4",
+                "--issued",
+                "0-3",
             ]
         )
         out = capsys.readouterr().out
@@ -98,8 +116,15 @@ class TestBlindSpot:
         path = trail_with_tickets(tmp_path, "iss", [0])
         main(
             [
-                "reconcile-tickets", str(path),
-                "--issuer", "iss", "--lease-size", "4", "--issued", "0-3", "--json",
+                "reconcile-tickets",
+                str(path),
+                "--issuer",
+                "iss",
+                "--lease-size",
+                "4",
+                "--issued",
+                "0-3",
+                "--json",
             ]
         )
         payload = json.loads(capsys.readouterr().out)
@@ -113,9 +138,7 @@ class TestIssuerUnreachable:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         path = trail_with_tickets(tmp_path, "iss", [0, 1, 2])
-        code = main(
-            ["reconcile-tickets", str(path), "--issuer", "iss", "--lease-size", "4"]
-        )
+        code = main(["reconcile-tickets", str(path), "--issuer", "iss", "--lease-size", "4"])
         out = capsys.readouterr().out
         assert code == 2
         assert "unmeasured" in out.lower()
@@ -139,8 +162,14 @@ class TestMalformedInput:
         path = trail_with_tickets(tmp_path, "iss", [0])
         code = main(
             [
-                "reconcile-tickets", str(path),
-                "--issuer", "iss", "--lease-size", "4", "--issued", "not-a-number",
+                "reconcile-tickets",
+                str(path),
+                "--issuer",
+                "iss",
+                "--lease-size",
+                "4",
+                "--issued",
+                "not-a-number",
             ]
         )
         out = capsys.readouterr().out
@@ -153,8 +182,14 @@ class TestMalformedInput:
         path = trail_with_tickets(tmp_path, "iss", [0])
         code = main(
             [
-                "reconcile-tickets", str(path),
-                "--issuer", "iss", "--lease-size", "4", "--issued", "5-2",
+                "reconcile-tickets",
+                str(path),
+                "--issuer",
+                "iss",
+                "--lease-size",
+                "4",
+                "--issued",
+                "5-2",
             ]
         )
         out = capsys.readouterr().out
@@ -167,8 +202,14 @@ class TestMalformedInput:
         path = trail_with_tickets(tmp_path, "iss", [0])
         code = main(
             [
-                "reconcile-tickets", str(path),
-                "--issuer", "iss", "--lease-size", "0", "--issued", "0",
+                "reconcile-tickets",
+                str(path),
+                "--issuer",
+                "iss",
+                "--lease-size",
+                "0",
+                "--issued",
+                "0",
             ]
         )
         out = capsys.readouterr().out
@@ -183,8 +224,14 @@ class TestUnreadableEntriesAndIssuerFiltering:
         path = trail_with_tickets(tmp_path, "other-issuer", [0, 1, 2, 3])
         code = main(
             [
-                "reconcile-tickets", str(path),
-                "--issuer", "iss", "--lease-size", "4", "--issued", "0-3",
+                "reconcile-tickets",
+                str(path),
+                "--issuer",
+                "iss",
+                "--lease-size",
+                "4",
+                "--issued",
+                "0-3",
             ]
         )
         out = capsys.readouterr().out
@@ -207,8 +254,15 @@ class TestUnreadableEntriesAndIssuerFiltering:
 
         code = main(
             [
-                "reconcile-tickets", str(path),
-                "--issuer", "iss", "--lease-size", "4", "--issued", "0", "--json",
+                "reconcile-tickets",
+                str(path),
+                "--issuer",
+                "iss",
+                "--lease-size",
+                "4",
+                "--issued",
+                "0",
+                "--json",
             ]
         )
         payload = json.loads(capsys.readouterr().out)
@@ -226,8 +280,14 @@ class TestNoTicketsIssuedYet:
         log.append(payload={"unrelated": True}, payload_type=OTHER_PT)
         code = main(
             [
-                "reconcile-tickets", str(path),
-                "--issuer", "iss", "--lease-size", "4", "--issued", "",
+                "reconcile-tickets",
+                str(path),
+                "--issuer",
+                "iss",
+                "--lease-size",
+                "4",
+                "--issued",
+                "",
             ]
         )
         out = capsys.readouterr().out
@@ -239,8 +299,14 @@ class TestMissingTrail:
     def test_nonexistent_trail_exits_3(self, tmp_path: Path) -> None:
         code = main(
             [
-                "reconcile-tickets", str(tmp_path / "nope.jsonl"),
-                "--issuer", "iss", "--lease-size", "4", "--issued", "0",
+                "reconcile-tickets",
+                str(tmp_path / "nope.jsonl"),
+                "--issuer",
+                "iss",
+                "--lease-size",
+                "4",
+                "--issued",
+                "0",
             ]
         )
         assert code == 3

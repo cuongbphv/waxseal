@@ -151,8 +151,10 @@ def main() -> None:
             ok_mine = verify_consistency(old_root, old_size, new_root, new_size, mine)
             ok_theirs = wx.verify_consistency(old_root, old_size, new_root, new_size, theirs)
             if not (ok_mine and ok_theirs):
-                print(f"VERIFY MISMATCH old={old_size} new={new_size}: "
-                      f"independent={ok_mine} waxseal={ok_theirs}")
+                print(
+                    f"VERIFY MISMATCH old={old_size} new={new_size}: "
+                    f"independent={ok_mine} waxseal={ok_theirs}"
+                )
                 sys.exit(1)
             checked += 1
     print(f"OK: {checked} (old_size, new_size) pairs match, sizes 1..{max_size}")

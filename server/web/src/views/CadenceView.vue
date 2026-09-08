@@ -8,8 +8,7 @@
  */
 
 import { useI18n } from '@/lib/i18n'
-import { runCadence } from '@/services/chains'
-import type { CadenceInput } from '@/lib/api'
+import { runCadenceForm } from '@/services/chains'
 import PageHeader from '@/components/ui/PageHeader.vue'
 import CommandForm, { type Field } from '@/components/app/CommandForm.vue'
 
@@ -26,7 +25,7 @@ const fields: readonly Field[] = [
 ]
 
 function run(values: Record<string, string>) {
-  return runCadence(values as unknown as CadenceInput)
+  return runCadenceForm(values)
 }
 </script>
 

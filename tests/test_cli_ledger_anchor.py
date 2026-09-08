@@ -23,7 +23,7 @@ from waxseal.cli import main
 LIVENESS_ADDR = "0x" + "11" * 20
 PT = "application/vnd.test.event+json"
 
-FAKE_SIGNER = '''
+FAKE_SIGNER = """
 import sys
 
 def main():
@@ -39,13 +39,13 @@ def main():
         sys.exit(2)
 
 main()
-'''
+"""
 
 
 @pytest.fixture
 def signer_cmd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     script = tmp_path / "fake_signer.py"
-    script.write_text(FAKE_SIGNER)
+    script.write_text(FAKE_SIGNER, encoding="utf-8")
     cmd = f"{sys.executable} {script}"
     monkeypatch.setenv("WAXSEAL_EVM_SIGNER_CMD", cmd)
     return cmd
@@ -74,7 +74,10 @@ def make_trail(path: Path) -> None:
 
 class TestEvmAnchor:
     def test_happy_path_records_an_evm_receipt(
-        self, tmp_path: Path, signer_cmd: str, two_write_nodes: Callable[[], list[str]],
+        self,
+        tmp_path: Path,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
@@ -82,8 +85,14 @@ class TestEvmAnchor:
         urls = two_write_nodes()
         code = main(
             [
-                "anchor", str(path), "--evm-rpc", urls[0], "--evm-rpc", urls[1],
-                "--evm-liveness", LIVENESS_ADDR,
+                "anchor",
+                str(path),
+                "--evm-rpc",
+                urls[0],
+                "--evm-rpc",
+                urls[1],
+                "--evm-liveness",
+                LIVENESS_ADDR,
             ]
         )
         out = capsys.readouterr().out
@@ -91,11 +100,16 @@ class TestEvmAnchor:
         record = json.loads(out.splitlines()[0])
         assert "seq" in record and "entry_hash" in record
 
-        sidecar = json.loads((path.parent / (path.name + ".anchors")).read_text().splitlines()[0])
+        sidecar = json.loads(
+            (path.parent / (path.name + ".anchors")).read_text(encoding="utf-8").splitlines()[0]
+        )
         assert sidecar["receipt"] == f"evm:31337:1:{TX_HASH}"
 
     def test_verify_anchors_sees_the_evm_receipt_as_structurally_ok_but_unverifiable_by_name(
-        self, tmp_path: Path, signer_cmd: str, two_write_nodes: Callable[[], list[str]],
+        self,
+        tmp_path: Path,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         # `verify --anchors` checks the checkpoint MATH (already correct,
@@ -111,8 +125,14 @@ class TestEvmAnchor:
         urls = two_write_nodes()
         main(
             [
-                "anchor", str(path), "--evm-rpc", urls[0], "--evm-rpc", urls[1],
-                "--evm-liveness", LIVENESS_ADDR,
+                "anchor",
+                str(path),
+                "--evm-rpc",
+                urls[0],
+                "--evm-rpc",
+                urls[1],
+                "--evm-liveness",
+                LIVENESS_ADDR,
             ]
         )
         capsys.readouterr()
@@ -135,8 +155,14 @@ class TestEvmAnchor:
         urls = two_write_nodes()
         code = main(
             [
-                "anchor", str(path), "--evm-rpc", urls[0], "--evm-rpc", urls[1],
-                "--evm-liveness", LIVENESS_ADDR,
+                "anchor",
+                str(path),
+                "--evm-rpc",
+                urls[0],
+                "--evm-rpc",
+                urls[1],
+                "--evm-liveness",
+                LIVENESS_ADDR,
             ]
         )
         err = capsys.readouterr().err
@@ -151,8 +177,12 @@ class TestEvmAnchor:
         make_trail(path)
         code = main(
             [
-                "anchor", str(path), "--evm-rpc", "http://only-one",
-                "--evm-liveness", LIVENESS_ADDR,
+                "anchor",
+                str(path),
+                "--evm-rpc",
+                "http://only-one",
+                "--evm-liveness",
+                LIVENESS_ADDR,
             ]
         )
         err = capsys.readouterr().err
@@ -160,7 +190,10 @@ class TestEvmAnchor:
         assert "could not prepare the anchor sink" in err
 
     def test_unreadable_consistency_proof_file_exits_1(
-        self, tmp_path: Path, signer_cmd: str, two_write_nodes: Callable[[], list[str]],
+        self,
+        tmp_path: Path,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
@@ -168,9 +201,16 @@ class TestEvmAnchor:
         urls = two_write_nodes()
         code = main(
             [
-                "anchor", str(path), "--evm-rpc", urls[0], "--evm-rpc", urls[1],
-                "--evm-liveness", LIVENESS_ADDR,
-                "--evm-consistency-proof-file", str(tmp_path / "nope.json"),
+                "anchor",
+                str(path),
+                "--evm-rpc",
+                urls[0],
+                "--evm-rpc",
+                urls[1],
+                "--evm-liveness",
+                LIVENESS_ADDR,
+                "--evm-consistency-proof-file",
+                str(tmp_path / "nope.json"),
             ]
         )
         err = capsys.readouterr().err
@@ -178,26 +218,39 @@ class TestEvmAnchor:
         assert "could not prepare the anchor sink" in err
 
     def test_consistency_proof_file_is_read_and_passed_through(
-        self, tmp_path: Path, signer_cmd: str, two_write_nodes: Callable[[], list[str]],
+        self,
+        tmp_path: Path,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
         make_trail(path)
         proof_path = tmp_path / "proof.json"
-        proof_path.write_text(json.dumps(["ab" * 32, "cd" * 32]))
+        proof_path.write_text(json.dumps(["ab" * 32, "cd" * 32]), encoding="utf-8")
         urls = two_write_nodes()
         code = main(
             [
-                "anchor", str(path), "--evm-rpc", urls[0], "--evm-rpc", urls[1],
-                "--evm-liveness", LIVENESS_ADDR,
-                "--evm-consistency-proof-file", str(proof_path),
+                "anchor",
+                str(path),
+                "--evm-rpc",
+                urls[0],
+                "--evm-rpc",
+                urls[1],
+                "--evm-liveness",
+                LIVENESS_ADDR,
+                "--evm-consistency-proof-file",
+                str(proof_path),
             ]
         )
         capsys.readouterr()
         assert code == 0
 
     def test_evm_trail_id_override(
-        self, tmp_path: Path, signer_cmd: str, two_write_nodes: Callable[[], list[str]],
+        self,
+        tmp_path: Path,
+        signer_cmd: str,
+        two_write_nodes: Callable[[], list[str]],
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "t.jsonl"
@@ -205,8 +258,16 @@ class TestEvmAnchor:
         urls = two_write_nodes()
         code = main(
             [
-                "anchor", str(path), "--evm-rpc", urls[0], "--evm-rpc", urls[1],
-                "--evm-liveness", LIVENESS_ADDR, "--evm-trail-id", "custom-trail",
+                "anchor",
+                str(path),
+                "--evm-rpc",
+                urls[0],
+                "--evm-rpc",
+                urls[1],
+                "--evm-liveness",
+                LIVENESS_ADDR,
+                "--evm-trail-id",
+                "custom-trail",
             ]
         )
         capsys.readouterr()

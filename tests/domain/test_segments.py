@@ -200,8 +200,9 @@ class TestVerifySegmentsHappyPath:
         # identity, so `mv` of the whole directory is not a break.
         segments = [
             base_segment("trail.00000"),
-            bound_segment("trail.00001", to_chain="a-different-slug/trail.00000", to_seq=1,
-                          to_hash=H1),
+            bound_segment(
+                "trail.00001", to_chain="a-different-slug/trail.00000", to_seq=1, to_hash=H1
+            ),
         ]
         assert verify_segments(segments).verdict is Verdict.OK
 

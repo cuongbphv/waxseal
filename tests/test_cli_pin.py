@@ -72,13 +72,13 @@ class TestFirstUse:
         pin = tmp_path / "pin.json"
         make_trail(trail, 4)
         main(["verify", str(trail), "--pin", str(pin)])
-        assert json.loads(pin.read_text())["seq"] == 3
+        assert json.loads(pin.read_text(encoding="utf-8"))["seq"] == 3
 
     def test_empty_trail_is_labelled_not_pinned(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         trail = tmp_path / "trail.jsonl"
-        trail.write_text("")
+        trail.write_text("", encoding="utf-8")
         pin = tmp_path / "pin.json"
         assert main(["verify", str(trail), "--pin", str(pin)]) == 0
         assert "nothing to pin" in capsys.readouterr().out
@@ -106,7 +106,7 @@ class TestSteadyState:
         make_trail(trail, 2, start=2)
 
         assert main(["verify", str(trail), "--pin", str(pin)]) == 0
-        assert json.loads(pin.read_text())["seq"] == 3
+        assert json.loads(pin.read_text(encoding="utf-8"))["seq"] == 3
 
 
 class TestRewrittenHistory:
@@ -136,8 +136,8 @@ class TestRewrittenHistory:
         make_trail(trail, 4)
         main(["verify", str(trail), "--pin", str(pin)])
         capsys.readouterr()
-        lines = trail.read_text().splitlines()
-        trail.write_text("\n".join(lines[:2]) + "\n")
+        lines = trail.read_text(encoding="utf-8").splitlines()
+        trail.write_text("\n".join(lines[:2]) + "\n", encoding="utf-8")
 
         assert main(["verify", str(trail), "--pin", str(pin)]) == 1
         assert "pin_beyond_head" in capsys.readouterr().out
@@ -165,11 +165,11 @@ class TestRewrittenHistory:
         before = pin.read_bytes()
 
         make_trail(trail, 1, start=3)
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         obj = json.loads(lines[3])
         obj["header"]["ts"] = "2027-01-01T00:00:00+00:00"
         lines[3] = json.dumps(obj)
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         assert main(["verify", str(trail), "--pin", str(pin)]) == 1
         assert pin.read_bytes() == before
@@ -188,7 +188,7 @@ class TestUnreadablePinState:
         assert "malformed_pin" in capsys.readouterr().out
         # The re-pin attack: an attacker who corrupts the pin must not get a
         # fresh trust-on-first-use over the trail they just rewrote.
-        assert pin.read_text() == "{ garbage"
+        assert pin.read_text(encoding="utf-8") == "{ garbage"
 
     def test_unknown_version_is_unverifiable_not_tampered(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -235,7 +235,7 @@ class TestUnreadablePinState:
         )
         pin.write_text(payload, encoding="utf-8")
         main(["verify", str(trail), "--pin", str(pin)])
-        assert pin.read_text() == payload
+        assert pin.read_text(encoding="utf-8") == payload
 
 
 class TestTargetMismatch:
@@ -289,12 +289,12 @@ class TestCompositionWithOtherDimensions:
         trail = tmp_path / "trail.jsonl"
         pin = tmp_path / "pin.json"
         make_trail(trail, 2)
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         obj = json.loads(lines[1])
         obj["header"]["hash_version"] = "e" * 64
         obj["entry_hash"] = compute_entry_hash(EntryHeader(**obj["header"]))
         lines[1] = json.dumps(obj)
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         assert main(["verify", str(trail), "--pin", str(pin)]) == 2
         out = capsys.readouterr().out
@@ -312,9 +312,9 @@ class TestCompositionWithOtherDimensions:
         capsys.readouterr()
 
         anchors = Path(str(trail) + ".anchors")
-        record = json.loads(anchors.read_text().strip())
+        record = json.loads(anchors.read_text(encoding="utf-8").strip())
         record["root"] = "c" * 64
-        anchors.write_text(json.dumps(record) + "\n")
+        anchors.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
         assert main(["verify", str(trail), "--pin", str(pin), "--anchors"]) == 1
         out = capsys.readouterr().out
@@ -330,17 +330,17 @@ class TestCompositionWithOtherDimensions:
         pin = tmp_path / "pin.json"
         make_trail(trail, 2)
         main(["verify", str(trail), "--pin", str(pin)])
-        before = json.loads(pin.read_text())["seq"]
+        before = json.loads(pin.read_text(encoding="utf-8"))["seq"]
 
         main(["anchor", str(trail)])
         anchors = Path(str(trail) + ".anchors")
-        record = json.loads(anchors.read_text().strip())
+        record = json.loads(anchors.read_text(encoding="utf-8").strip())
         record["root"] = "c" * 64
-        anchors.write_text(json.dumps(record) + "\n")
+        anchors.write_text(json.dumps(record) + "\n", encoding="utf-8")
         make_trail(trail, 2, start=2)
 
         assert main(["verify", str(trail), "--pin", str(pin), "--anchors"]) == 1
-        assert json.loads(pin.read_text())["seq"] == before
+        assert json.loads(pin.read_text(encoding="utf-8"))["seq"] == before
 
 
 class TestInjectableClock:
@@ -365,7 +365,7 @@ class TestInjectableClock:
             now_fn=lambda: fixed,
         )
         assert code == 0
-        assert json.loads(pin.read_text())["pinned_ts"] == fixed.isoformat()
+        assert json.loads(pin.read_text(encoding="utf-8"))["pinned_ts"] == fixed.isoformat()
 
 
 class TestReportSurface:
@@ -499,8 +499,8 @@ class TestRemoteTarget:
             log.append(payload={"i": 0}, payload_type=PT)
             main(["verify", url, "--pin", str(pin)])
             capsys.readouterr()
-            assert json.loads(pin.read_text())["target"] == url
-            assert json.loads(pin.read_text())["chain_id"] == "default"
+            assert json.loads(pin.read_text(encoding="utf-8"))["target"] == url
+            assert json.loads(pin.read_text(encoding="utf-8"))["chain_id"] == "default"
         finally:
             httpd.shutdown()
             thread.join(timeout=5)
@@ -569,10 +569,12 @@ def _duplicate_anchor_record(trail: Path, *, sink: str) -> None:
     agree on the same checkpoint.
     """
     anchors = Path(str(trail) + ".anchors")
-    lines = anchors.read_text().splitlines()
+    lines = anchors.read_text(encoding="utf-8").splitlines()
     record = json.loads(lines[-1])
     record["sink"] = sink
-    anchors.write_text(anchors.read_text() + json.dumps(record) + "\n")
+    anchors.write_text(
+        anchors.read_text(encoding="utf-8") + json.dumps(record) + "\n", encoding="utf-8"
+    )
 
 
 def _add_declared_topology(
@@ -597,7 +599,7 @@ def _add_declared_topology(
     `domain/pinning.py`'s own omit-when-undeclared round-trip so a caller
     that leaves it out gets exactly the pre-fg4.45 shape.
     """
-    state = json.loads(pin.read_text())
+    state = json.loads(pin.read_text(encoding="utf-8"))
     topology: dict[str, object] = {
         "seal_escrow": seal_escrow,
         "anchor_sinks": anchor_sinks,
@@ -607,7 +609,7 @@ def _add_declared_topology(
     if ledger is not None:
         topology["ledger"] = ledger
     state["declared_topology"] = topology
-    pin.write_text(json.dumps(state))
+    pin.write_text(json.dumps(state), encoding="utf-8")
 
 
 class TestDeclaredTopologyShortfall:
@@ -737,7 +739,8 @@ class TestDeclaredTopologyShortfall:
                     "root": head.root,
                     "pinned_ts": "2026-08-23T09:00:00+00:00",
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         assert main(["verify", str(trail), "--pin", str(pin)]) == 0
@@ -759,7 +762,7 @@ class TestDeclaredTopologyShortfall:
         make_trail(trail, 1, start=2)
         main(["verify", str(trail), "--pin", str(pin)])
 
-        assert json.loads(pin.read_text())["declared_topology"] == {
+        assert json.loads(pin.read_text(encoding="utf-8"))["declared_topology"] == {
             "seal_escrow": True,
             "anchor_sinks": 1,
             "witness": False,
@@ -827,9 +830,7 @@ class TestLedgerShortfall:
 
     LIVENESS = "0x" + "33" * 20
 
-    def _two_nodes(
-        self, handler: object
-    ) -> tuple[list[str], tuple[object, object]]:
+    def _two_nodes(self, handler: object) -> tuple[list[str], tuple[object, object]]:
         from tests._fake_evm_rpc import start_fake_node
 
         url_a, server_a = start_fake_node(handler)  # type: ignore[arg-type]
@@ -862,8 +863,16 @@ class TestLedgerShortfall:
         try:
             code = main(
                 [
-                    "verify", str(trail), "--pin", str(pin),
-                    "--liveness", self.LIVENESS, "--rpc", urls[0], "--rpc", urls[1],
+                    "verify",
+                    str(trail),
+                    "--pin",
+                    str(pin),
+                    "--liveness",
+                    self.LIVENESS,
+                    "--rpc",
+                    urls[0],
+                    "--rpc",
+                    urls[1],
                 ]
             )
         finally:
@@ -890,8 +899,16 @@ class TestLedgerShortfall:
         try:
             code = main(
                 [
-                    "verify", str(trail), "--pin", str(pin),
-                    "--liveness", self.LIVENESS, "--rpc", urls[0], "--rpc", urls[1],
+                    "verify",
+                    str(trail),
+                    "--pin",
+                    str(pin),
+                    "--liveness",
+                    self.LIVENESS,
+                    "--rpc",
+                    urls[0],
+                    "--rpc",
+                    urls[1],
                 ]
             )
         finally:
@@ -947,8 +964,16 @@ class TestLedgerShortfall:
         try:
             code = main(
                 [
-                    "verify", str(trail), "--pin", str(pin),
-                    "--liveness", self.LIVENESS, "--rpc", urls[0], "--rpc", urls[1],
+                    "verify",
+                    str(trail),
+                    "--pin",
+                    str(pin),
+                    "--liveness",
+                    self.LIVENESS,
+                    "--rpc",
+                    urls[0],
+                    "--rpc",
+                    urls[1],
                 ]
             )
         finally:
@@ -975,7 +1000,7 @@ class TestLedgerShortfall:
         make_trail(trail, 1, start=2)
         main(["verify", str(trail), "--pin", str(pin)])
 
-        assert json.loads(pin.read_text())["declared_topology"]["ledger"] is True
+        assert json.loads(pin.read_text(encoding="utf-8"))["declared_topology"]["ledger"] is True
 
     def test_a_declared_ledger_raises_tau(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -1003,9 +1028,9 @@ def _add_max_anchor_age(pin: Path, *, max_anchor_age_s: int) -> None:
     not-yet-built CLI flag to declare one (out of this bead's scope — only
     `domain/pinning.py` parse/render and the `cli.py` comparison are wired
     here)."""
-    state = json.loads(pin.read_text())
+    state = json.loads(pin.read_text(encoding="utf-8"))
     state["max_anchor_age_s"] = max_anchor_age_s
-    pin.write_text(json.dumps(state))
+    pin.write_text(json.dumps(state), encoding="utf-8")
 
 
 def _set_last_anchor_ts(trail: Path, ts: str) -> None:
@@ -1013,20 +1038,20 @@ def _set_last_anchor_ts(trail: Path, ts: str) -> None:
     checkpoint (seq/entry_hash/root) untouched so `verify --anchors` still
     finds it consistent — only the anchor_staleness input changes."""
     anchors = Path(str(trail) + ".anchors")
-    lines = anchors.read_text().splitlines()
+    lines = anchors.read_text(encoding="utf-8").splitlines()
     record = json.loads(lines[-1])
     record["ts"] = ts
     lines[-1] = json.dumps(record)
-    anchors.write_text("\n".join(lines) + "\n")
+    anchors.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _add_expect_anchor_binding(pin: Path, *, expect_anchor_binding: bool = True) -> None:
     """Hand-edit a pin file to add `expect_anchor_binding` directly,
     bypassing `--expect-anchor-binding` (waxseal-ekd) — kept for tests of
     the comparison logic itself in isolation from the CLI writer."""
-    state = json.loads(pin.read_text())
+    state = json.loads(pin.read_text(encoding="utf-8"))
     state["expect_anchor_binding"] = expect_anchor_binding
-    pin.write_text(json.dumps(state))
+    pin.write_text(json.dumps(state), encoding="utf-8")
 
 
 def _append_anchor_record(
@@ -1065,7 +1090,7 @@ def _append_anchor_record(
         record["agg_commit"] = agg_commit
         record["agg_epoch"] = agg_epoch
     anchors = Path(str(trail) + ".anchors")
-    with open(anchors, "a") as f:
+    with open(anchors, "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
 
 
@@ -1075,7 +1100,7 @@ def _append_unreadable_anchor_record(trail: Path, *, v: str = "99") -> None:
     unreadable-by-name without even inspecting the rest of the record (see
     its own source), so no seq/entry_hash/root is needed here."""
     anchors = Path(str(trail) + ".anchors")
-    with open(anchors, "a") as f:
+    with open(anchors, "a", encoding="utf-8") as f:
         f.write(json.dumps({"v": v}) + "\n")
 
 
@@ -1091,9 +1116,7 @@ class TestAnchorStaleness:
 
     FIXED = datetime(2026, 8, 29, 12, 0, 0, tzinfo=UTC)
 
-    def _verify_at(
-        self, trail: Path, *, pin: Path, check_anchors: bool = True
-    ) -> int:
+    def _verify_at(self, trail: Path, *, pin: Path, check_anchors: bool = True) -> int:
         from waxseal.cli import _verify
 
         return _verify(
@@ -1247,7 +1270,8 @@ class TestAnchorStaleness:
                     "root": head.root,
                     "pinned_ts": "2026-08-23T09:00:00+00:00",
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         main(["anchor", str(trail)])
         _set_last_anchor_ts(trail, "2000-01-01T00:00:00+00:00")
@@ -1257,7 +1281,7 @@ class TestAnchorStaleness:
         assert code == 0
         assert "pin ok" in out
         assert "anchor_stale" not in out
-        assert "max_anchor_age_s" not in json.loads(pin.read_text())
+        assert "max_anchor_age_s" not in json.loads(pin.read_text(encoding="utf-8"))
 
     def test_max_anchor_age_survives_a_pin_advance(self, tmp_path: Path) -> None:
         # Exit 2 still advances the pin (SPEC.md section 13: unverifiable is
@@ -1274,7 +1298,7 @@ class TestAnchorStaleness:
         make_trail(trail, 1, start=2)
         main(["verify", str(trail), "--pin", str(pin)])
 
-        assert json.loads(pin.read_text())["max_anchor_age_s"] == 3600
+        assert json.loads(pin.read_text(encoding="utf-8"))["max_anchor_age_s"] == 3600
 
     def test_staleness_is_checked_before_separation_shortfall(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -1289,7 +1313,7 @@ class TestAnchorStaleness:
         main(["verify", str(trail), "--pin", str(pin), "--anchors"])
         capsys.readouterr()
 
-        pin_obj = json.loads(pin.read_text())
+        pin_obj = json.loads(pin.read_text(encoding="utf-8"))
         pin_obj["max_anchor_age_s"] = 3600
         pin_obj["declared_topology"] = {
             "seal_escrow": True,
@@ -1297,7 +1321,7 @@ class TestAnchorStaleness:
             "witness": True,
             "pin_separate": True,
         }
-        pin.write_text(json.dumps(pin_obj))
+        pin.write_text(json.dumps(pin_obj), encoding="utf-8")
         _set_last_anchor_ts(trail, "2000-01-01T00:00:00+00:00")
 
         code = self._verify_at(trail, pin=pin)
@@ -1320,9 +1344,7 @@ class TestAnchorPolicyDowngrade:
     uncorroborated.
     """
 
-    def _verify_at(
-        self, trail: Path, *, pin: Path, check_anchors: bool = True
-    ) -> int:
+    def _verify_at(self, trail: Path, *, pin: Path, check_anchors: bool = True) -> int:
         from waxseal.cli import _verify
 
         return _verify(
@@ -1365,7 +1387,7 @@ class TestAnchorPolicyDowngrade:
         capsys.readouterr()
 
         _add_expect_anchor_binding(pin)
-        pinned_seq = json.loads(pin.read_text())["seq"]
+        pinned_seq = json.loads(pin.read_text(encoding="utf-8"))["seq"]
         _append_anchor_record(trail, seq=pinned_seq, agg_commit="commit-1", agg_epoch=1)
 
         code = self._verify_at(trail, pin=pin)
@@ -1387,7 +1409,7 @@ class TestAnchorPolicyDowngrade:
         capsys.readouterr()
 
         _add_expect_anchor_binding(pin)
-        assert json.loads(pin.read_text())["seq"] == 4
+        assert json.loads(pin.read_text(encoding="utf-8"))["seq"] == 4
 
         code = self._verify_at(trail, pin=pin)
         out = capsys.readouterr().out
@@ -1479,7 +1501,8 @@ class TestAnchorPolicyDowngrade:
                     "root": head.root,
                     "pinned_ts": "2026-08-23T09:00:00+00:00",
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         main(["anchor", str(trail)])
 
@@ -1492,7 +1515,7 @@ class TestAnchorPolicyDowngrade:
         # declared_topology/max_anchor_age_s's omit-when-absent
         # convention) — an old pin file with the key missing entirely
         # still advances to an explicit False, never an error.
-        assert json.loads(pin.read_text())["expect_anchor_binding"] is False
+        assert json.loads(pin.read_text(encoding="utf-8"))["expect_anchor_binding"] is False
 
     def test_downgrade_survives_a_pin_advance(self, tmp_path: Path) -> None:
         # Exit 2 still advances the pin (SPEC.md section 13: unverifiable is
@@ -1510,7 +1533,7 @@ class TestAnchorPolicyDowngrade:
         make_trail(trail, 1, start=2)
         self._verify_at(trail, pin=pin)
 
-        assert json.loads(pin.read_text())["expect_anchor_binding"] is True
+        assert json.loads(pin.read_text(encoding="utf-8"))["expect_anchor_binding"] is True
 
     def test_downgrade_is_checked_before_anchor_staleness(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -1525,10 +1548,10 @@ class TestAnchorPolicyDowngrade:
         main(["verify", str(trail), "--pin", str(pin), "--anchors"])
         capsys.readouterr()
 
-        pin_obj = json.loads(pin.read_text())
+        pin_obj = json.loads(pin.read_text(encoding="utf-8"))
         pin_obj["expect_anchor_binding"] = True
         pin_obj["max_anchor_age_s"] = 3600
-        pin.write_text(json.dumps(pin_obj))
+        pin.write_text(json.dumps(pin_obj), encoding="utf-8")
         _set_last_anchor_ts(trail, "2000-01-01T00:00:00+00:00")  # ancient -> stale too
 
         code = self._verify_at(trail, pin=pin)
@@ -1564,8 +1587,7 @@ class TestDeclaredTopologySpecParsing:
 
         with pytest.raises(ValueError, match="given more than once"):
             _parse_declared_topology_spec(
-                "seal_escrow=true,seal_escrow=false,anchor_sinks=2,"
-                "witness=true,pin_separate=true"
+                "seal_escrow=true,seal_escrow=false,anchor_sinks=2,witness=true,pin_separate=true"
             )
 
     def test_an_unknown_field_is_rejected(self) -> None:
@@ -1573,8 +1595,7 @@ class TestDeclaredTopologySpecParsing:
 
         with pytest.raises(ValueError, match="unknown declared_topology field"):
             _parse_declared_topology_spec(
-                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
-                "extra=true"
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,extra=true"
             )
 
     def test_a_non_boolean_value_is_rejected(self) -> None:
@@ -1600,8 +1621,7 @@ class TestDeclaredTopologySpecParsing:
         from waxseal.cli import _parse_declared_topology_spec
 
         topology = _parse_declared_topology_spec(
-            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
-            "ledger=true"
+            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,ledger=true"
         )
         assert topology.ledger is True
 
@@ -1609,8 +1629,7 @@ class TestDeclaredTopologySpecParsing:
         from waxseal.cli import _parse_declared_topology_spec
 
         topology = _parse_declared_topology_spec(
-            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
-            "ledger=false"
+            "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,ledger=false"
         )
         assert topology.ledger is False
 
@@ -1636,8 +1655,7 @@ class TestDeclaredTopologySpecParsing:
 
         with pytest.raises(ValueError, match="must be 'true' or 'false'"):
             _parse_declared_topology_spec(
-                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,"
-                "ledger=maybe"
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=true,ledger=maybe"
             )
 
 
@@ -1649,17 +1667,13 @@ class TestDeclareViaCLI:
     `_add_expect_anchor_binding` as a stand-in for exactly this.
     """
 
-    def test_expect_anchor_binding_alone_is_true_others_omitted(
-        self, tmp_path: Path
-    ) -> None:
+    def test_expect_anchor_binding_alone_is_true_others_omitted(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
         pin = tmp_path / "pin.json"
         make_trail(trail, 2)
 
-        assert (
-            main(["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"]) == 0
-        )
-        state = json.loads(pin.read_text())
+        assert main(["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"]) == 0
+        state = json.loads(pin.read_text(encoding="utf-8"))
         assert state["expect_anchor_binding"] is True
         assert "max_anchor_age_s" not in state
         assert "declared_topology" not in state
@@ -1670,7 +1684,7 @@ class TestDeclareViaCLI:
         make_trail(trail, 2)
 
         assert main(["verify", str(trail), "--pin", str(pin), "--max-anchor-age-s", "3600"]) == 0
-        state = json.loads(pin.read_text())
+        state = json.loads(pin.read_text(encoding="utf-8"))
         assert state["max_anchor_age_s"] == 3600
         assert state["expect_anchor_binding"] is False
         assert "declared_topology" not in state
@@ -1684,13 +1698,16 @@ class TestDeclareViaCLI:
 
         code = main(
             [
-                "verify", str(trail), "--pin", str(pin),
+                "verify",
+                str(trail),
+                "--pin",
+                str(pin),
                 "--declare-topology",
                 "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false",
             ]
         )
         assert code == 0
-        state = json.loads(pin.read_text())
+        state = json.loads(pin.read_text(encoding="utf-8"))
         assert state["declared_topology"] == {
             "seal_escrow": True,
             "anchor_sinks": 2,
@@ -1711,14 +1728,16 @@ class TestDeclareViaCLI:
 
         code = main(
             [
-                "verify", str(trail), "--pin", str(pin),
+                "verify",
+                str(trail),
+                "--pin",
+                str(pin),
                 "--declare-topology",
-                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false,"
-                "ledger=true",
+                "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false,ledger=true",
             ]
         )
         assert code == 0
-        state = json.loads(pin.read_text())
+        state = json.loads(pin.read_text(encoding="utf-8"))
         assert state["declared_topology"] == {
             "seal_escrow": True,
             "anchor_sinks": 2,
@@ -1740,13 +1759,16 @@ class TestDeclareViaCLI:
 
         code = main(
             [
-                "verify", str(trail), "--pin", str(pin),
+                "verify",
+                str(trail),
+                "--pin",
+                str(pin),
                 "--declare-topology",
                 "seal_escrow=true,anchor_sinks=2,witness=true,pin_separate=false",
             ]
         )
         assert code == 0
-        state = json.loads(pin.read_text())
+        state = json.loads(pin.read_text(encoding="utf-8"))
         assert "ledger" not in state["declared_topology"]
 
     def test_declare_topology_partial_is_a_cli_usage_error(
@@ -1759,9 +1781,13 @@ class TestDeclareViaCLI:
         with pytest.raises(SystemExit) as exc:
             main(
                 [
-                    "verify", str(trail), "--pin", str(pin),
+                    "verify",
+                    str(trail),
+                    "--pin",
+                    str(pin),
                     # missing witness/pin_separate — never silently False-filled
-                    "--declare-topology", "seal_escrow=true,anchor_sinks=2",
+                    "--declare-topology",
+                    "seal_escrow=true,anchor_sinks=2",
                 ]
             )
         assert exc.value.code == 2
@@ -1792,25 +1818,21 @@ class TestDeclareViaCLI:
         pin = tmp_path / "pin.json"
         make_trail(trail, 3)
         main(["verify", str(trail), "--pin", str(pin)])
-        before = pin.read_text()
+        before = pin.read_text(encoding="utf-8")
         rewrite_whole_trail(trail, 3)
 
-        code = main(
-            ["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"]
-        )
+        code = main(["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"])
         capsys.readouterr()
         assert code == 1
-        assert pin.read_text() == before
+        assert pin.read_text(encoding="utf-8") == before
 
     def test_declare_on_report_pin_flow_too(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
         pin = tmp_path / "pin.json"
         make_trail(trail, 2)
 
-        assert (
-            main(["report", str(trail), "--pin", str(pin), "--expect-anchor-binding"]) == 0
-        )
-        assert json.loads(pin.read_text())["expect_anchor_binding"] is True
+        assert main(["report", str(trail), "--pin", str(pin), "--expect-anchor-binding"]) == 0
+        assert json.loads(pin.read_text(encoding="utf-8"))["expect_anchor_binding"] is True
 
     def test_declaring_again_without_the_flag_preserves_the_prior_declaration(
         self, tmp_path: Path
@@ -1822,7 +1844,7 @@ class TestDeclareViaCLI:
 
         make_trail(trail, 1, start=2)
         assert main(["verify", str(trail), "--pin", str(pin)]) == 0
-        assert json.loads(pin.read_text())["max_anchor_age_s"] == 3600
+        assert json.loads(pin.read_text(encoding="utf-8"))["max_anchor_age_s"] == 3600
 
     def test_old_pin_without_the_fields_then_declaring_on_the_next_run_works(
         self, tmp_path: Path
@@ -1851,15 +1873,14 @@ class TestDeclareViaCLI:
                     "root": head.root,
                     "pinned_ts": "2020-01-01T00:00:00+00:00",
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         make_trail(trail, 1, start=3)
-        code = main(
-            ["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"]
-        )
+        code = main(["verify", str(trail), "--pin", str(pin), "--expect-anchor-binding"])
         assert code == 0
-        state = json.loads(pin.read_text())
+        state = json.loads(pin.read_text(encoding="utf-8"))
         assert state["expect_anchor_binding"] is True
         assert "max_anchor_age_s" not in state
         assert "declared_topology" not in state

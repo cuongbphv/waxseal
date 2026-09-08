@@ -43,7 +43,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def run_verify(trail: Path) -> tuple[int, str]:
     proc = subprocess.run(
         [sys.executable, "-m", "waxseal.cli", "verify", str(trail)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return proc.returncode, proc.stdout.strip()
 
@@ -56,7 +57,10 @@ def main() -> int:
     def fire(event: dict) -> None:
         proc = subprocess.run(
             [sys.executable, str(HOOK)],
-            input=json.dumps(event), capture_output=True, text=True, env=env,
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+            env=env,
         )
         # The observe-only contract: exit 0 always; stdout stays empty because
         # Claude Code injects/parses it (UserPromptSubmit -> model context).
@@ -66,14 +70,41 @@ def main() -> int:
     leaked = "export GITHUB_TOKEN=ghp_16C7e42F292c6912E7710c838347Ae178B4a"
     common = {"session_id": "s1", "cwd": "/work/project", "permission_mode": "default"}
     fire({**common, "hook_event_name": "SessionStart"})
-    fire({**common, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "t1",
-          "tool_input": {"command": leaked}})
-    fire({**common, "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": "t1",
-          "tool_input": {"command": "export GITHUB_TOKEN=..."}, "tool_output": "ok"})
-    fire({**common, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "t2",
-          "tool_input": {"command": "kubectl apply -f deploy.yaml"}})
-    fire({**common, "hook_event_name": "UserPromptSubmit",
-          "prompt": "here is my key sk-usersecret1234567890abcdef please fix the deploy"})
+    fire(
+        {
+            **common,
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "t1",
+            "tool_input": {"command": leaked},
+        }
+    )
+    fire(
+        {
+            **common,
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "t1",
+            "tool_input": {"command": "export GITHUB_TOKEN=..."},
+            "tool_output": "ok",
+        }
+    )
+    fire(
+        {
+            **common,
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "t2",
+            "tool_input": {"command": "kubectl apply -f deploy.yaml"},
+        }
+    )
+    fire(
+        {
+            **common,
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "here is my key sk-usersecret1234567890abcdef please fix the deploy",
+        }
+    )
 
     print("\nScenario 1 — audited session verifies clean (hook stayed observe-only)")
     code, out = run_verify(trail)
@@ -81,13 +112,16 @@ def main() -> int:
 
     print("\nScenario 5 — secrets never reach disk")
     decoded = b"\n".join(
-        base64.b64decode(json.loads(line)["payload_b64"])
-        for line in trail.read_text().splitlines()
+        base64.b64decode(json.loads(line)["payload_b64"]) for line in trail.read_text().splitlines()
     )
-    check("agent-leaked GitHub token absent from decoded payloads",
-          b"ghp_16C7e42F292c6912E7710c838347Ae178B4a" not in decoded)
-    check("user-pasted API key absent from decoded payloads",
-          b"sk-usersecret1234567890abcdef" not in decoded)
+    check(
+        "agent-leaked GitHub token absent from decoded payloads",
+        b"ghp_16C7e42F292c6912E7710c838347Ae178B4a" not in decoded,
+    )
+    check(
+        "user-pasted API key absent from decoded payloads",
+        b"sk-usersecret1234567890abcdef" not in decoded,
+    )
     check("redaction marker present in decoded payloads", b"***REDACTED***" in decoded)
 
     print("\nScenario 2 — attacker rewrites a past action")
@@ -126,15 +160,28 @@ def main() -> int:
         prev_hash=last["entry_hash"],
     )
     future = tmp / "future.jsonl"
-    future.write_text("\n".join(lines + [json.dumps({
-        "header": {
-            "seq": header.seq, "ts": header.ts, "hash_version": header.hash_version,
-            "payload_type": header.payload_type, "payload_hash": header.payload_hash,
-            "prev_hash": header.prev_hash,
-        },
-        "entry_hash": compute_entry_hash(header),
-        "payload_b64": base64.b64encode(new_payload).decode(),
-    })]) + "\n")
+    future.write_text(
+        "\n".join(
+            lines
+            + [
+                json.dumps(
+                    {
+                        "header": {
+                            "seq": header.seq,
+                            "ts": header.ts,
+                            "hash_version": header.hash_version,
+                            "payload_type": header.payload_type,
+                            "payload_hash": header.payload_hash,
+                            "prev_hash": header.prev_hash,
+                        },
+                        "entry_hash": compute_entry_hash(header),
+                        "payload_b64": base64.b64encode(new_payload).decode(),
+                    }
+                )
+            ]
+        )
+        + "\n"
+    )
     code, out = run_verify(future)
     check("unknown schema -> exit 2, not broken", code == 2, out)
     check("reported unverifiable, NOT tampering", "NOT evidence of tampering" in out)

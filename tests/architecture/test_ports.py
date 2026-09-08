@@ -21,9 +21,7 @@ import pytest
 
 import waxseal.ports
 
-PORT_MODULES = sorted(
-    module.name for module in pkgutil.iter_modules(waxseal.ports.__path__)
-)
+PORT_MODULES = sorted(module.name for module in pkgutil.iter_modules(waxseal.ports.__path__))
 
 
 def test_the_package_actually_has_ports() -> None:

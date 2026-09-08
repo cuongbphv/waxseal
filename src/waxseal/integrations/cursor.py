@@ -40,49 +40,53 @@ prompt reaches this trail only as ***REDACTED***.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any
 
-from waxseal.adapters.redactors import RegexRedactor
-from waxseal.integrations._archive import archive_destination
+from waxseal.integrations import _sanitize as _sanitize_impl
+from waxseal.integrations._stdin_hook import run_stdin_hook
 from waxseal.integrations._trail import home_base, resolve_trail, routed_trail
-from waxseal.sources.rotation import (
-    DEFAULT_MAX_SEGMENT_BYTES,
-    active_segment,
-    open_segmented,
-)
+from waxseal.sources.rotation import DEFAULT_MAX_SEGMENT_BYTES
 
-# _sanitize redacts BEFORE clipping: a clip can split a secret across the
-# boundary (a PEM losing its END marker stops matching) and land it on disk.
-_REDACTOR = RegexRedactor()
+MAX_FIELD_CHARS = _sanitize_impl.MAX_FIELD_CHARS
+_sanitize = _sanitize_impl.sanitize
 
 PAYLOAD_TYPE = "application/vnd.cursor.hook-event+json"
-
-# Shell outputs and file contents can be megabytes. Clip stored fields,
-# visibly, because silent truncation would read as "the full output".
-MAX_FIELD_CHARS = 4096
 
 # Per-event fields worth keeping, on top of the common envelope. Unlisted
 # fields (e.g. beforeReadFile's full file content) are deliberately dropped:
 # the trail records actions, not a copy of the workspace.
 _EVENT_FIELDS = (
-    "command", "cwd", "output", "duration", "sandbox",
-    "tool_name", "tool_input", "result_json", "url",
-    "file_path", "edits", "prompt", "attachments", "status", "loop_count",
-    "error_message", "failure_type",
+    "command",
+    "cwd",
+    "output",
+    "duration",
+    "sandbox",
+    "tool_name",
+    "tool_input",
+    "result_json",
+    "url",
+    "file_path",
+    "edits",
+    "prompt",
+    "attachments",
+    "status",
+    "loop_count",
+    "error_message",
+    "failure_type",
 )
 _COMMON_FIELDS = (
-    "conversation_id", "generation_id", "model", "workspace_roots",
+    "conversation_id",
+    "generation_id",
+    "model",
+    "workspace_roots",
 )
 
 
 def _trail_path(event: dict[str, Any]) -> Path:
     return resolve_trail(
-        default=lambda: routed_trail(
-            home_base() / ".cursor" / "waxseal", _project_key(event)
-        )
+        default=lambda: routed_trail(home_base() / ".cursor" / "waxseal", _project_key(event))
     )
 
 
@@ -106,25 +110,6 @@ def _project_key(event: dict[str, Any]) -> str | None:
     return None
 
 
-def _clip(text: str) -> str:
-    if len(text) <= MAX_FIELD_CHARS:
-        return text
-    return text[:MAX_FIELD_CHARS] + f"…[truncated {len(text) - MAX_FIELD_CHARS} chars]"
-
-
-def _sanitize(value: Any) -> Any:
-    """Keep the payload JSON-serializable and bounded whatever the event holds."""
-    if value is None or isinstance(value, (int, float, bool)):
-        return value
-    if isinstance(value, str):
-        return _clip(_REDACTOR.redact_text(value))
-    if isinstance(value, dict):
-        return {str(k): _sanitize(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_sanitize(v) for v in value]
-    return _clip(_REDACTOR.redact_text(repr(value)))
-
-
 def build_payload(event: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {"event": event.get("hook_event_name")}
     for name in _COMMON_FIELDS + _EVENT_FIELDS:
@@ -136,47 +121,14 @@ def build_payload(event: dict[str, Any]) -> dict[str, Any]:
 def main() -> int:
     # Every failure path returns 0: exit 2 is a deny, and an audit hook must
     # never veto the user's shell command, edit, or prompt.
-    try:
-        event = json.loads(sys.stdin.read())
-        if not isinstance(event, dict):
-            raise ValueError("hook event must be a JSON object")
-    except Exception as e:
-        print(f"[waxseal-audit] unreadable hook event (entry dropped): {e}", file=sys.stderr)
-        return 0
-    target = _trail_path(event)
-    try:
+    return run_stdin_hook(
+        payload_type=PAYLOAD_TYPE,
+        build_payload=build_payload,
+        resolve_target=_trail_path,
         # The hook passes the built-in constant; the rotation notice says so,
         # so nobody reads 16777216 as something they configured.
-        log = open_segmented(
-            target,
-            max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES,
-            # J3's off-box copy, opt-in through `WAXSEAL_ARCHIVE`. `None` (the
-            # unconfigured case) is passed through deliberately: rotation renders
-            # it as `archive_not_attempted`, which is the line an operator who
-            # believes they configured one needs to see.
-            archive=archive_destination(),
-            redactor=RegexRedactor(),
-            record_drops=True,
-        )
-    except Exception as e:
-        print(f"[waxseal-audit] cannot open trail (entry dropped): {e}", file=sys.stderr)
-        # No AuditLog to route this through, so record it directly, best-effort
-        # (FileDropRecorder.record() never raises). Beside the segment actually
-        # in play: a `.drops` file in the wrong directory is a loss nobody finds.
-        from waxseal.adapters.drops import FileDropRecorder
-
-        FileDropRecorder(active_segment(target)).record(
-            reason=type(e).__name__, payload_type=PAYLOAD_TYPE
-        )
-        return 0
-    if not log.try_append(payload=build_payload(event), payload_type=PAYLOAD_TYPE):
-        # Labelled fail-open (chain integrity ≠ trail completeness): the loss
-        # is visible on stderr, never silent.
-        print(
-            f"[waxseal-audit] dropped write for {event.get('hook_event_name')!r}",
-            file=sys.stderr,
-        )
-    return 0
+        max_segment_bytes=DEFAULT_MAX_SEGMENT_BYTES,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - measured via in-process tests

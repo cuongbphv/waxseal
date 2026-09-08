@@ -20,6 +20,16 @@ def source_files() -> list[Path]:
     return sorted(SRC.rglob("*.py"))
 
 
+def _is_log_module(path: Path) -> bool:
+    if path.name == "log.py":
+        return True
+    try:
+        path.relative_to(SRC / "log")
+        return True
+    except ValueError:
+        return False
+
+
 class TestFacadeEncapsulation:
     def test_only_log_py_touches_the_backend_attribute(self) -> None:
         # The token, not the import: a bypass reads `log._backend.entries()`,
@@ -28,7 +38,7 @@ class TestFacadeEncapsulation:
         offenders = [
             str(path.relative_to(REPO))
             for path in source_files()
-            if "._backend" in path.read_text(encoding="utf-8") and path.name != "log.py"
+            if "._backend" in path.read_text(encoding="utf-8") and not _is_log_module(path)
         ]
         assert offenders == []
 
@@ -45,7 +55,30 @@ class TestLayerImports:
             re.M,
         )
         for subpackage in ("sources", "integrations"):
-            for path in sorted((SRC / subpackage).glob("*.py")):
+            for path in sorted((SRC / subpackage).rglob("*.py")):
                 if pattern.search(path.read_text(encoding="utf-8")):
+                    offenders.append(str(path.relative_to(REPO)))
+        assert offenders == []
+
+
+class TestJsonlTailIsPublic:
+    def test_sources_and_the_server_do_not_import_the_private_tail_name(self) -> None:
+        # Promoted in 0.1.6; leftover `_read_last_line` imports would make the
+        # alias load-bearing forever.
+        forbidden = re.compile(
+            r"from waxseal\.adapters\.jsonl import [^\n]*_read_last_line"
+            r"|waxseal\.adapters\.jsonl\._read_last_line"
+        )
+        roots = [
+            SRC / "sources",
+            SRC / "integrations",
+            REPO / "server" / "waxseal_server",
+        ]
+        offenders = []
+        for root in roots:
+            if not root.is_dir():
+                continue
+            for path in root.rglob("*.py"):
+                if forbidden.search(path.read_text(encoding="utf-8")):
                     offenders.append(str(path.relative_to(REPO)))
         assert offenders == []

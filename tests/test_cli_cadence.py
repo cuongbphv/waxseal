@@ -52,8 +52,18 @@ class TestFeasibleCase:
         code = main(
             [
                 "cadence",
-                "--lam", "100000", "--c", "2.0", "--w", "1.0", "--rho", "0.0001",
-                "--delta", "0.5", "--t-max", "1.0",
+                "--lam",
+                "100000",
+                "--c",
+                "2.0",
+                "--w",
+                "1.0",
+                "--rho",
+                "0.0001",
+                "--delta",
+                "0.5",
+                "--t-max",
+                "1.0",
             ]
         )
         out = capsys.readouterr().out
@@ -86,9 +96,7 @@ class TestFeasibleCase:
         assert math.isclose(band_high, n_star_expected * 2.0, rel_tol=1e-3)
         # flatness_bound(2) == 1.25, flatness_bound(3) == 5/3 — the concrete
         # "usable at order-of-magnitude precision" numbers the bead asks for.
-        factor2, factor3 = (
-            float(x) for x in re.findall(r"(\d+\.?\d*)x optimal", band_line)
-        )
+        factor2, factor3 = (float(x) for x in re.findall(r"(\d+\.?\d*)x optimal", band_line))
         assert math.isclose(factor2, 1.25, rel_tol=1e-5)
         assert math.isclose(factor3, 5.0 / 3.0, rel_tol=1e-5)
 
@@ -100,8 +108,18 @@ class TestInfeasibleAnchorTechnology:
         code = main(
             [
                 "cadence",
-                "--lam", "100000", "--c", "2.0", "--w", "1.0", "--rho", "0.0001",
-                "--delta", "2.0", "--t-max", "1.0",
+                "--lam",
+                "100000",
+                "--c",
+                "2.0",
+                "--w",
+                "1.0",
+                "--rho",
+                "0.0001",
+                "--delta",
+                "2.0",
+                "--t-max",
+                "1.0",
             ]
         )
         out = capsys.readouterr().out
@@ -121,8 +139,18 @@ class TestMissingRequiredFlag:
     ) -> None:
         args = [
             "cadence",
-            "--lam", "100000", "--c", "2.0", "--w", "1.0", "--rho", "0.0001",
-            "--delta", "0.5", "--t-max", "1.0",
+            "--lam",
+            "100000",
+            "--c",
+            "2.0",
+            "--w",
+            "1.0",
+            "--rho",
+            "0.0001",
+            "--delta",
+            "0.5",
+            "--t-max",
+            "1.0",
         ]
         # Drop the flag and its value.
         idx = args.index(missing)
@@ -139,8 +167,18 @@ class TestInvalidMeasurement:
         code = main(
             [
                 "cadence",
-                "--lam", "100000", "--c", "2.0", "--w", "-1.0", "--rho", "0.0001",
-                "--delta", "0.5", "--t-max", "1.0",
+                "--lam",
+                "100000",
+                "--c",
+                "2.0",
+                "--w",
+                "-1.0",
+                "--rho",
+                "0.0001",
+                "--delta",
+                "0.5",
+                "--t-max",
+                "1.0",
             ]
         )
         out = capsys.readouterr().out

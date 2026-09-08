@@ -67,9 +67,7 @@ def post_tool_call_kwargs(**overrides: object) -> dict[str, object]:
 
 
 @pytest.fixture()
-def plugin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[types.ModuleType]:
+def plugin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleType]:
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
     name = "waxseal.integrations.hermes"
     sys.modules.pop(name, None)
@@ -90,10 +88,8 @@ def trail_path(tmp_path: Path) -> Path:
 
 
 def read_payload(tmp_path: Path, line_no: int = 0) -> dict[str, Any]:
-    line = trail_path(tmp_path).read_text().splitlines()[line_no]
-    result: dict[str, Any] = json.loads(
-        base64.b64decode(json.loads(line)["payload_b64"])
-    )
+    line = trail_path(tmp_path).read_text(encoding="utf-8").splitlines()[line_no]
+    result: dict[str, Any] = json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
     return result
 
 
@@ -160,9 +156,7 @@ class TestPostToolCall:
     def test_unknown_future_kwargs_are_accepted(self, ctx: FakeCtx, tmp_path: Path) -> None:
         # Hook payloads evolve additively (plugins.py:5074) — a callback that
         # cannot swallow new kwargs breaks on the next hermes release.
-        ctx.hooks["post_tool_call"](
-            **post_tool_call_kwargs(brand_new_field={"nested": True})
-        )
+        ctx.hooks["post_tool_call"](**post_tool_call_kwargs(brand_new_field={"nested": True}))
         assert AuditLog.open(trail_path(tmp_path)).verify(measure_drops=False).ok
 
 
@@ -187,9 +181,7 @@ class TestPreToolCall:
         # pre_tool_call dict returns are parsed as block/approve/modify
         # directives — an audit observer returning anything else could
         # block or mutate real tool calls.
-        ret = ctx.hooks["pre_tool_call"](
-            tool_name="terminal", args={}, telemetry_schema_version=1
-        )
+        ret = ctx.hooks["pre_tool_call"](tool_name="terminal", args={}, telemetry_schema_version=1)
         assert ret is None
 
 
@@ -229,7 +221,7 @@ class TestNeverBlocksThePipeline:
         # dropped write instead.
         home = tmp_path / "hermes-home"
         home.mkdir(parents=True)
-        (home / "audit").write_text("not a directory")
+        (home / "audit").write_text("not a directory", encoding="utf-8")
         ctx.hooks["post_tool_call"](**post_tool_call_kwargs())  # must not raise
         assert "dropped" in capsys.readouterr().out
 

@@ -67,7 +67,9 @@ def run_cmd(argv: list[str]) -> int:
 
 
 def load(trail: Path) -> list[dict]:
-    return [json.loads(line) for line in trail.read_text().splitlines() if line.strip()]
+    return [
+        json.loads(line) for line in trail.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
 def save(trail: Path, rows: list[dict]) -> None:
@@ -120,9 +122,9 @@ def rebuild_chain(rows: list[dict]) -> list[dict]:
     for seq, row in enumerate(rows):
         row["header"]["seq"] = seq
         row["header"]["prev_hash"] = prev
-        row["header"]["payload_hash"] = __import__("hashlib").sha256(
-            base64.b64decode(row["payload_b64"])
-        ).hexdigest()
+        row["header"]["payload_hash"] = (
+            __import__("hashlib").sha256(base64.b64decode(row["payload_b64"])).hexdigest()
+        )
         header = EntryHeader(**row["header"])
         frame = registry.encoder_for(header.hash_version)
         row["entry_hash"] = compute_entry_hash(header, frame=frame)
@@ -146,8 +148,7 @@ def scenario_delete(src: Path, work: Path) -> Outcome:
 
 
 def scenario_reorder(src: Path, work: Path) -> Outcome:
-    banner(3, "Reorder history", "swap two decisions to change the story",
-           "the chain (prev_hash)")
+    banner(3, "Reorder history", "swap two decisions to change the story", "the chain (prev_hash)")
     trail = copy_case(src, work, "03-reorder")
     rows = load(trail)
     rows[2], rows[3] = rows[3], rows[2]
@@ -156,8 +157,12 @@ def scenario_reorder(src: Path, work: Path) -> Outcome:
 
 
 def scenario_insert(src: Path, work: Path) -> Outcome:
-    banner(4, "Insert a decision after the fact",
-           "back-date an approval that was never made", "the chain (prev_hash)")
+    banner(
+        4,
+        "Insert a decision after the fact",
+        "back-date an approval that was never made",
+        "the chain (prev_hash)",
+    )
     trail = copy_case(src, work, "04-insert")
     rows = load(trail)
     rows = rows[:2] + [json.loads(json.dumps(rows[1]))] + rows[2:]
@@ -172,7 +177,8 @@ def scenario_insert(src: Path, work: Path) -> Outcome:
 
 def scenario_whole_rewrite(src: Path, work: Path) -> Outcome:
     banner(
-        5, "Rewrite the WHOLE trail consistently",
+        5,
+        "Rewrite the WHOLE trail consistently",
         "edit a row, then recompute every hash after it so the chain re-links",
         "the anchor (a root published before the edit)",
     )
@@ -188,13 +194,16 @@ def scenario_whole_rewrite(src: Path, work: Path) -> Outcome:
     with_anchor = run_cmd(["verify", "--anchors", str(trail)])
     return Outcome(
         f"whole-trail rewrite (chain alone: exit {chain_only})",
-        1, with_anchor, "anchor",
+        1,
+        with_anchor,
+        "anchor",
     )
 
 
 def scenario_truncate(src: Path, work: Path) -> Outcome:
     banner(
-        6, "Truncate the tail, sidecar and all",
+        6,
+        "Truncate the tail, sidecar and all",
         "drop the last decisions and the seals that covered them",
         "the forward-secure seal (a one-way key epoch cannot be rolled back)",
     )
@@ -202,7 +211,7 @@ def scenario_truncate(src: Path, work: Path) -> Outcome:
     rows = load(trail)
     save(trail, rows[:3])
     attest = trail.with_suffix(trail.suffix + ".attest")
-    lines = attest.read_text().splitlines()
+    lines = attest.read_text(encoding="utf-8").splitlines()
     attest.write_text("\n".join(lines[:3]) + "\n", encoding="utf-8")
 
     print(colour("     chain + sidecar agree with each other after the cut:", DIM))
@@ -218,13 +227,16 @@ def scenario_truncate(src: Path, work: Path) -> Outcome:
     print(f"     ok={attest_result.ok} reason={attest_result.reason}")
     return Outcome(
         f"tail truncation (chain alone: exit {chain_only})",
-        1, 0 if attest_result.ok else 1, "forward-secure seal",
+        1,
+        0 if attest_result.ok else 1,
+        "forward-secure seal",
     )
 
 
 def scenario_unknown_schema(src: Path, work: Path) -> Outcome:
     banner(
-        7, "A row from a NEWER version of the software",
+        7,
+        "A row from a NEWER version of the software",
         "not an attack — a rollback leaves rows this build cannot recompute",
         "nothing: it must be reported unverifiable, NOT tampered (exit 2)",
     )
@@ -237,13 +249,18 @@ def scenario_unknown_schema(src: Path, work: Path) -> Outcome:
     last["header"]["hash_version"] = "f" * 64
     last["entry_hash"] = compute_entry_hash(EntryHeader(**last["header"]))
     save(trail, rows)
-    return Outcome("unknown schema fingerprint", 2, run_cmd(["verify", str(trail)]),
-                   "reported as unverifiable, not tampering")
+    return Outcome(
+        "unknown schema fingerprint",
+        2,
+        run_cmd(["verify", str(trail)]),
+        "reported as unverifiable, not tampering",
+    )
 
 
 def scenario_proof_bundle(src: Path, work: Path) -> Outcome:
     banner(
-        8, "Disclose ONE decision to an auditor",
+        8,
+        "Disclose ONE decision to an auditor",
         "not an attack — answer a question about one customer",
         "a proof bundle: checkable offline, without the rest of the trail",
     )
@@ -264,7 +281,7 @@ def scenario_proof_bundle(src: Path, work: Path) -> Outcome:
     print(colour("     (trail deleted — the bundle stands on its own)", DIM))
     good = run_cmd(["verify-proof", str(bundle)])
 
-    obj = json.loads(bundle.read_text())
+    obj = json.loads(bundle.read_text(encoding="utf-8"))
     obj["payload_b64"] = base64.b64encode(b'{"outcome":"approve"}').decode()
     bundle.write_text(json.dumps(obj), encoding="utf-8")
     print(colour("     now tamper with the bundle itself:", DIM))
@@ -325,8 +342,12 @@ def main(argv: list[str] | None = None) -> int:
 
     _survive_a_narrow_console()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=Path("examples/poc-out"),
-                        help="the directory simulate.py wrote its trail into")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path("examples/poc-out"),
+        help="the directory simulate.py wrote its trail into",
+    )
     args = parser.parse_args(argv)
     return run(args.out.expanduser())
 

@@ -1,0 +1,26 @@
+# Five minutes — the cadence `waxseal install openclaw` recommends, which this
+# unit replaces the crontab line for.
+#
+#   systemctl enable --now waxseal-openclaw-ingest.timer
+#   systemctl list-timers waxseal-openclaw-ingest.timer
+
+[Unit]
+Description=Five-minutely waxseal ingest of the OpenClaw audit ledger
+Documentation=https://github.com/cuongbphv/waxseal
+
+[Timer]
+# Every five minutes from boot, not on the wall clock's :00/:05, so a host that
+# came up mid-interval does not wait for the next round number.
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+# Persistent= is deliberately NOT set. OpenClaw's ledger is what it is when the
+# next run reads it; catching up a missed five-minute slot after a long
+# downtime would read the same rows the following run reads anyway. What the
+# downtime cost is COVERAGE — rows OpenClaw pruned while nothing was chaining
+# them — and no timer setting recovers that. `dropped_writes` is the metric
+# that reports incompleteness, and `None` there means not measured, never zero.
+Unit=waxseal-openclaw-ingest.service
+
+[Install]
+WantedBy=timers.target

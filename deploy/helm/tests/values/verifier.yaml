@@ -1,0 +1,56 @@
+# The verifier, pointed at a chain server in ANOTHER namespace.
+#
+# The trailUrl crosses a namespace boundary on purpose: this release belongs to
+# the verifier authority and the server belongs to the chain authority, and the
+# whole reason scheduled verification detects anything is that the two are not
+# the same people.
+trailUrl: http://waxseal-server.waxseal-chain.svc.cluster.local:8000
+
+credentials:
+  existingSecret: waxseal-verifier-credentials
+  apiKey: ""
+
+verify:
+  enabled: true
+  schedule: "17 * * * *"
+  # False: for a URL target --anchors has no effect and the CLI says so on
+  # stderr. See the values.yaml comment.
+  anchors: false
+  pin:
+    enabled: true
+    mountPath: /var/lib/waxseal-verifier
+    fileName: pin
+    size: 64Mi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+  witnessUrls:
+    - https://witness.other-authority.example.invalid/v1/witness/waxseal
+  expectAnchorBinding: true
+  maxAnchorAgeSeconds: 90000
+  concurrencyPolicy: Forbid
+  backoffLimit: 0
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 10
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi
+
+report:
+  enabled: true
+  schedule: "27 3 * * *"
+  concurrencyPolicy: Forbid
+  backoffLimit: 0
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 7
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi

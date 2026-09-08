@@ -163,9 +163,7 @@ class TestMissingSegment:
         rotate(tmp_path / "trail.00000.jsonl", times=2)
         (tmp_path / "trail.00001.jsonl").unlink()
         main(["segments", str(tmp_path)])
-        line = next(
-            ln for ln in capsys.readouterr().out.splitlines() if "trail.00001" in ln
-        )
+        line = next(ln for ln in capsys.readouterr().out.splitlines() if "trail.00001" in ln)
         assert "missing" in line
         assert "tamper" not in line.lower()
         assert "broken" not in line.lower()
@@ -212,9 +210,9 @@ class TestBrokenBindings:
         rotate(tmp_path / "trail.00000.jsonl")
         segment = tmp_path / "trail.00001.jsonl"
         original = json.loads(
-            base64.b64decode(json.loads(segment.read_text(encoding="utf-8").splitlines()[0])[
-                "payload_b64"
-            ])
+            base64.b64decode(
+                json.loads(segment.read_text(encoding="utf-8").splitlines()[0])["payload_b64"]
+            )
         )
 
         def flip(obj: dict[str, Any]) -> None:
@@ -390,20 +388,23 @@ class TestUnusualSegmentContents:
 
         rotate(tmp_path / "trail.00000.jsonl")
         header = EntryHeader(
-            seq=0, ts="2026-08-31T00:00:00+00:00", hash_version="a" * 64,
+            seq=0,
+            ts="2026-08-31T00:00:00+00:00",
+            hash_version="a" * 64,
             payload_type="application/vnd.waxseal.rotation-binding+json",
-            payload_hash="b" * 64, prev_hash=GENESIS_PREV_HASH,
+            payload_hash="b" * 64,
+            prev_hash=GENESIS_PREV_HASH,
         )
         entry = Entry(header=header, entry_hash="c" * 64, payload=None)
         result = VerifyResult(
-            ok=True, checked=1, broken_seq=None, reason=None,
-            unverifiable=(), dropped_writes=None,
+            ok=True,
+            checked=1,
+            broken_seq=None,
+            reason=None,
+            unverifiable=(),
+            dropped_writes=None,
         )
-        monkeypatch.setattr(
-            AuditLog, "_verify_and_entries", lambda self: (result, [entry])
-        )
+        monkeypatch.setattr(AuditLog, "_verify_and_entries", lambda self: (result, [entry]))
         read = _read_segment(tmp_path / "trail.00001.jsonl")
         assert read.genesis_payload is None
-        assert read.genesis_payload_type == (
-            "application/vnd.waxseal.rotation-binding+json"
-        )
+        assert read.genesis_payload_type == ("application/vnd.waxseal.rotation-binding+json")

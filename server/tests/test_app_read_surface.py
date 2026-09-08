@@ -92,9 +92,7 @@ class TestCapabilities:
         assert commands["verify"] is True
         assert commands["report"] is True
 
-    def test_a_planned_command_is_reported_absent_not_omitted(
-        self, client: TestClient
-    ) -> None:
+    def test_a_planned_command_is_reported_absent_not_omitted(self, client: TestClient) -> None:
         # Omitting it would leave the UI unable to distinguish "this build lacks
         # that command" from "the server forgot to answer". Present-and-false is
         # the measured answer; a missing key is not. This is the surface the
@@ -148,25 +146,21 @@ class TestVerifyEndpoint:
         assert body["exit_code"] == 0
         assert body["verdict"] == "ok"
 
-    def test_the_response_carries_the_argv_that_produced_it(
-        self, stocked: TestClient
-    ) -> None:
+    def test_the_response_carries_the_argv_that_produced_it(self, stocked: TestClient) -> None:
         assert "verify" in stocked.get("/v1/chains/default/verify").json()["argv"]
 
-    def test_a_chain_that_does_not_exist_is_absent_not_broken(
-        self, client: TestClient
-    ) -> None:
+    def test_a_chain_that_does_not_exist_is_absent_not_broken(self, client: TestClient) -> None:
         body = client.get("/v1/chains/nothinghere/verify").json()
         assert body["status"] == "absent"
         assert body["verdict"] is None
 
     def test_a_tampered_chain_is_broken(self, stocked: TestClient, tmp_path: Path) -> None:
         trail = _trail(tmp_path)
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         record = json.loads(lines[2])
         record["header"]["ts"] = "2000-01-01T00:00:00+00:00"
         lines[2] = json.dumps(record, sort_keys=True, separators=(",", ":"))
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         body = stocked.get("/v1/chains/default/verify").json()
         assert body["status"] == "broken"
@@ -176,11 +170,11 @@ class TestVerifyEndpoint:
         self, stocked: TestClient, tmp_path: Path
     ) -> None:
         trail = _trail(tmp_path)
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         record = json.loads(lines[2])
         record["header"]["hash_version"] = "ff" * 32
         lines[2] = json.dumps(record, sort_keys=True, separators=(",", ":"))
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         body = stocked.get("/v1/chains/default/verify").json()
         assert body["status"] == "unverifiable"
@@ -199,15 +193,11 @@ class TestReportEndpoint:
         body = stocked.get("/v1/chains/default/report").json()
         assert body["report"]["scope"]["id"] == "waxseal-scope-v1"
 
-    def test_dropped_writes_stays_null_when_never_measured(
-        self, stocked: TestClient
-    ) -> None:
+    def test_dropped_writes_stays_null_when_never_measured(self, stocked: TestClient) -> None:
         body = stocked.get("/v1/chains/default/report").json()
         assert body["report"]["completeness"]["dropped_writes"] is None
 
-    def test_a_missing_chain_reports_absent_with_no_report_body(
-        self, client: TestClient
-    ) -> None:
+    def test_a_missing_chain_reports_absent_with_no_report_body(self, client: TestClient) -> None:
         body = client.get("/v1/chains/nothinghere/report").json()
         assert body["status"] == "absent"
         assert body["report"] is None
@@ -226,14 +216,10 @@ class TestExportProofEndpoint:
         assert bundle["bundle_version"] == "waxseal-proof-bundle-v1"
         assert bundle["header"]["seq"] == 2
 
-    def test_a_seq_past_the_head_is_reported_not_crashed(
-        self, stocked: TestClient
-    ) -> None:
+    def test_a_seq_past_the_head_is_reported_not_crashed(self, stocked: TestClient) -> None:
         assert stocked.get("/v1/chains/default/export-proof/99").json()["exit_code"] == 1
 
-    def test_a_negative_seq_is_400_and_never_reaches_argv(
-        self, stocked: TestClient
-    ) -> None:
+    def test_a_negative_seq_is_400_and_never_reaches_argv(self, stocked: TestClient) -> None:
         assert stocked.get("/v1/chains/default/export-proof/-1").status_code == 400
 
 
@@ -286,9 +272,7 @@ class TestSegmentsIsShippedNow:
         body = stocked.get("/v1/chains/default/segments").json()
         assert body["argv"][-1] == str(_trail(tmp_path).parent)
 
-    def test_a_rotated_chain_gets_a_real_verdict(
-        self, stocked: TestClient, tmp_path: Path
-    ) -> None:
+    def test_a_rotated_chain_gets_a_real_verdict(self, stocked: TestClient, tmp_path: Path) -> None:
         _rotate(_trail(tmp_path))
         body = stocked.get("/v1/chains/default/segments").json()
         assert body["status"] == "ok"
@@ -296,9 +280,7 @@ class TestSegmentsIsShippedNow:
         assert body["exit_code"] == 0
         assert "segment(s)" in body["stdout"]
 
-    def test_a_chain_that_has_not_rotated_is_absent_not_intact(
-        self, stocked: TestClient
-    ) -> None:
+    def test_a_chain_that_has_not_rotated_is_absent_not_intact(self, stocked: TestClient) -> None:
         # Exit 3: nothing was checked. Rendering it as "ok" would report every
         # segment of a trail that has none as found intact (CLAUDE.md rule 5).
         body = stocked.get("/v1/chains/default/segments").json()
@@ -317,9 +299,7 @@ class TestPreflightIsShippedNow:
     trail's sidecars — so it is deliberately not in `DIRECTORY_READS`.
     """
 
-    def test_the_read_is_handed_the_trail_file(
-        self, stocked: TestClient, tmp_path: Path
-    ) -> None:
+    def test_the_read_is_handed_the_trail_file(self, stocked: TestClient, tmp_path: Path) -> None:
         body = stocked.get("/v1/chains/default/preflight").json()
         assert body["argv"][-1] == str(_trail(tmp_path))
 
@@ -386,9 +366,7 @@ class TestNoWriteSurfaceAnywhere:
         for _, method in self.EXPECTED_MUTATIONS:
             assert method != "delete"
 
-    def test_the_mutating_routes_are_exactly_the_documented_ones(
-        self, client: TestClient
-    ) -> None:
+    def test_the_mutating_routes_are_exactly_the_documented_ones(self, client: TestClient) -> None:
         paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
         mutating = {
             (path, method)
@@ -398,9 +376,7 @@ class TestNoWriteSurfaceAnywhere:
         }
         assert mutating == set(self.EXPECTED_MUTATIONS)
 
-    def test_no_mutating_route_addresses_an_existing_entry(
-        self, client: TestClient
-    ) -> None:
+    def test_no_mutating_route_addresses_an_existing_entry(self, client: TestClient) -> None:
         # An entry is addressed by its seq. No route that writes may name one:
         # that is what "verify reports, never repairs" looks like in a URL table.
         for path, _ in self.EXPECTED_MUTATIONS:
@@ -445,9 +421,7 @@ class TestThePublicReadPointIsGetOnly:
             if path.startswith("/public/v1")
         }
 
-    def test_every_route_on_the_public_read_point_is_get(
-        self, client: TestClient
-    ) -> None:
+    def test_every_route_on_the_public_read_point_is_get(self, client: TestClient) -> None:
         paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
         public = self._by_tag(paths) | self._by_prefix(paths)
         # A selector that silently matched nothing would pass forever. The
@@ -515,9 +489,7 @@ class TestPublicReceiptCrossCheck:
     evidence rather than an assurance.
     """
 
-    def test_an_untouched_chain_agrees_with_its_receipts(
-        self, stocked: TestClient
-    ) -> None:
+    def test_an_untouched_chain_agrees_with_its_receipts(self, stocked: TestClient) -> None:
         body = stocked.get("/public/v1/chains/default/receipts/cross-check").json()
         assert body == {
             "verdict": "ok",
@@ -534,12 +506,12 @@ class TestPublicReceiptCrossCheck:
         from waxseal.domain.header import header_from_obj
 
         trail = _trail(tmp_path)
-        lines = trail.read_text().splitlines()
+        lines = trail.read_text(encoding="utf-8").splitlines()
         record = json.loads(lines[0])
         record["header"]["ts"] = "2000-01-01T00:00:00+00:00"
         record["entry_hash"] = compute_entry_hash(header_from_obj(record["header"]))
         lines[0] = json.dumps(record, sort_keys=True, separators=(",", ":"))
-        trail.write_text("\n".join(lines) + "\n")
+        trail.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         body = stocked.get("/public/v1/chains/default/receipts/cross-check").json()
         assert body["verdict"] == "broken"
@@ -561,7 +533,9 @@ class TestADamagedReceiptLogIsReportedNotCrashed:
     ) -> None:
         # "I could not read the log" must not arrive as a 500, and must not
         # arrive as the 404 that means "there is no log".
-        (tmp_path / "data" / "chains" / "default" / "receipts.jsonl").write_text("{not json\n")
+        (tmp_path / "data" / "chains" / "default" / "receipts.jsonl").write_text(
+            "{not json\n", encoding="utf-8"
+        )
         resp = stocked.get("/public/v1/chains/default/receipts")
         assert resp.status_code == 422
         assert resp.json()["error"] == "damaged_receipt_log"
@@ -569,7 +543,9 @@ class TestADamagedReceiptLogIsReportedNotCrashed:
     def test_the_cross_check_reports_it_as_a_break(
         self, stocked: TestClient, tmp_path: Path
     ) -> None:
-        (tmp_path / "data" / "chains" / "default" / "receipts.jsonl").write_text("{not json\n")
+        (tmp_path / "data" / "chains" / "default" / "receipts.jsonl").write_text(
+            "{not json\n", encoding="utf-8"
+        )
         body = stocked.get("/public/v1/chains/default/receipts/cross-check").json()
         assert body["verdict"] == "broken"
         assert body["reason"] == "malformed_receipt_record"
@@ -591,9 +567,7 @@ class TestSummaryEndpoint:
         assert body["head"]["seq"] == 4
         assert body["receipt"]["receipt_seq"] == 4
 
-    def test_an_empty_chain_has_a_null_head_not_a_zero_one(
-        self, client: TestClient
-    ) -> None:
+    def test_an_empty_chain_has_a_null_head_not_a_zero_one(self, client: TestClient) -> None:
         # seq 0 is a real entry. `head: null` is the only honest way to say
         # there is not one.
         body = client.get("/v1/chains/nothinghere/summary").json()
@@ -607,9 +581,7 @@ class TestSummaryEndpoint:
     def test_an_invalid_chain_id_is_400(self, client: TestClient) -> None:
         assert client.get("/v1/chains/a%20b/summary").status_code == 400
 
-    def test_it_needs_the_credential_when_one_is_configured(
-        self, tmp_path: Path
-    ) -> None:
+    def test_it_needs_the_credential_when_one_is_configured(self, tmp_path: Path) -> None:
         keyed = TestClient(create_app(Settings(data_dir=tmp_path / "d", api_key="k")))
         assert keyed.get("/v1/chains/default/summary").status_code == 401
 

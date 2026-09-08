@@ -63,8 +63,12 @@ from typing import Any
 
 import pytest
 
+from waxseal.adapters.anchors import FileAnchorSink
 from waxseal.adapters.jsonl import JSONLBackend, JSONLCorruptionError
-from waxseal.cli import _report, _tail
+from waxseal.adapters.receipts import append_receipt
+from waxseal.cli import _report, _tail, _verify
+from waxseal.cli._anchors import _anchor_check, _receipts_check, _witness_verdicts
+from waxseal.cli.pin import _pin_check
 from waxseal.domain.fingerprint import fingerprint
 from waxseal.domain.hashing import compute_entry_hash, compute_payload_hash
 from waxseal.domain.header import GENESIS_PREV_HASH, Entry, EntryHeader
@@ -114,9 +118,7 @@ class _CountingFile:
         return self._fileobj.tell(*args, **kwargs)
 
 
-def _count_reads_of(
-    path: Path, monkeypatch: pytest.MonkeyPatch, sink: list[int]
-) -> None:
+def _count_reads_of(path: Path, monkeypatch: pytest.MonkeyPatch, sink: list[int]) -> None:
     """Patch ``waxseal.adapters.jsonl.open`` so reads of ``path`` are counted."""
     real_open = open
 
@@ -345,9 +347,7 @@ class TestIntegrityScanResume:
             backend._integrity_scan()
         assert exc_info.value.line_no == 4
 
-    def test_a_fresh_backend_scans_the_whole_file_it_did_not_write(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_fresh_backend_scans_the_whole_file_it_did_not_write(self, tmp_path: Path) -> None:
         # The resume point is per-instance in-memory state: a new process
         # (new backend object) has cleared nothing and must scan everything.
         path = tmp_path / "trail.jsonl"
@@ -391,9 +391,7 @@ class TestReportReadsOnce:
             "verifying and summarizing in two separate passes"
         )
 
-    def test_an_unterminated_final_line_is_re_read_by_the_next_scan(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_unterminated_final_line_is_re_read_by_the_next_scan(self, tmp_path: Path) -> None:
         # A tail without its newline is a torn write, not a cleared line: the
         # bytes that complete it have not been seen yet, so clearing the
         # offset past them would skip whatever they turn out to be.
@@ -409,6 +407,204 @@ class TestReportReadsOnce:
         lines[2] = lines[2][:-5]
         path.write_bytes(b"\n".join(lines))
 
-        with pytest.raises(JSONLCorruptionError) as exc_info:
+        with pytest.raises(JSONLCorruptionError) as extra_info:
             backend._integrity_scan()
-        assert exc_info.value.line_no == 3
+        assert extra_info.value.line_no == 3
+
+
+class TestVerifyReadsHashesOnce:
+    """P1: `verify --anchors --pin --witness` used to rematerialize the
+    trail for each dimension. Receipt counts bytes read of the trail file
+    only. RED (before the hashes argument) was k times the size; GREEN is
+    one pass.
+    """
+
+    def test_verify_with_anchors_pin_and_witness_reads_the_trail_once(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        log = AuditLog.open(path, anchor_sink=FileAnchorSink(path))
+        for i in range(40):
+            log.append(payload={"i": i}, payload_type=PAYLOAD_TYPE)
+        log.anchor()
+        size = path.stat().st_size
+
+        sink: list[int] = []
+        _count_reads_of(path, monkeypatch, sink)
+        code = _verify(
+            log,
+            path,
+            check_anchors=True,
+            pin_path=tmp_path / "pin.json",
+            target=str(path),
+            witnesses=["http://127.0.0.1:1"],
+        )
+        monkeypatch.undo()
+        capsys.readouterr()
+
+        assert code in (0, 2)
+        assert sum(sink) == size, (
+            f"verify --anchors --pin --witness read {sum(sink)} bytes off a "
+            f"{size}-byte trail ({sum(sink) / size:.1f}x) — each dimension is "
+            "calling entry_hashes() on its own pass"
+        )
+
+    def test_omitted_hashes_still_materializes_the_trail(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        log = AuditLog.open(path, anchor_sink=FileAnchorSink(path))
+        entry = log.append(payload={"i": 0}, payload_type=PAYLOAD_TYPE)
+        log.anchor()
+        append_receipt(
+            path,
+            seq=0,
+            entry_hash=entry.entry_hash,
+            receipt_seq=0,
+            receipt_head=entry.entry_hash,
+            source="https://ledger.example",
+            ts="2026-09-01T00:00:00+00:00",
+        )
+
+        assert _anchor_check(log, path).summary.ok
+        assert _receipts_check(log, path).summary.ok
+        assert _witness_verdicts(log, ["http://127.0.0.1:1"])
+        check, _pending = _pin_check(log, tmp_path / "pin.json", target=str(path), chain_id=None)
+        capsys.readouterr()
+        assert check.summary.ok
+
+
+class TestEntryHashesSkipPayloadDecode:
+    """P2: `entry_hashes()` used to reconstruct every Entry, base64-decoding
+    payload bytes that no hash check reads. Receipt counts `b64decode` calls
+    during one `entry_hashes()` pass. RED = one decode per row; GREEN = 0.
+    """
+
+    def test_entry_hashes_does_not_decode_payload_b64(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "trail.jsonl"
+        log = AuditLog.open(path)
+        n = 40
+        for i in range(n):
+            log.append(payload={"i": i, "blob": "x" * 200}, payload_type=PAYLOAD_TYPE)
+        expected = [e.entry_hash for e in log.entries()]
+
+        import base64
+
+        sink: list[int] = []
+        real = base64.b64decode
+
+        def counting(
+            data: str | bytes, altchars: bytes | None = None, validate: bool = False
+        ) -> bytes:
+            sink.append(1)
+            return real(data, altchars, validate)
+
+        monkeypatch.setattr("waxseal.adapters._envelope.base64.b64decode", counting)
+        hashes = log.entry_hashes()
+        monkeypatch.undo()
+
+        assert hashes == expected
+        assert sum(sink) == 0, (
+            f"entry_hashes() decoded payload_b64 {sum(sink)} times on a "
+            f"{n}-row trail — hashes-only callers do not need the payload"
+        )
+
+
+class TestBatchRootHashInvocations:
+    """P3: one-shot `batch_root` is still a full RFC 6962 walk (2n-1 hashes
+    for n≥1). The incremental forest in IncrementalMerkle is what stops
+    `anchor_every=N` from paying that cost on every prefix. Golden vectors
+    stay byte-for-byte; this receipt is the one-shot bound, and
+    TestIncrementalMerkleCumulativeCost is the across-prefixes bound.
+
+    P4 is not a hash count: every server GET read/verify still shells out
+    on a cache miss (`WaxsealCli.run`) because the CLI is the sole verdict
+    authority. The cache keys on command + argv + input mtime/size.
+    """
+
+    def test_batch_root_still_matches_rfc6962_golden_vectors(self) -> None:
+        from tests.domain.test_anchoring import RFC_LEAVES, RFC_ROOTS
+        from waxseal.domain.anchoring import batch_root
+
+        for size, expected in enumerate(RFC_ROOTS):
+            assert batch_root(RFC_LEAVES[:size]) == expected
+
+    @pytest.mark.parametrize("n", (1, 8, 32, 256))
+    def test_one_full_tree_of_n_leaves_is_2n_minus_1_sha256_calls(
+        self, n: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+
+        from waxseal.domain.anchoring import batch_root
+
+        hashes = [hashlib.sha256(f"leaf-{i}".encode()).hexdigest() for i in range(n)]
+        sink: list[int] = []
+        real = hashlib.sha256
+
+        def counting(data: bytes = b"", usedforsecurity: bool = True) -> hashlib._Hash:
+            sink.append(1)
+            return real(data)
+
+        monkeypatch.setattr("waxseal.domain.anchoring.hashlib.sha256", counting)
+        batch_root(hashes)
+        assert sum(sink) == 2 * n - 1, (
+            f"batch_root of {n} leaves hashed {sum(sink)} times; "
+            "the current recursive tree is 2n-1 (n leaves + n-1 nodes). "
+            "Cumulative under anchor_every=N at sizes N,2N,...,mN is "
+            "N*m*(m+1)-m (n=1000 N=10 -> 100900), which is the O(n^2/N) "
+            "the plan named."
+        )
+
+
+class TestIncrementalMerkleCumulativeCost:
+    """P3 GREEN bound: growing the same trail with IncrementalMerkle must
+    not replay the full prefix at every anchor. RED (repeated batch_root
+    of N,2N,...,mN) is N*m*(m+1)-m hashes; recorded here so backing the
+    incremental tree out restores that number.
+    """
+
+    def test_growing_prefixes_do_not_replay_the_full_tree(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+
+        from waxseal.domain.anchoring import IncrementalMerkle, batch_root
+
+        n, step = 256, 16
+        hashes = [hashlib.sha256(f"leaf-{i}".encode()).hexdigest() for i in range(n)]
+        expected = [batch_root(hashes[:k]) for k in range(step, n + 1, step)]
+
+        sink: list[int] = []
+        real = hashlib.sha256
+
+        def counting(data: bytes = b"", usedforsecurity: bool = True) -> hashlib._Hash:
+            sink.append(1)
+            return real(data)
+
+        monkeypatch.setattr("waxseal.domain.anchoring.hashlib.sha256", counting)
+        for k in range(step, n + 1, step):
+            batch_root(hashes[:k])
+        replayed = sum(sink)
+        sink.clear()
+
+        tree = IncrementalMerkle()
+        sampled: list[str] = []
+        for i, h in enumerate(hashes, start=1):
+            tree.push(h)
+            if i % step == 0:
+                sampled.append(tree.root())
+        incremental = sum(sink)
+        assert sampled == expected
+
+        m = n // step
+        expected_replay = step * m * (m + 1) - m
+        assert replayed == expected_replay
+        assert incremental * 4 < replayed, (
+            f"incremental {incremental} hashes vs replayed {replayed}; "
+            "appending a leaf must not rehash the whole prefix"
+        )

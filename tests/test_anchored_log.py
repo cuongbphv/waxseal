@@ -30,7 +30,7 @@ class TestAutoAnchoring:
         log = open_anchored(tmp_path, anchor_every=2)
         for i in range(5):
             log.append(payload={"i": i}, payload_type=PT)
-        lines = (tmp_path / "trail.jsonl.anchors").read_text().splitlines()
+        lines = (tmp_path / "trail.jsonl.anchors").read_text(encoding="utf-8").splitlines()
         # 5 appends, anchor_every=2 -> triggers when (seq+1) % 2 == 0: seq 1, 3.
         assert len(lines) == 2
         assert [json.loads(line)["seq"] for line in lines] == [1, 3]
@@ -47,9 +47,7 @@ class TestAutoAnchoring:
         log.append(payload={"i": 0}, payload_type=PT)
         assert not (tmp_path / "trail.jsonl.anchors").exists()
 
-    def test_non_positive_anchor_every_is_rejected_at_construction(
-        self, tmp_path: Path
-    ) -> None:
+    def test_non_positive_anchor_every_is_rejected_at_construction(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
         for bad in (0, -1):
             with pytest.raises(ValueError, match="anchor_every"):
@@ -61,7 +59,7 @@ class TestAutoAnchoring:
             log.append(payload={"i": i}, payload_type=PT)
         entries = list(log._backend.entries())
         hashes = [e.entry_hash for e in entries]
-        line = (tmp_path / "trail.jsonl.anchors").read_text().splitlines()[0]
+        line = (tmp_path / "trail.jsonl.anchors").read_text(encoding="utf-8").splitlines()[0]
         obj = json.loads(line)
         assert obj["seq"] == 2
         assert obj["entry_hash"] == hashes[-1]
@@ -77,7 +75,7 @@ class TestExplicitAnchor:
             log.append(payload={"i": i}, payload_type=PT)
         cp = log.anchor()
         assert cp.seq == 2
-        assert len((tmp_path / "trail.jsonl.anchors").read_text().splitlines()) == 1
+        assert len((tmp_path / "trail.jsonl.anchors").read_text(encoding="utf-8").splitlines()) == 1
 
     def test_anchor_on_empty_trail_raises(self, tmp_path: Path) -> None:
         trail = tmp_path / "trail.jsonl"
@@ -90,6 +88,73 @@ class TestExplicitAnchor:
         log.append(payload={"i": 0}, payload_type=PT)
         with pytest.raises(ValueError, match="anchor_sink"):
             log.anchor()
+
+    def test_a_stale_hash_snapshot_does_not_rewind_the_incremental_tree(
+        self, tmp_path: Path
+    ) -> None:
+        log = open_anchored(tmp_path, anchor_every=None)
+        for i in range(5):
+            log.append(payload={"i": i}, payload_type=PT)
+        hashes = log.entry_hashes()
+        prefix_root = log._merkle_root_for(hashes[:3])
+        assert prefix_root == batch_root(hashes[:3])
+        assert log._merkle.size == 5
+        assert log.anchor().root == batch_root(hashes)
+
+    def test_anchor_rebuilds_when_memory_last_leaf_disagrees_with_disk(
+        self, tmp_path: Path
+    ) -> None:
+        from waxseal.domain.anchoring import IncrementalMerkle
+
+        log = open_anchored(tmp_path, anchor_every=None)
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type=PT)
+        hashes = log.entry_hashes()
+        log._merkle = IncrementalMerkle.from_hashes([*hashes[:-1], "ab" * 32])
+        assert log._merkle.size == len(hashes)
+        assert log._merkle.last_leaf != hashes[-1]
+        cp = log.anchor()
+        assert cp.root == batch_root(hashes)
+        assert cp.entry_hash == hashes[-1]
+        assert log._merkle.last_leaf == hashes[-1]
+
+    def test_equal_length_rewrite_of_an_earlier_row_is_verify_s_job_not_anchor_s(
+        self, tmp_path: Path
+    ) -> None:
+        """Pins the DESIGN behind the one-leaf compare in _merkle_root_for.
+
+        Comparing only the last leaf looks like a partial check: an equal-length
+        rewrite of an EARLIER row leaves last_leaf == hashes[-1] and the anchor
+        publishes the root of what this process wrote, not of what is now on
+        disk. That is deliberate and sound, because entry_hash is a chain:
+        hashes[-1] commits transitively (via prev_hash) to every earlier
+        header, so a middle row that changed without the last leaf changing
+        is by construction a broken link, and `verify` says so. Anchoring
+        commits to the chain this writer produced; disk divergence is verify's
+        finding. A "stronger" full recompute here would undo bcc0c59's O(n)
+        saving to catch a tamper the chain already catches.
+        """
+        log = open_anchored(tmp_path, anchor_every=None)
+        for i in range(3):
+            log.append(payload={"i": i}, payload_type=PT)
+        written = log.entry_hashes()
+        first = log.anchor()
+        assert first.root == batch_root(written)
+
+        trail = tmp_path / "trail.jsonl"
+        rows = trail.read_text(encoding="utf-8").splitlines()
+        row = json.loads(rows[1])
+        row["entry_hash"] = "f" * 64  # same length, different middle leaf
+        rows[1] = json.dumps(row)
+        trail.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+        on_disk = log.entry_hashes()
+        assert on_disk[1] != written[1] and on_disk[-1] == written[-1]
+        second = log.anchor()
+        assert second.root == first.root
+        assert second.root != batch_root(on_disk)
+        result = log.verify()
+        assert not result.ok and result.broken_seq == 1
 
 
 class TestAnchorFailuresNeverPropagate:
@@ -206,9 +271,7 @@ class TestSidecarAppendCriticalSection:
             barrier.wait()
             for i in range(per_thread):
                 sink.anchor(
-                    Checkpoint(
-                        seq=worker_id * per_thread + i, entry_hash="ab" * 32, root="cd" * 32
-                    )
+                    Checkpoint(seq=worker_id * per_thread + i, entry_hash="ab" * 32, root="cd" * 32)
                 )
 
         with ThreadPoolExecutor(max_workers=threads) as pool:
@@ -301,9 +364,7 @@ class TestSidecarPermissions:
         old_umask = os.umask(0o022)
         try:
             trail = tmp_path / "trail.jsonl"
-            FileAnchorSink(trail).anchor(
-                Checkpoint(seq=0, entry_hash="aa" * 32, root="bb" * 32)
-            )
+            FileAnchorSink(trail).anchor(Checkpoint(seq=0, entry_hash="aa" * 32, root="bb" * 32))
             mode = (tmp_path / "trail.jsonl.anchors").stat().st_mode
             assert (mode & 0o777) == 0o600
         finally:
@@ -348,7 +409,7 @@ class TestAnchorConcurrency:
         assert len(entries) == total
         assert log.verify().ok
 
-        lines = (tmp_path / "trail.jsonl.anchors").read_text().splitlines()
+        lines = (tmp_path / "trail.jsonl.anchors").read_text(encoding="utf-8").splitlines()
         # anchor_every=5 over `total` appends triggers at least total//5 times;
         # a race can duplicate a trigger but never skip or corrupt one.
         assert len(lines) >= total // 5

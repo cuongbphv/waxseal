@@ -1,0 +1,36 @@
+{{- if and .Values.verify.enabled .Values.verify.pin.enabled (not .Values.verify.pin.existingClaim) }}
+{{- /*
+The pin state file's storage, owned by the VERIFIER.
+
+adapters/pinstore.py, in the code: a pin is "not a sidecar of the trail" —
+every other file written next to a trail describes the log and belongs to
+whoever owns it, but "a pin describes what THIS verifier already confirmed, and
+its entire value is that it lives somewhere the trail's writer cannot reach."
+That is why this is a claim in the verifier's namespace and not a subdirectory
+of the chain server's data volume. A pin the writer can edit is a pin the
+writer can roll back, and then it catches nothing.
+
+Small on purpose: the file is a few hundred bytes. ReadWriteOnce with the
+verify CronJob at concurrencyPolicy: Forbid means one writer at a time, which
+is what a state file read-modify-written each run needs.
+*/ -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "waxseal-verifier.pinClaimName" . }}
+  labels:
+    {{- include "waxseal-verifier.labels" . | nindent 4 }}
+  annotations:
+    # Survives `helm uninstall`. Losing the pin loses every head this verifier
+    # has ever confirmed, and a fresh pin trusts whatever it is served first.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ .Values.verify.pin.accessMode }}
+  {{- if .Values.verify.pin.storageClass }}
+  storageClassName: {{ .Values.verify.pin.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.verify.pin.size | quote }}
+{{- end }}

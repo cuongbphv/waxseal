@@ -67,11 +67,13 @@ def envelope_for(scratch: Path, seq: int, prev_hash: str, payload: bytes) -> dic
     scratch.parent.mkdir(parents=True, exist_ok=True)
     scratch.unlink(missing_ok=True)
     JSONLBackend(scratch).append(lambda *_: build_entry(seq, prev_hash, payload))
-    return cast(dict[str, Any], json.loads(scratch.read_text().splitlines()[-1]))
+    return cast(dict[str, Any], json.loads(scratch.read_text(encoding="utf-8").splitlines()[-1]))
 
 
 def stored(path: Path) -> list[dict[str, Any]]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
 def genesis_binding(segment: Path) -> dict[str, Any]:
@@ -267,9 +269,8 @@ class TestReceiptsSurviveRotation:
         records = stored(sealed)
         records[0]["entry_hash"] = "ff" * 32
         sealed.write_text(
-            "".join(
-                json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in records
-            )
+            "".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in records),
+            encoding="utf-8",
         )
         report = store.cross_check_receipts("default")
         assert report.reason == "receipt_mismatch"
@@ -312,13 +313,9 @@ class TestArchivingReachesHostedChains:
         assert seen, "no segment was ever offered to the archive"
         assert taken.is_set(), "the archive ran while segments.lock was still held"
 
-    def test_no_archive_destination_is_a_labelled_state_not_a_silence(
-        self, tmp_path: Path
-    ) -> None:
+    def test_no_archive_destination_is_a_labelled_state_not_a_silence(self, tmp_path: Path) -> None:
         notices: list[str] = []
-        store = ChainStore(
-            tmp_path / "chains", max_segment_bytes=TINY, notice=notices.append
-        )
+        store = ChainStore(tmp_path / "chains", max_segment_bytes=TINY, notice=notices.append)
         fill_over(store, tmp_path, "default", 8)
         assert any("rotated" in line for line in notices)
         assert any("exists only on this box" in line for line in notices)
@@ -611,9 +608,7 @@ class TestTheHttpReadsFollowTheGroup:
         # about the segment being written — a truthful verdict on a sealed
         # segment would be a verdict about the wrong chain.
         settings = Settings(data_dir=tmp_path / "data")
-        store = ChainStore(
-            settings.chains_dir, max_segment_bytes=TINY, notice=lambda _m: None
-        )
+        store = ChainStore(settings.chains_dir, max_segment_bytes=TINY, notice=lambda _m: None)
         fill_over(store, tmp_path, "default", 8)
         segments = [p.name for p in store.segment_paths("default")]
         assert len(segments) > 1

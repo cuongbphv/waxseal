@@ -19,9 +19,7 @@ from waxseal import AuditLog
 
 
 @pytest.fixture()
-def handler(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[types.ModuleType]:
+def handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleType]:
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
     name = "waxseal.integrations.hermes_gateway"
     sys.modules.pop(name, None)
@@ -50,7 +48,7 @@ class TestAppend:
         self, handler: types.ModuleType, tmp_path: Path
     ) -> None:
         handler.handle("agent:end", {"session_id": "s1", "response": "done"})
-        line = trail_path(tmp_path).read_text().splitlines()[0]
+        line = trail_path(tmp_path).read_text(encoding="utf-8").splitlines()[0]
         import base64
 
         payload = json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
@@ -104,5 +102,5 @@ class TestNeverBlocksThePipeline:
         # broken environment: the audit dir path is occupied by a file.
         home = tmp_path / "hermes-home"
         home.mkdir(parents=True)
-        (home / "audit").write_text("not a directory")
+        (home / "audit").write_text("not a directory", encoding="utf-8")
         handler.handle("agent:start", {"session_id": "s1"})  # must not raise

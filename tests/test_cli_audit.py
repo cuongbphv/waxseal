@@ -93,11 +93,11 @@ def start_fake_chain_server() -> tuple[Any, Any]:
 
 
 def break_row(path: Path, seq: int) -> None:
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     obj = json.loads(lines[seq])
     obj["header"]["ts"] = "2027-01-01T00:00:00+00:00"
     lines[seq] = json.dumps(obj)
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def make_unverifiable(path: Path, seq: int) -> None:
@@ -109,12 +109,12 @@ def make_unverifiable(path: Path, seq: int) -> None:
     from waxseal.domain.hashing import compute_entry_hash
     from waxseal.domain.header import EntryHeader
 
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     obj = json.loads(lines[seq])
     obj["header"]["hash_version"] = "e" * 64
     obj["entry_hash"] = compute_entry_hash(EntryHeader(**obj["header"]))
     lines[seq] = json.dumps(obj)
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 class TestReport:
@@ -184,7 +184,11 @@ class TestReport:
         AuditLog(log._backend, anchor_sink=FileAnchorSink(path)).anchor()
         assert main(["report", str(path), "--anchors", "--json"]) == 0
         assert json.loads(capsys.readouterr().out)["anchors"] == {
-            "ok": True, "checked": 1, "reason": None, "unverifiable": False, "notes": []
+            "ok": True,
+            "checked": 1,
+            "reason": None,
+            "unverifiable": False,
+            "notes": [],
         }
 
     def test_without_the_flag_anchors_are_reported_unchecked_not_ok(
@@ -204,8 +208,8 @@ class TestReport:
         log = make_trail(path, 3)
         AuditLog(log._backend, anchor_sink=FileAnchorSink(path)).anchor()
         # Truncate the trail after the checkpoint was taken.
-        lines = path.read_text().splitlines()
-        path.write_text("\n".join(lines[:2]) + "\n")
+        lines = path.read_text(encoding="utf-8").splitlines()
+        path.write_text("\n".join(lines[:2]) + "\n", encoding="utf-8")
         assert main(["report", str(path), "--anchors"]) == 1
         assert "anchor_beyond_head" in capsys.readouterr().out
 
@@ -214,10 +218,9 @@ class TestReport:
     ) -> None:
         path = tmp_path / "trail.jsonl"
         make_trail(path, 2)
-        (tmp_path / "trail.jsonl.anchors").write_text("{not json\n")
+        (tmp_path / "trail.jsonl.anchors").write_text("{not json\n", encoding="utf-8")
         assert main(["report", str(path), "--anchors"]) == 1
         assert "malformed_anchor" in capsys.readouterr().out
-
 
     def test_a_measured_drop_count_reaches_the_report(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -294,11 +297,14 @@ class TestReportSeparationDegree:
         main(["report", str(path), "--pin", str(pin)])  # trust-on-first-use
         capsys.readouterr()
 
-        state = json.loads(pin.read_text())
+        state = json.loads(pin.read_text(encoding="utf-8"))
         state["declared_topology"] = {
-            "seal_escrow": True, "anchor_sinks": 2, "witness": True, "pin_separate": True,
+            "seal_escrow": True,
+            "anchor_sinks": 2,
+            "witness": True,
+            "pin_separate": True,
         }
-        pin.write_text(json.dumps(state))
+        pin.write_text(json.dumps(state), encoding="utf-8")
 
         assert main(["report", str(path), "--pin", str(pin), "--json"]) == 0
         obj = json.loads(capsys.readouterr().out)
@@ -345,7 +351,7 @@ class TestExportProof:
 
     def test_empty_trail_exits_1(self, tmp_path: Path) -> None:
         path = tmp_path / "trail.jsonl"
-        path.write_text("")
+        path.write_text("", encoding="utf-8")
         assert main(["export-proof", str(path), "0"]) == 1
 
     def test_missing_trail_exits_3(self, tmp_path: Path) -> None:
@@ -391,9 +397,9 @@ class TestVerifyProof:
         import base64
 
         bundle = self.export(tmp_path, capsys)
-        obj = json.loads(bundle.read_text())
+        obj = json.loads(bundle.read_text(encoding="utf-8"))
         obj["payload_b64"] = base64.b64encode(b'{"i":99}').decode()
-        bundle.write_text(json.dumps(obj))
+        bundle.write_text(json.dumps(obj), encoding="utf-8")
         assert main(["verify-proof", str(bundle)]) == 1
         assert "payload_hash_mismatch" in capsys.readouterr().out
 
@@ -401,9 +407,9 @@ class TestVerifyProof:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         bundle = self.export(tmp_path, capsys)
-        obj = json.loads(bundle.read_text())
+        obj = json.loads(bundle.read_text(encoding="utf-8"))
         obj["root"] = "f" * 64
-        bundle.write_text(json.dumps(obj))
+        bundle.write_text(json.dumps(obj), encoding="utf-8")
         assert main(["verify-proof", str(bundle)]) == 1
         assert "membership_not_proven" in capsys.readouterr().out
 
@@ -423,7 +429,7 @@ class TestVerifyProof:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         bad = tmp_path / "bad.json"
-        bad.write_text("{ not json at all")
+        bad.write_text("{ not json at all", encoding="utf-8")
         assert main(["verify-proof", str(bad)]) == 1
         err = capsys.readouterr().err
         assert "cannot read bundle" in err
@@ -434,9 +440,9 @@ class TestVerifyProof:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         bundle = self.export(tmp_path, capsys)
-        obj = json.loads(bundle.read_text())
+        obj = json.loads(bundle.read_text(encoding="utf-8"))
         obj["bundle_version"] = "waxseal-proof-bundle-v99"
-        bundle.write_text(json.dumps(obj))
+        bundle.write_text(json.dumps(obj), encoding="utf-8")
         assert main(["verify-proof", str(bundle)]) == 1
         err = capsys.readouterr().err
         assert "v99" in err
@@ -489,9 +495,7 @@ class TestNarrowConsole:
         assert out.errors == "backslashreplace"
         assert err.errors == "backslashreplace"
 
-    def test_a_capable_console_is_left_untouched(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_capable_console_is_left_untouched(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Reconfiguring a console that can already encode the output would
         # silently change error handling the operator chose.
         out = self.FakeStream("utf-8")

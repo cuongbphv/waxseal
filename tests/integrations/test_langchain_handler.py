@@ -57,9 +57,7 @@ def handler_module(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleType
 
 
 @pytest.fixture()
-def make_handler(
-    handler_module: types.ModuleType, tmp_path: Path
-) -> Callable[..., Any]:
+def make_handler(handler_module: types.ModuleType, tmp_path: Path) -> Callable[..., Any]:
     def _make(trail: Path | None = None) -> Any:
         return handler_module.WaxsealCallbackHandler(trail or tmp_path / "trail.jsonl")
 
@@ -72,16 +70,17 @@ RUN_ID = uuid.uuid4()
 def tool_start_kwargs() -> dict[str, object]:
     # The exact keyword-only shape langchain-core 1.6.0 invokes with.
     return dict(
-        run_id=RUN_ID, parent_run_id=None, tags=["agent"], metadata={"m": 1},
+        run_id=RUN_ID,
+        parent_run_id=None,
+        tags=["agent"],
+        metadata={"m": 1},
         inputs={"query": "SELECT 1"},
     )
 
 
 def read_payload(trail: Path, line_no: int = 0) -> dict[str, Any]:
-    line = trail.read_text().splitlines()[line_no]
-    result: dict[str, Any] = json.loads(
-        base64.b64decode(json.loads(line)["payload_b64"])
-    )
+    line = trail.read_text(encoding="utf-8").splitlines()[line_no]
+    result: dict[str, Any] = json.loads(base64.b64decode(json.loads(line)["payload_b64"]))
     return result
 
 
@@ -241,7 +240,7 @@ class TestNeverBlocksTheRun:
         # LangChain would swallow a raise (raise_error=False), but that
         # swallow is silent — the handler must label the drop itself.
         blocked = tmp_path / "blocked"
-        blocked.write_text("a file where the trail dir should be")
+        blocked.write_text("a file where the trail dir should be", encoding="utf-8")
         h = make_handler(blocked / "trail.jsonl")
         h.on_tool_start({"name": "shell"}, "ls", **tool_start_kwargs())  # must not raise
         assert "dropped" in capsys.readouterr().err
@@ -257,7 +256,8 @@ class TestNeverBlocksTheRun:
         # yet, so it calls FileDropRecorder directly. tmp_path is writable,
         # so unlike the blocked-directory case above, the record must land.
         monkeypatch.setattr(
-            AuditLog, "open",
+            AuditLog,
+            "open",
             staticmethod(lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))),
         )
         trail = tmp_path / "trail.jsonl"
@@ -266,4 +266,4 @@ class TestNeverBlocksTheRun:
         assert "dropped" in capsys.readouterr().err
         drops = tmp_path / "trail.jsonl.drops"
         assert drops.exists()
-        assert len(drops.read_text().splitlines()) == 1
+        assert len(drops.read_text(encoding="utf-8").splitlines()) == 1

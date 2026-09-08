@@ -20,10 +20,18 @@
     "noUncheckedSideEffectImports": true,
     "noImplicitOverride": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["vite/client", "node"],
+    "types": ["vite/client", "node", "vitest/globals"],
     "paths": {
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "env.d.ts", "vite.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "src/**/*.vue",
+    "env.d.ts",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "eslint.config.ts"
+  ]
 }

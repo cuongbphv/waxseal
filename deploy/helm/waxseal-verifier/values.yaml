@@ -1,0 +1,185 @@
+# waxseal-verifier — default values.
+#
+# INSTALL THIS SOMEWHERE ELSE. Not the namespace the chain server is in, and
+# preferably not the cluster. The verifier is the fourth authority of
+# docs/architecture/deployment.md section 1, and "different authority" means
+# different people can `helm upgrade` it — one Helm release, one namespace and
+# one RBAC boundary shared with the chain would put the verification job under
+# the control of whoever can already write the trail. Then the detections that
+# survive an attacker with write access stop surviving.
+#
+# This chart deliberately contains: no Deployment, no Service, no Ingress, no
+# trail volume, and no chain write credential.
+
+image:
+  # The CLI image, not the server image.
+  repository: ghcr.io/cuongbphv/waxseal
+  # Never `latest`.
+  tag: "0.1.6"
+  # Optional. `sha256:<64 hex>` of the published image. When set it pins the
+  # bytes and the tag only names the release; `unverifiable` is a statement
+  # about which build read the trail, and a digest names the build exactly.
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+# ---------------------------------------------------------------------------
+# What is verified: an HTTP READ SURFACE, by URL.
+# ---------------------------------------------------------------------------
+# REQUIRED. The chain server's base URL, e.g.
+#   http://waxseal-server.waxseal-chain.svc.cluster.local:8000
+#
+# Reading over the URL rather than mounting the server's data volume is NOT a
+# workaround for ReadWriteOnce. It is the better separation-of-authority story:
+# a verifier that mounts the writer's volume needs a grant on the writer's
+# storage, has to be scheduled on the writer's node, and ends up in the writer's
+# namespace — all three of which put it back under the authority it exists to
+# be independent of. Over HTTP it needs a network route and a read credential
+# and nothing else, and `verify_chain` runs CLIENT-SIDE either way: a server
+# that corrupts, truncates or reorders entries is caught exactly as a corrupted
+# local file would be.
+#
+# KNOWN LIMIT, and it is the CLI's, not the chart's: `waxseal verify <url>`
+# reads the chain id `default` (cli.py passes chain_id="default" for a URL
+# target, and RemoteBackend composes {base}/v1/chains/{chain_id}/...). A server
+# holding several chains cannot yet be pointed at a named one from this
+# command. Verifying a non-default chain needs a CLI flag that does not exist
+# in 0.1.5 — recorded here rather than papered over with a URL that would not
+# work.
+trailUrl: ""
+
+# ---------------------------------------------------------------------------
+# The read credential. A VIEWER or AUDITOR key. NEVER the server's write key.
+# ---------------------------------------------------------------------------
+# The environment variable the CLI reads for a URL target is WAXSEAL_API_KEY
+# (log.py, AuditLog.open). The NAME is shared with the chain server's bootstrap
+# credential; the VALUE must not be. Mint a separate key:
+#
+#   waxseal-server-admin key-mint --username auditor --label k8s-verifier
+#
+# The `auditor` role carries trails:read, head:read, verify:run, proof:export,
+# import:write, public:read — and there is no entries:edit, entries:delete or
+# trails:repair scope anywhere in the server for it to be granted.
+credentials:
+  # Preferred: a Secret you create outside this chart, carrying WAXSEAL_API_KEY.
+  existingSecret: ""
+  # Inline. Development only: it lands in the stored release manifest.
+  apiKey: ""
+
+# ---------------------------------------------------------------------------
+# verify — the integrity CronJob.
+# ---------------------------------------------------------------------------
+verify:
+  enabled: true
+  schedule: "17 * * * *"
+  # --anchors. DEFAULT FALSE, and that is deliberate rather than an oversight:
+  # for a URL target the flag has NO EFFECT — a remote trail has no local
+  # `.anchors` sidecar to read, and the CLI prints a labelled note on stderr
+  # saying so rather than pretending it checked something (CLAUDE.md rule 6).
+  # Turning it on adds that notice to every run's log and nothing else. It is
+  # exposed so an operator who wants the notice on the record can have it; the
+  # anchor sidecar itself is checked where it lives, beside the trail, by
+  # `waxseal verify <path> --anchors` on the chain host.
+  anchors: false
+  # The pin state file — SPEC.md section 13. THE VERIFIER OWNS THIS.
+  # adapters/pinstore.py: "its entire value is that it lives somewhere the
+  # trail's writer cannot reach", which is why it gets its own small PVC in
+  # this namespace instead of a directory on the server's volume. A pinned head
+  # is what catches a rewrite of history this verifier already confirmed —
+  # which plain chain verification cannot see, because a consistent rewrite
+  # recomputes every hash.
+  pin:
+    enabled: true
+    mountPath: /var/lib/waxseal-verifier
+    # The file inside that directory.
+    fileName: pin
+    size: 64Mi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+  # --witness, repeatable. Catches a SPLIT VIEW: the server serving this
+  # verifier one history and someone else another. Only while the witness host
+  # answers to a DIFFERENT administrative authority than the chain server — a
+  # witness beside the chain it witnesses proves nothing, and no code can
+  # enforce that (adapters/witness.py says so in its own docstring).
+  witnessUrls: []
+  # --expect-anchor-binding: record in the pin state that an anchor binding is
+  # expected, so a trail that stops being anchored becomes visible instead of
+  # merely quiet.
+  expectAnchorBinding: false
+  # --max-anchor-age-s. null means the declaration is not made at all, which is
+  # not the same as a very large number.
+  maxAnchorAgeSeconds: null
+  concurrencyPolicy: Forbid
+  # 0: a detected break is not retried. A retry loop turns one finding into a
+  # burst of identical alerts and tells the operator nothing the first run did
+  # not, and exit 1 is a security incident to preserve, not a flake.
+  backoffLimit: 0
+  successfulJobsHistoryLimit: 3
+  # Keep failures around: the exit code IS the interface, and a Job garbage
+  # collected before anyone read it took the finding with it.
+  failedJobsHistoryLimit: 10
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi
+
+# ---------------------------------------------------------------------------
+# report — the SIEM and GRC integration point.
+# ---------------------------------------------------------------------------
+# `waxseal report <url> --json` to stdout, which is what deployment.md section 4
+# names as the integration point: ship the report, not the trail. It carries
+# the chain verdict, the completeness measure AND ITS SOURCE, inventory by
+# payload type and schema fingerprint, decision counts by type and oversight
+# mode, and the status of each sidecar check. Fields that were NOT CHECKED are
+# reported as not checked — an alerting rule must not treat a missing check as
+# a pass.
+report:
+  enabled: true
+  schedule: "27 3 * * *"
+  concurrencyPolicy: Forbid
+  backoffLimit: 0
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 7
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+extraEnv: []

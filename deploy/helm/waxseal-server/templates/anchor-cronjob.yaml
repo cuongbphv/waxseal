@@ -1,0 +1,123 @@
+{{- if .Values.anchor.enabled }}
+{{- /*
+The anchor CLIENT, beside the chain. That co-location is the INTENDED topology,
+not a compromise: deployment.md section 1 draws the arrow from the chain server
+into the anchor domain, so the process that publishes checkpoints belongs on
+the chain side. What must answer to a DIFFERENT administrative authority is the
+anchor SINK — the RFC 3161 TSA, the OpenTimestamps calendar, the witness host.
+A published root the trail's writer can rewrite proves nothing (deployment.md
+section 5), which is exactly why this chart ships no witness template and must
+never grow one: a witness installed by this same release answers to this
+release's upgraders and witnesses nothing.
+
+`waxseal anchor` WRITES — the `.anchors` sidecar lands beside the trail — so it
+needs the trail volume read-write and it needs to be on the same node as the
+server pod, because ReadWriteOnce is per-node, not per-pod. Hence the required
+pod affinity below. It appends no chain entries: the CLI never does.
+
+The PVC name is the volumeClaimTemplate's name joined to the StatefulSet's,
+with the ordinal — "<claimName>-<fullname>-0" — because that is what Kubernetes
+creates for a StatefulSet's claim template.
+*/ -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-anchor" (include "waxseal-server.fullname" .) }}
+  labels:
+    {{- include "waxseal-server.labels" . | nindent 4 }}
+    waxseal.io/role: anchor-client
+spec:
+  schedule: {{ .Values.anchor.schedule | quote }}
+  # One anchor run at a time. Two `waxseal anchor` processes appending to one
+  # sidecar is the same single-writer question the chain itself answers with a
+  # file lock, and Forbid is the cheap answer here.
+  concurrencyPolicy: {{ .Values.anchor.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.anchor.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.anchor.failedJobsHistoryLimit }}
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "waxseal-server.selectorLabels" . | nindent 8 }}
+        waxseal.io/role: anchor-client
+    spec:
+      backoffLimit: {{ .Values.anchor.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "waxseal-server.selectorLabels" . | nindent 12 }}
+            waxseal.io/role: anchor-client
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          affinity:
+            podAffinity:
+              # REQUIRED, not preferred. A ReadWriteOnce volume is attachable
+              # on one node at a time, so a run scheduled elsewhere does not
+              # anchor late — it does not start.
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      {{- include "waxseal-server.selectorLabels" . | nindent 22 }}
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: anchor
+              image: {{ include "waxseal-server.image" .Values.anchor.image | quote }}
+              imagePullPolicy: {{ .Values.anchor.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.containerSecurityContext | nindent 16 }}
+              args:
+                - anchor
+                - {{ .Values.anchor.trailPath | quote }}
+                {{- with .Values.anchor.tsaUrl }}
+                - --tsa-url
+                - {{ . | quote }}
+                {{- end }}
+                {{- with .Values.anchor.otsCalendar }}
+                - --ots-calendar
+                - {{ . | quote }}
+                {{- end }}
+                {{- range .Values.anchor.witnessUrls }}
+                - --witness
+                - {{ . | quote }}
+                {{- end }}
+              env:
+                {{- if .Values.anchor.existingSecret }}
+                # WAXSEAL_WITNESS_API_KEY and never WAXSEAL_API_KEY. The
+                # chain's write credential does not cross the administrative
+                # boundary to a witness (REMOTE.md section 8), and the CLI
+                # reads only this variable for witness deposits.
+                - name: WAXSEAL_WITNESS_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.anchor.existingSecret }}
+                      key: WAXSEAL_WITNESS_API_KEY
+                      optional: true
+                {{- end }}
+              resources:
+                {{- toYaml .Values.anchor.resources | nindent 16 }}
+              volumeMounts:
+                - name: {{ .Values.persistence.claimName }}
+                  mountPath: {{ .Values.persistence.mountPath }}
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: {{ .Values.persistence.claimName }}
+              persistentVolumeClaim:
+                claimName: {{ printf "%s-%s-0" .Values.persistence.claimName (include "waxseal-server.fullname" .) }}
+            - name: tmp
+              emptyDir: {}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

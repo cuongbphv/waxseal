@@ -1,0 +1,38 @@
+# Every `uses:` in .github/workflows is pinned to a commit SHA with the version
+# as a trailing comment (0.1.6 pre-release review: two floating tags that did
+# not exist took the image and audit jobs down at "Set up job"). A SHA pin
+# without something to move it is a pin that rots; this is the something.
+# Dependabot rewrites the SHA and the comment together for the actions
+# ecosystem. The other ecosystems keep the two lockfiles and the three
+# Dockerfiles from drifting silently; every PR still has to pass the gates.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: uv
+    directory: /server
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /server/web
+    schedule:
+      interval: weekly
+    groups:
+      web-dev:
+        dependency-type: development
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /server
+      - /deploy/docker
+    schedule:
+      interval: weekly

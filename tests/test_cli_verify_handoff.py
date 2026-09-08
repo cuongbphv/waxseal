@@ -57,9 +57,7 @@ class TestHoldingBinding:
         record_handoff(log_delegate, chain_id="origin-chain", seq=seq_o, head_hash=hash_o)
         fill(log_delegate, 2, prefix="delegate")
 
-        code = main(
-            ["verify-handoff", str(delegate_path), "--origin", str(origin_path)]
-        )
+        code = main(["verify-handoff", str(delegate_path), "--origin", str(origin_path)])
         out = capsys.readouterr().out
 
         assert code == 0
@@ -94,9 +92,7 @@ class TestBrokenBinding:
         fill(log_rewritten, 3, prefix="origin-different-content")
         assert log_rewritten.verify().ok  # passes ITS OWN check; that is the threat
 
-        code = main(
-            ["verify-handoff", str(delegate_path), "--origin", str(rewritten_origin_path)]
-        )
+        code = main(["verify-handoff", str(delegate_path), "--origin", str(rewritten_origin_path)])
         out = capsys.readouterr().out
 
         assert code == 1
@@ -117,9 +113,7 @@ class TestNothingToCheck:
         delegate_path = tmp_path / "delegate.jsonl"
         fill(open_log(delegate_path), 2)  # ordinary entries, no handoff binding
 
-        code = main(
-            ["verify-handoff", str(delegate_path), "--origin", str(origin_path)]
-        )
+        code = main(["verify-handoff", str(delegate_path), "--origin", str(origin_path)])
         out = capsys.readouterr().out
 
         assert code == 0

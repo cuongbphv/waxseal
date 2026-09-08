@@ -2,6 +2,7 @@
 """waxseal-audit hook shim — the logic lives in waxseal.integrations.claude_code
 (shipped in the wheel). Prefer `waxseal install claude-code`, which writes this
 same shim; upgrade behavior with `pip install -U waxseal`."""
+
 import sys
 
 try:

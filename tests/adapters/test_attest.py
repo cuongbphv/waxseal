@@ -40,9 +40,7 @@ class TestConstruction:
 
     def test_a_scheme_with_a_signer_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="signer mode"):
-            FileAttestor(
-                tmp_path / "t.jsonl", signer=FakeSigner(), scheme=FS_HMAC_AGG_SCHEME
-            )
+            FileAttestor(tmp_path / "t.jsonl", signer=FakeSigner(), scheme=FS_HMAC_AGG_SCHEME)
 
     def test_an_unknown_scheme_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="unknown scheme"):
@@ -50,9 +48,7 @@ class TestConstruction:
 
 
 class TestEpochDesync:
-    def test_sealing_a_seq_the_keyfile_does_not_match_is_refused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_sealing_a_seq_the_keyfile_does_not_match_is_refused(self, tmp_path: Path) -> None:
         # A crash between append and attest leaves the keyfile one behind.
         # Re-aligning silently would seal a row with a key from a different
         # epoch, which is a forged history rather than a recovery.
@@ -64,9 +60,7 @@ class TestEpochDesync:
 
 
 class TestAttestations:
-    def test_a_missing_sidecar_yields_nothing_rather_than_raising(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_missing_sidecar_yields_nothing_rather_than_raising(self, tmp_path: Path) -> None:
         # "Never attested" is a state, not an error: a trail can legitimately
         # have no sidecar yet, and the verdict for that belongs to the caller.
         attestor = FileAttestor(tmp_path / "trail.jsonl", initial_key=KEY)
@@ -78,7 +72,7 @@ class TestAttestations:
         attestor = FileAttestor(path, initial_key=KEY)
         attestor.attest(0, "a" * 64)
         sidecar = Path(str(path) + ".attest")
-        sidecar.write_text("\n" + sidecar.read_text() + "\n\n", encoding="utf-8")
+        sidecar.write_text("\n" + sidecar.read_text(encoding="utf-8") + "\n\n", encoding="utf-8")
         assert len(list(attestor.attestations())) == 1
 
 
@@ -113,5 +107,5 @@ class TestContinuity:
         assert attestor.check_continuity(KEY, 1) is None
         # Falsifiability receipt for the test above: the stored key really is
         # the evolved one, so "key_mismatch" was not passing by accident.
-        stored = json.loads(Path(str(path) + ".sealkey").read_text())
+        stored = json.loads(Path(str(path) + ".sealkey").read_text(encoding="utf-8"))
         assert stored["key"] == evolve_key(KEY).hex()

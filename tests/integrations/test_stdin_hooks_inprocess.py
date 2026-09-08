@@ -49,8 +49,7 @@ def test_event_is_appended_and_verifies(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     trail = tmp_path / "trail.jsonl"
-    event = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
-             "tool_input": {"command": "ls"}}
+    event = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}
     assert run_main(monkeypatch, hook, json.dumps(event), trail) == 0
     # stdout is parsed by the hosts as decision JSON — must stay empty.
     assert capsys.readouterr().out == ""
@@ -64,8 +63,11 @@ def test_secret_is_redacted_before_disk(
 ) -> None:
     trail = tmp_path / "trail.jsonl"
     secret = "sk-abcdef1234567890abcdef"
-    event = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
-             "tool_input": {"command": f"export KEY={secret}"}}
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": f"export KEY={secret}"},
+    }
     run_main(monkeypatch, hook, json.dumps(event), trail)
     assert secret.encode() not in trail.read_bytes()
 
@@ -109,7 +111,7 @@ def test_unopenable_trail_exits_zero_with_labelled_drop(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     blocker = tmp_path / "blocker"
-    blocker.write_text("a file where the trail dir should be")
+    blocker.write_text("a file where the trail dir should be", encoding="utf-8")
     event = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}
     assert run_main(monkeypatch, hook, json.dumps(event), blocker / "trail.jsonl") == 0
     assert "dropped" in capsys.readouterr().err
@@ -141,7 +143,7 @@ def test_open_failure_still_leaves_a_drop_record(
 
     drops = trail.parent / (trail.name + ".drops")
     assert drops.exists()
-    assert len(drops.read_text().splitlines()) == 1
+    assert len(drops.read_text(encoding="utf-8").splitlines()) == 1
 
 
 class TestToolResultFieldNaming:
@@ -188,9 +190,7 @@ class TestClaudeCodeRemoteTargetInProcess:
 
     @pytest.fixture()
     def claude(self) -> types.ModuleType:
-        module: types.ModuleType = importlib.import_module(
-            "waxseal.integrations.claude_code"
-        )
+        module: types.ModuleType = importlib.import_module("waxseal.integrations.claude_code")
         return module
 
     def test_an_http_trail_is_kept_as_a_string(

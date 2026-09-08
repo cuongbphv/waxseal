@@ -30,8 +30,10 @@ from waxseal.adapters.redactors import REDACTED
 SECRET = "sk-abcdef1234567890abcdef"
 
 # Every integration that clips and redacts; they share one _sanitize body,
-# so a shape that escapes one escapes all of them.
+# so a shape that escapes one escapes all of them. Owner ruling 08/09/2026:
+# AGT joins this list (both mappings already passed).
 REDACTING_MODULES = [
+    "waxseal.integrations.agt",
     "waxseal.integrations.claude_code",
     "waxseal.integrations.codex",
     "waxseal.integrations.crewai",
@@ -42,9 +44,15 @@ REDACTING_MODULES = [
 ]
 
 _CREWAI_EVENT_NAMES = (
-    "CrewKickoffCompletedEvent", "CrewKickoffFailedEvent", "CrewKickoffStartedEvent",
-    "TaskCompletedEvent", "TaskFailedEvent", "TaskStartedEvent",
-    "ToolUsageErrorEvent", "ToolUsageFinishedEvent", "ToolUsageStartedEvent",
+    "CrewKickoffCompletedEvent",
+    "CrewKickoffFailedEvent",
+    "CrewKickoffStartedEvent",
+    "TaskCompletedEvent",
+    "TaskFailedEvent",
+    "TaskStartedEvent",
+    "ToolUsageErrorEvent",
+    "ToolUsageFinishedEvent",
+    "ToolUsageStartedEvent",
 )
 
 
@@ -91,6 +99,14 @@ def integration(
     module = importlib.import_module(request.param)
     yield module
     sys.modules.pop(request.param, None)
+
+
+def test_redacting_hosts_reexport_the_shared_sanitize(
+    integration: types.ModuleType,
+) -> None:
+    from waxseal.integrations._sanitize import sanitize
+
+    assert integration._sanitize is sanitize
 
 
 class TestScalarsKeepTheirIdentity:
