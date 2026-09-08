@@ -28,6 +28,7 @@ from waxseal_server.api import imports as imports_api
 from waxseal_server.api import public as public_api
 from waxseal_server.api import settings as settings_api
 from waxseal_server.api import witness as witness_api
+from waxseal_server.api._body_limit import BodySizeLimitMiddleware
 from waxseal_server.api.deps import Authorizer, Services, guard_for
 from waxseal_server.config import Settings
 from waxseal_server.ports.operators import OperatorStore
@@ -102,6 +103,7 @@ def create_app(
         summary="Self-hosted chain server, witness, and public read point for waxseal trails.",
         version=API_VERSION,
     )
+    app.add_middleware(BodySizeLimitMiddleware)
     app.state.services = services
     app.state.settings = settings
     app.state.authorizer = authz
