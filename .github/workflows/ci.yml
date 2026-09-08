@@ -150,7 +150,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-      - run: npm ci || npm install
+      - run: npm ci
         working-directory: server/web
       - run: npm run test
         working-directory: server/web
@@ -201,8 +201,13 @@ jobs:
             VERSION=ci
             REVISION=${{ github.sha }}
 
+      # `exit-code: "0"` only silences FINDINGS. A vuln-DB download that is
+      # rate-limited would still fail the step, and this step sits before
+      # the exit-code contract checks below - so the scan itself is also
+      # advisory, or a scanner hiccup would hide the contract.
       - name: trivy image waxseal:ci (advisory)
-        uses: aquasecurity/trivy-action@0.32.0
+        uses: aquasecurity/trivy-action@v0.32.0
+        continue-on-error: true
         with:
           image-ref: waxseal:ci
           exit-code: "0"
@@ -514,21 +519,10 @@ jobs:
       - name: npm audit web
         working-directory: server/web
         run: |
-          npm ci || npm install
+          npm ci
           npm audit --audit-level=high
-      # The image that can actually be scanned is built in job `image`,
-      # which runs `trivy image waxseal:ci`. This job does not have that
-      # image. A scanner with nothing to scan is UNMEASURED, not a pass
-      # (CLAUDE.md rule 5).
-      - uses: aquasecurity/setup-trivy@v0.2.4
-        with:
-          version: v0.67.2
-          cache: true
-      - name: trivy image waxseal:ci
-        run: |
-          if ! docker image inspect waxseal:ci >/dev/null 2>&1; then
-            echo "waxseal:ci not present in this job — UNMEASURED (see job image)"
-            exit 0
-          fi
-          trivy image --exit-code 0 waxseal:ci
+      # The container scan lives in job `image`, next to the only image
+      # that exists in CI. It used to be duplicated here behind an
+      # `image inspect` guard that could never succeed (this job builds
+      # nothing), so every run installed a scanner to print UNMEASURED.
 

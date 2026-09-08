@@ -12,13 +12,27 @@
 FROM node:24-alpine AS web
 WORKDIR /src
 COPY server/web/package.json server/web/package-lock.json* server/web/
-RUN cd server/web && (npm ci || npm install)
+RUN cd server/web && npm ci
 COPY server/web server/web
 # Vite's outDir is ../waxseal_server/static, so this writes to
 # /src/server/waxseal_server/static.
 RUN cd server/web && npm run build
 
-# ---- stage 2: the runtime ----------------------------------------------------
+# ---- stage 2: the server's dependency set, FROM THE LOCK ----------------------
+# `pip install ./server` resolved FastAPI/uvicorn/psycopg from the floors in
+# pyproject at build time, so the image shipped a dependency set nobody had
+# audited: CI's pip-audit runs against server/uv.lock, and the two only agreed
+# by luck. Export the lock (with hashes) here and install exactly that below.
+# `waxseal` is a path source (`..`) installed from this tree in the runtime
+# stage, so it is left out of the export.
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS lock
+WORKDIR /app
+COPY pyproject.toml ./
+COPY server/pyproject.toml server/uv.lock ./server/
+RUN cd server && uv export --frozen --no-dev --no-emit-project --no-emit-package waxseal \
+      --format requirements-txt -o /requirements.txt
+
+# ---- stage 3: the runtime ----------------------------------------------------
 FROM python:3.13-slim AS runtime
 
 # The server shells out to `python -m waxseal.cli` for every read; it needs no
@@ -35,11 +49,16 @@ COPY src ./src
 RUN pip install --no-cache-dir .
 
 # Then the application, which is allowed its own dependencies (FastAPI, uvicorn)
-# because it is never packaged into the waxseal wheel.
+# because it is never packaged into the waxseal wheel. The dependencies come
+# from the lock export (hash-checked); the application itself with --no-deps,
+# so pip cannot widen the set behind the lock's back.
+COPY --from=lock /requirements.txt /tmp/server-requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r /tmp/server-requirements.txt \
+ && rm /tmp/server-requirements.txt
 COPY server/pyproject.toml server/README.md ./server/
 COPY server/waxseal_server ./server/waxseal_server
 COPY --from=web /src/server/waxseal_server/static ./server/waxseal_server/static
-RUN pip install --no-cache-dir ./server
+RUN pip install --no-cache-dir --no-deps ./server
 
 # Runs unprivileged. The data volume is the only writable path it needs, and an
 # imported trail is chmod'd read-only the moment it lands.
