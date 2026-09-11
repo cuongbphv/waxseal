@@ -33,7 +33,7 @@ RUN cd server && uv export --frozen --no-dev --no-emit-project --no-emit-package
       --format requirements-txt -o /requirements.txt
 
 # ---- stage 3: the runtime ----------------------------------------------------
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 # The server shells out to `python -m waxseal.cli` for every read; it needs no
 # compiler, no git, and no shell utilities beyond what the base image carries.
