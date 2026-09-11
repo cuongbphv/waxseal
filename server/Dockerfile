@@ -9,7 +9,7 @@
 #   docker build -f server/Dockerfile -t waxseal-server .
 
 # ---- stage 1: the web UI -----------------------------------------------------
-FROM node:24-alpine AS web
+FROM node:26-alpine AS web
 WORKDIR /src
 COPY server/web/package.json server/web/package-lock.json* server/web/
 RUN cd server/web && npm ci
