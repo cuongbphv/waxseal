@@ -25,7 +25,7 @@ COPY src ./src
 RUN uv build --wheel --out-dir /wheels
 
 # ---- stage 2: the runtime ----------------------------------------------------
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 # Optional extras, off by default. The default image is therefore stdlib-only:
 # `cryptography` (the rfc3161 extra) and `boto3` (s3) stay OUT of it, so the
